@@ -1,0 +1,28 @@
+{
+  "name": "sijord",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A co-op open world monster-catching adventure game.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "server": "tsx src/server/index.ts",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "three": "^0.186.1",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/three": "^0.186.0",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
+  }
+}
