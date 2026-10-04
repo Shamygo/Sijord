@@ -1,0 +1,37 @@
+name: Publish playable build
+
+# Builds the one-file game and attaches it to the "latest" release.
+# An offline copy of the game alongside the GitHub Pages site.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:single
+      - name: Replace the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest dist-single/sijord.html \
+            --title "Latest playable build" \
+            --notes "Built from ${GITHUB_SHA::7}. Download sijord.html, double-click it, and type the same world code as your partner." \
+            --target "$GITHUB_SHA"

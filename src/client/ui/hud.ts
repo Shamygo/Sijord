@@ -1,0 +1,165 @@
+import { PLAYER_CLASSES } from '../../shared/classes';
+import type { PlayerProfile } from '../../shared/types';
+import type { World } from '../world/types';
+import { DialogueBox } from './dialogue';
+import { h } from './dom';
+import { Minimap } from './minimap';
+
+export interface Quest {
+  id: string;
+  text: string;
+  main?: boolean;
+  done?: boolean;
+  /** World point the compass and minimap point at while the quest is active. */
+  target?: { x: number; z: number };
+}
+
+const DIRS: [number, string, boolean][] = [
+  [0, 'N', true], [45, 'NE', false], [90, 'E', true], [135, 'SE', false],
+  [180, 'S', true], [225, 'SW', false], [270, 'W', true], [315, 'NW', false],
+];
+/** Degrees visible across the compass strip. */
+const COMPASS_SPAN = 180;
+
+export class Hud {
+  readonly el: HTMLDivElement;
+  readonly dialogue = new DialogueBox();
+  private compass = h('div.compass');
+  private clock = h('div.clock');
+  private quests = h('div.quests');
+  private minimap: Minimap;
+  private stamina = h('i');
+  private staminaBar = h('div.bar.stamina', {}, this.stamina);
+  private prompt = h('div.prompt');
+  private net = h('div.net');
+  private toast = h('div.toast');
+  private clickToPlay = h('div.click-to-play', {}, 'Click to play');
+  private questList: Quest[] = [];
+  private toastTimer = 0;
+
+  constructor(world: World, profile: PlayerProfile, onClickToPlay: () => void) {
+    this.minimap = new Minimap(world);
+    const cls = PLAYER_CLASSES.find((c) => c.id === profile.playerClass) ?? PLAYER_CLASSES[0];
+    this.clickToPlay.addEventListener('click', onClickToPlay);
+    this.el = h(
+      'div.hud',
+      {},
+      this.compass,
+      this.clock,
+      h('div.minimap', {}, this.minimap.canvas),
+      this.quests,
+      h('div.party', {}, h('div.party-empty', {}, 'No Pokemon yet. Professor Hazel is waiting at her lab.')),
+      h(
+        'div.vitals',
+        {},
+        h('div.badge', { style: `background:${cls.color}` }, cls.name[0]),
+        h(
+          'div.info',
+          {},
+          h('div.name', {}, `${profile.name} · ${cls.name} · Lv. 1`),
+          h('div.bar', {}, h('i', { style: 'width:100%' })),
+          this.staminaBar,
+        ),
+      ),
+      h(
+        'div.hotbar',
+        {},
+        hot('◓', 'Q', 'Throw'),
+        hot('✦', 'F', 'Partner'),
+        hot('▣', 'Tab', 'Bag'),
+      ),
+      h(
+        'div.help',
+        {},
+        h('span.key', {}, 'WASD'), ' move  ', h('span.key', {}, 'Shift'), ' sprint  ', h('span.key', {}, 'Space'), ' jump  ',
+        h('span.key', {}, 'E'), ' talk  ', h('span.key', {}, 'Esc'), ' release mouse',
+      ),
+      this.prompt,
+      this.net,
+      this.toast,
+      this.dialogue.el,
+      this.clickToPlay,
+    );
+  }
+
+  setQuests(q: Quest[]): void {
+    this.questList = q;
+    this.quests.replaceChildren(
+      ...q.map((x) => h('div.quest' + (x.main ? '.main' : '') + (x.done ? '.done' : ''), {}, h('span.icon'), x.text)),
+    );
+  }
+
+  setPrompt(text: string | null): void {
+    this.prompt.classList.toggle('show', !!text);
+    if (text) this.prompt.replaceChildren(h('span.key', {}, 'E'), text);
+  }
+
+  setNetStatus(text: string): void {
+    this.net.textContent = text;
+  }
+
+  setPointerLocked(locked: boolean): void {
+    this.clickToPlay.classList.toggle('hidden', locked);
+  }
+
+  showToast(title: string, sub = '', seconds = 4): void {
+    this.toast.replaceChildren(title, sub ? h('small', {}, sub) : '');
+    this.toast.classList.add('show');
+    this.toastTimer = seconds;
+  }
+
+  update(
+    dt: number,
+    player: { x: number; z: number; yaw: number },
+    camYaw: number,
+    stamina: number,
+    exhausted: boolean,
+    landmarks: { x: number; z: number; label: string }[],
+    partner: { x: number; z: number } | undefined,
+    gameMinutes: number,
+  ): void {
+    if (this.toastTimer > 0) {
+      this.toastTimer -= dt;
+      if (this.toastTimer <= 0) this.toast.classList.remove('show');
+    }
+    this.stamina.style.width = `${Math.round(stamina * 100)}%`;
+    this.staminaBar.classList.toggle('exhausted', exhausted);
+
+    const hh = Math.floor(gameMinutes / 60) % 24;
+    const mm = Math.floor(gameMinutes % 60);
+    this.clock.textContent = `${hh >= 6 && hh < 19 ? '☀' : '☾'} ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+
+    // Compass: heading in degrees clockwise from north. North is +Z; Three.js is right-handed, so east is -X.
+    const heading = deg(-camYaw);
+    const width = this.compass.clientWidth || 520;
+    const marks: HTMLElement[] = [h('div.compass-line'), h('div.compass-center')];
+    const place = (bearing: number, el: HTMLElement) => {
+      const off = wrap180(bearing - heading);
+      if (Math.abs(off) > COMPASS_SPAN / 2) return;
+      el.style.left = `${width / 2 + (off / COMPASS_SPAN) * width}px`;
+      marks.push(el);
+    };
+    for (const [b, label, major] of DIRS) place(b, h('div.compass-mark' + (major ? '' : '.minor'), {}, label));
+    const active = this.questList.find((q) => !q.done && q.target);
+    if (active?.target) {
+      place(deg(Math.atan2(player.x - active.target.x, active.target.z - player.z)), h('div.compass-mark.poi', {}, '◆'));
+    }
+    this.compass.replaceChildren(...marks);
+
+    const markers = landmarks.map((l) => ({ x: l.x, z: l.z, color: '#ffffff' }));
+    if (active?.target) markers.push({ x: active.target.x, z: active.target.z, color: '#ffd34d' });
+    this.minimap.draw(player.x, player.z, player.yaw, camYaw, markers, partner);
+  }
+}
+
+function hot(icon: string, key: string, title: string) {
+  return h('div.hot', { title: `${title} (coming soon)` }, h('div.ring', {}, icon), h('span.key', {}, key));
+}
+
+function deg(rad: number): number {
+  return ((rad * 180) / Math.PI + 360) % 360;
+}
+
+function wrap180(d: number): number {
+  return ((((d + 180) % 360) + 360) % 360) - 180;
+}
