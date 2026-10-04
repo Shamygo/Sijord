@@ -79,13 +79,45 @@ export class Professor {
         text: 'Before I hand over a partner Pokemon, tell me: what draws you out into the wild?',
         choices: ['Catching every Pokemon', 'Beating every Gym', 'Seeing the whole map'],
       },
-      { speaker: NAME, text: "A fine answer. My assistants are still settling this year's partner Pokemon in the lab, so they aren't ready quite yet." },
-      { speaker: NAME, text: 'In the meantime, head out the north gate onto Route 1 and get a feel for the land. Come back when you have stretched your legs!' },
+      { speaker: NAME, text: 'A fine answer. Whatever it is, you will need a partner for it.' },
+    ];
+  }
+
+  /** The three starters, then the pick. The choice index maps to STARTERS. */
+  starterLines(): DialogueLine[] {
+    return [
+      { speaker: NAME, text: "My assistants have this year's partners settled at last. Three of them, and every one is waiting for a trainer." },
+      { speaker: NAME, text: 'Fernfawn, the Grass type: steady and patient, and tougher than it looks. Cindlet, the Fire type: quick and fierce, but fragile. Splashpup, the Water type: bouncy, sturdy and hard to knock down.' },
+      { speaker: NAME, text: 'Which one will walk with you?', choices: ['Fernfawn (Grass)', 'Cindlet (Fire)', 'Splashpup (Water)'] },
+    ];
+  }
+
+  starterChosenLines(starterName: string): DialogueLine[] {
+    return [
+      { speaker: NAME, text: `${starterName}! I thought so. It hasn't taken its eyes off you since you walked up.` },
+      { speaker: NAME, text: 'One more thing. Every battle in Sijord is a double battle: two Pokemon a side, all at once. One partner is not enough.' },
+      { speaker: NAME, text: "My Hjordpup had a litter this spring, and this pup keeps herding everyone towards you. Take her along. She'll fight beside your new partner." },
+      { speaker: '', text: `You received ${starterName} and Hjordpup!` },
+      { speaker: NAME, text: 'Bring them back to me whenever they get hurt, and I will patch them up. Wild Pokemon out on the meadow do not go easy on beginners.' },
+    ];
+  }
+
+  healLines(): DialogueLine[] {
+    return [
+      { speaker: NAME, text: 'Your team looks worn out. Let me take a look at them.' },
+      { speaker: '', text: 'Professor Hazel healed your Pokemon.' },
     ];
   }
 
   repeatLines(): DialogueLine[] {
-    return [{ speaker: NAME, text: 'The north gate leads to Route 1. Mind the tall grass, and keep an eye on your stamina!' }];
+    return [{ speaker: NAME, text: 'The north gate leads to Route 1. Wild Pokemon there live in herds, and they always fight in pairs. Mind your stamina, and come back here if your team gets hurt.' }];
+  }
+
+  blackoutLines(): DialogueLine[] {
+    return [
+      { speaker: NAME, text: 'There you are! Your Pokemon gave everything they had out there.' },
+      { speaker: NAME, text: 'Rest is part of training too. They are healed now. Pick your fights a little more carefully next time.' },
+    ];
   }
 
   dispose(): void {

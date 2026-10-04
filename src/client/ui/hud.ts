@@ -1,3 +1,4 @@
+import type { MajorStatus } from '../../shared/battle/types';
 import { PLAYER_CLASSES } from '../../shared/classes';
 import type { PlayerProfile } from '../../shared/types';
 import type { World } from '../world/types';
@@ -14,6 +15,19 @@ export interface Quest {
   /** World point the compass and minimap point at while the quest is active. */
   target?: { x: number; z: number };
 }
+
+/** One creature in the party strip, top left (as in the art reference). */
+export interface PartyEntry {
+  name: string;
+  species: string;
+  level: number;
+  hp: number;
+  maxHp: number;
+  status?: MajorStatus;
+  portrait: string;
+}
+
+const STATUS_SHORT: Record<MajorStatus, string> = { brn: 'BRN', par: 'PAR', psn: 'PSN', tox: 'TOX', slp: 'SLP', frz: 'FRZ' };
 
 const DIRS: [number, string, boolean][] = [
   [0, 'N', true], [45, 'NE', false], [90, 'E', true], [135, 'SE', false],
@@ -40,6 +54,10 @@ export class Hud {
   private net = h('div.net');
   private toast = h('div.toast');
   private clickToPlay = h('div.click-to-play', {}, 'Click to play');
+  private fadeEl = h('div.fade');
+  private party = h('div.party', {}, h('div.party-empty', {}, 'No Pokemon yet. Professor Hazel is waiting at her lab.'));
+  private hasParty = false;
+  private lastSettings: Settings | null = null;
   private questList: Quest[] = [];
   private toastTimer = 0;
 
@@ -54,7 +72,7 @@ export class Hud {
       this.clock,
       h('div.minimap', {}, this.minimap.canvas),
       this.quests,
-      h('div.party', {}, h('div.party-empty', {}, 'No Pokemon yet. Professor Hazel is waiting at her lab.')),
+      this.party,
       h(
         'div.vitals',
         {},
@@ -73,6 +91,7 @@ export class Hud {
       this.prompt,
       this.net,
       this.toast,
+      this.fadeEl,
       this.dialogue.el,
       this.clickToPlay,
     );
@@ -80,15 +99,17 @@ export class Hud {
 
   /** Refresh key labels and hint visibility after settings change. */
   applySettings(s: Settings): void {
+    this.lastSettings = s;
     const k = (a: Action) => h('span.key', {}, keyLabel(s.keys[a]));
     this.hotbar.replaceChildren(
-      this.hot('◓', 'throw', 'Throw (no Pokemon yet)', s, true),
+      this.hot('◓', 'throw', 'Throw a ball (catching arrives in the next update)', s, true),
+      this.hot('🐾', 'partner', this.hasParty ? 'Call or recall your partner' : 'No partner Pokemon yet', s, !this.hasParty),
       this.hot('🗺', 'map', 'Map', s),
       this.hot('🎒', 'bag', 'Bag', s),
     );
     this.help.replaceChildren(
-      k('forward'), k('left'), k('back'), k('right'), ' move  ', k('sprint'), ' sprint  ', k('jump'), ' jump  ', k('interact'), ' talk  ',
-      k('map'), ' map  ', k('bag'), ' bag  ', h('span.key', {}, 'Esc'), ' menu',
+      k('forward'), k('left'), k('back'), k('right'), ' move  ', k('sprint'), ' sprint  ', k('jump'), ' jump  ', k('interact'), ' talk / battle  ',
+      k('party'), ' party  ', k('map'), ' map  ', k('bag'), ' bag  ', h('span.key', {}, 'Esc'), ' menu',
     );
     this.help.style.display = s.showControlsHint ? '' : 'none';
     this.fps.classList.toggle('show', s.showFps);
@@ -101,6 +122,42 @@ export class Hud {
       h('div.ring', {}, icon),
       h('span.key', {}, keyLabel(s.keys[action])),
     );
+  }
+
+  /** Party strip, top left: round portrait, level and HP bar per creature. */
+  setParty(list: PartyEntry[]): void {
+    if (list.length && !this.hasParty) {
+      this.hasParty = true;
+      if (this.lastSettings) this.applySettings(this.lastSettings);
+    }
+    if (!list.length) return;
+    this.party.replaceChildren(
+      ...list.map((m) => {
+        const r = m.maxHp ? m.hp / m.maxHp : 0;
+        return h(
+          'div.party-mon' + (m.hp <= 0 ? '.fainted' : ''),
+          { title: `${m.name} · Lv. ${m.level} · ${m.hp}/${m.maxHp} HP` },
+          h('div.party-portrait', {}, m.portrait ? h('img', { src: m.portrait, alt: m.name }) : h('span', {}, m.name[0])),
+          h(
+            'div.party-info',
+            {},
+            h('div.party-lv', {}, `Lv. ${m.level}`, m.status ? h('span.status-chip.s-' + m.status, {}, STATUS_SHORT[m.status]) : m.hp <= 0 ? h('span.status-chip.s-fnt', {}, 'FNT') : null),
+            h('div.party-hp', {}, h('i', { style: `width:${Math.round(r * 100)}%`, class: r > 0.5 ? '' : r > 0.2 ? 'mid' : 'low' })),
+          ),
+        );
+      }),
+    );
+  }
+
+  /** Fade the screen to black (or back); resolves once the fade has finished. */
+  fade(on: boolean): Promise<void> {
+    this.fadeEl.classList.toggle('show', on);
+    return new Promise((r) => setTimeout(r, 450));
+  }
+
+  /** Hide the overworld HUD pieces that would clutter a battle. */
+  setBattleMode(on: boolean): void {
+    this.el.classList.toggle('in-battle', on);
   }
 
   setQuests(q: Quest[]): void {

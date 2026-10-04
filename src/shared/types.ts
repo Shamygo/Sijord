@@ -32,6 +32,10 @@ export interface PlayerSnapshot {
   /** Horizontal speed in metres per second, used to blend walk/run. */
   speed: number;
   anim: MoveAnim;
+  /** Species of the lead creature walking beside the player, if one is out. */
+  lead?: string;
+  /** True while the player is in a battle. */
+  battle?: boolean;
 }
 
 export const DEFAULT_APPEARANCE: Appearance = {
