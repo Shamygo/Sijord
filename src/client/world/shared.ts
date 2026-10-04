@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { paintPropMaterial } from './materials';
 
 /** Uniforms shared by every animated world material. */
 export const worldUniforms = {
@@ -132,7 +133,7 @@ export function signTexture(lines: string[], opts: { w?: number; h?: number; bg?
 
 /** Shared materials. */
 export const mats = {
-  vc: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }),
+  vc: paintPropMaterial(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0 }), 'vc'),
   vcLambert: new THREE.MeshLambertMaterial({ vertexColors: true }),
   glow: new THREE.MeshStandardMaterial({ vertexColors: true, emissive: new THREE.Color(0xffb347), emissiveIntensity: 1.4, roughness: 0.6 }),
 };

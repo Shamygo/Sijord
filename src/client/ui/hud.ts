@@ -1,6 +1,7 @@
 import { PLAYER_CLASSES } from '../../shared/classes';
 import type { PlayerProfile } from '../../shared/types';
 import type { World } from '../world/types';
+import { keyLabel, type Action, type Settings } from '../core/settings';
 import { DialogueBox } from './dialogue';
 import { h } from './dom';
 import { Minimap } from './minimap';
@@ -27,7 +28,12 @@ export class Hud {
   private compass = h('div.compass');
   private clock = h('div.clock');
   private quests = h('div.quests');
-  private minimap: Minimap;
+  readonly minimap: Minimap;
+  private hotbar = h('div.hotbar');
+  private help = h('div.help');
+  private fps = h('div.fps');
+  private fpsFrames = 0;
+  private fpsTime = 0;
   private stamina = h('i');
   private staminaBar = h('div.bar.stamina', {}, this.stamina);
   private prompt = h('div.prompt');
@@ -37,7 +43,7 @@ export class Hud {
   private questList: Quest[] = [];
   private toastTimer = 0;
 
-  constructor(world: World, profile: PlayerProfile, onClickToPlay: () => void) {
+  constructor(world: World, profile: PlayerProfile, onClickToPlay: () => void, private onHotbar: (a: Action) => void) {
     this.minimap = new Minimap(world);
     const cls = PLAYER_CLASSES.find((c) => c.id === profile.playerClass) ?? PLAYER_CLASSES[0];
     this.clickToPlay.addEventListener('click', onClickToPlay);
@@ -61,24 +67,39 @@ export class Hud {
           this.staminaBar,
         ),
       ),
-      h(
-        'div.hotbar',
-        {},
-        hot('◓', 'Q', 'Throw'),
-        hot('✦', 'F', 'Partner'),
-        hot('▣', 'Tab', 'Bag'),
-      ),
-      h(
-        'div.help',
-        {},
-        h('span.key', {}, 'WASD'), ' move  ', h('span.key', {}, 'Shift'), ' sprint  ', h('span.key', {}, 'Space'), ' jump  ',
-        h('span.key', {}, 'E'), ' talk  ', h('span.key', {}, 'Esc'), ' release mouse',
-      ),
+      this.hotbar,
+      this.help,
+      this.fps,
       this.prompt,
       this.net,
       this.toast,
       this.dialogue.el,
       this.clickToPlay,
+    );
+  }
+
+  /** Refresh key labels and hint visibility after settings change. */
+  applySettings(s: Settings): void {
+    const k = (a: Action) => h('span.key', {}, keyLabel(s.keys[a]));
+    this.hotbar.replaceChildren(
+      this.hot('◓', 'throw', 'Throw (no Pokemon yet)', s, true),
+      this.hot('🗺', 'map', 'Map', s),
+      this.hot('🎒', 'bag', 'Bag', s),
+    );
+    this.help.replaceChildren(
+      k('forward'), k('left'), k('back'), k('right'), ' move  ', k('sprint'), ' sprint  ', k('jump'), ' jump  ', k('interact'), ' talk  ',
+      k('map'), ' map  ', k('bag'), ' bag  ', h('span.key', {}, 'Esc'), ' menu',
+    );
+    this.help.style.display = s.showControlsHint ? '' : 'none';
+    this.fps.classList.toggle('show', s.showFps);
+  }
+
+  private hot(icon: string, action: Action, title: string, s: Settings, soon = false): HTMLElement {
+    return h(
+      'div.hot' + (soon ? '.soon' : ''),
+      { title, onclick: () => this.onHotbar(action) },
+      h('div.ring', {}, icon),
+      h('span.key', {}, keyLabel(s.keys[action])),
     );
   }
 
@@ -118,6 +139,13 @@ export class Hud {
     partner: { x: number; z: number } | undefined,
     gameMinutes: number,
   ): void {
+    this.fpsFrames++;
+    this.fpsTime += dt;
+    if (this.fpsTime >= 0.5) {
+      this.fps.textContent = `${Math.round(this.fpsFrames / this.fpsTime)} FPS`;
+      this.fpsFrames = 0;
+      this.fpsTime = 0;
+    }
     if (this.toastTimer > 0) {
       this.toastTimer -= dt;
       if (this.toastTimer <= 0) this.toast.classList.remove('show');
@@ -150,10 +178,6 @@ export class Hud {
     if (active?.target) markers.push({ x: active.target.x, z: active.target.z, color: '#ffd34d' });
     this.minimap.draw(player.x, player.z, player.yaw, camYaw, markers, partner);
   }
-}
-
-function hot(icon: string, key: string, title: string) {
-  return h('div.hot', { title: `${title} (coming soon)` }, h('div.ring', {}, icon), h('span.key', {}, key));
 }
 
 function deg(rad: number): number {

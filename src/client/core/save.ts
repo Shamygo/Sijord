@@ -7,6 +7,8 @@ export interface SaveData {
   room: string;
   /** Story flags, e.g. "met-professor", "left-town". */
   flags: string[];
+  /** Item id to count. Missing on saves from before the bag existed. */
+  bag?: Record<string, number>;
 }
 
 export function loadSave(): SaveData | null {

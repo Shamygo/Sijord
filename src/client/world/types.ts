@@ -47,4 +47,9 @@ export interface World {
   update(dt: number, elapsed: number, focus: THREE.Vector3): void;
   /** Base colour of the ground near a point, used to paint the minimap. */
   groundColorAt(x: number, z: number): THREE.Color;
+  /**
+   * Optional: scale grass / vegetation density and draw distance to a graphics quality level
+   * (matches GraphicsQuality in core/render). Defaults to 'medium'.
+   */
+  setQuality?(quality: 'low' | 'medium' | 'high'): void;
 }

@@ -8,8 +8,9 @@ const VIEW = 140;
 export class Minimap {
   readonly canvas = document.createElement('canvas');
   private ctx: CanvasRenderingContext2D;
-  private terrain: HTMLCanvasElement;
-  private metresPerPx: number;
+  /** Top-down painting of the whole map; x maps to world x, y to world z. Shared with the full map. */
+  readonly terrain: HTMLCanvasElement;
+  readonly metresPerPx: number;
 
   constructor(private world: World) {
     this.canvas.width = this.canvas.height = SIZE;

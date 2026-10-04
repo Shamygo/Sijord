@@ -60,15 +60,25 @@ function damp(current: number, target: number, rate: number, dt: number): number
   return current + (target - current) * (1 - Math.exp(-rate * dt));
 }
 
-/** Critically damped spring on one axis. */
-function springStep(x: number, v: number, target: number, freq: number, dt: number): [number, number] {
-  // Exact solution of the critically damped oscillator over dt.
+/**
+ * Critically damped spring on one axis, integrated exactly over dt while the target moves
+ * linearly from `from` to `to`. Treating the target as moving (rather than jumping to its new
+ * position at the start of the frame) makes the follow lag independent of the frame time, so
+ * uneven frame pacing (30 / 60 / 144 fps, dropped frames) can't make the view jitter.
+ */
+export function springFollow(x: number, v: number, from: number, to: number, freq: number, dt: number): [number, number] {
   const w = freq;
-  const d = x - target;
+  if (dt <= 0) return [x, v];
+  const tv = (to - from) / dt;
+  // Steady state for a target moving at tv lags it by 2·tv/w; solve for the deviation from that.
+  const lag = (2 * tv) / w;
+  const y0 = x - (from - lag);
+  const yv0 = v - tv;
   const e = Math.exp(-w * dt);
-  const nx = target + (d + (v + w * d) * dt) * e;
-  const nv = (v - w * (v + w * d) * dt) * e;
-  return [nx, nv];
+  const c = yv0 + w * y0;
+  const y = (y0 + c * dt) * e;
+  const yv = (yv0 - w * c * dt) * e;
+  return [to - lag + y, tv + yv];
 }
 
 /**
@@ -93,8 +103,15 @@ export class ThirdPersonCamera {
   private boom: number;
   private readonly pivot = new THREE.Vector3();
   private readonly pivotVel = new THREE.Vector3();
+  /** Follow target of the previous frame (the spring integrates towards it linearly). */
+  private readonly followPrev = new THREE.Vector3();
+  private sensitivityMult = 1;
+  private invertY = false;
+  private baseFov: number;
+  private sprintFovBoost: number;
   private readonly lastTarget = new THREE.Vector3();
   private readonly moveVel = new THREE.Vector3();
+  private moveVelY = 0;
   private hasTarget = false;
   private idleMouse = 0;
 
@@ -107,16 +124,37 @@ export class ThirdPersonCamera {
   constructor(aspect = 16 / 9, tuning: Partial<CameraTuning> = {}) {
     this.tuning = { ...CAMERA_TUNING, ...tuning };
     this.camera = new THREE.PerspectiveCamera(this.tuning.fov, aspect, 0.1, 3200);
+    this.baseFov = this.tuning.fov;
+    this.sprintFovBoost = this.tuning.sprintFov - this.tuning.fov;
     this.pitch = this.targetPitch = this.tuning.defaultPitch;
     this.distance = this.targetDistance = this.boom = this.tuning.defaultDistance;
   }
 
+  /** Mouse-look sensitivity multiplier (1 = default). */
+  setSensitivity(mult: number): void {
+    this.sensitivityMult = clamp(Number.isFinite(mult) ? mult : 1, 0.05, 10);
+  }
+
+  /** Invert vertical mouse look. */
+  setInvertY(v: boolean): void {
+    this.invertY = !!v;
+  }
+
+  /** Base field of view in degrees (sprinting widens it by the same amount as before). */
+  setFov(deg: number): void {
+    if (!Number.isFinite(deg)) return;
+    this.baseFov = clamp(deg, 30, 120);
+    this.camera.fov = this.baseFov;
+    this.camera.updateProjectionMatrix();
+  }
+
   onMouseDelta(dx: number, dy: number): void {
     if (!dx && !dy) return;
-    const s = this.tuning.sensitivity;
+    const s = this.tuning.sensitivity * this.sensitivityMult;
     // Mouse right turns the view right; right of a +Z-facing view is -X, i.e. decreasing yaw.
     this.targetYaw -= dx * s;
-    this.targetPitch = clamp(this.targetPitch + dy * s, this.tuning.minPitch, this.tuning.maxPitch);
+    const sy = this.invertY ? -1 : 1;
+    this.targetPitch = clamp(this.targetPitch + dy * s * sy, this.tuning.minPitch, this.tuning.maxPitch);
     this.idleMouse = 0;
   }
 
@@ -134,6 +172,7 @@ export class ThirdPersonCamera {
     this.pitch = this.targetPitch = this.tuning.defaultPitch;
     this.pivot.set(target.x, target.y + this.tuning.pivotHeight, target.z);
     this.pivotVel.set(0, 0, 0);
+    this.followPrev.copy(this.pivot);
     this.lastTarget.copy(target);
     this.moveVel.set(0, 0, 0);
     this.hasTarget = true;
@@ -156,10 +195,13 @@ export class ThirdPersonCamera {
       // Teleport: snap the follow rather than swooping across the map.
       this.pivot.set(target.x, target.y + T.pivotHeight, target.z);
       this.pivotVel.set(0, 0, 0);
+      this.followPrev.copy(this.pivot);
       this.tmpP.set(0, 0, 0);
+      this.moveVel.set(0, 0, 0);
     }
     this.moveVel.x = damp(this.moveVel.x, this.tmpP.x, 6, dt);
     this.moveVel.z = damp(this.moveVel.z, this.tmpP.z, 6, dt);
+    this.moveVelY = this.tmpP.y;
     this.lastTarget.copy(target);
 
     // Gentle auto-recentre behind the direction of travel.
@@ -189,9 +231,11 @@ export class ThirdPersonCamera {
     const tx = target.x + this.moveVel.x * lead;
     const ty = target.y + T.pivotHeight;
     const tz = target.z + this.moveVel.z * lead;
-    [this.pivot.x, this.pivotVel.x] = springStep(this.pivot.x, this.pivotVel.x, tx, T.followFreq, dt);
-    [this.pivot.z, this.pivotVel.z] = springStep(this.pivot.z, this.pivotVel.z, tz, T.followFreq, dt);
-    [this.pivot.y, this.pivotVel.y] = springStep(this.pivot.y, this.pivotVel.y, ty, T.followFreqY, dt);
+    const fp = this.followPrev;
+    [this.pivot.x, this.pivotVel.x] = springFollow(this.pivot.x, this.pivotVel.x, fp.x, tx, T.followFreq, dt);
+    [this.pivot.z, this.pivotVel.z] = springFollow(this.pivot.z, this.pivotVel.z, fp.z, tz, T.followFreq, dt);
+    [this.pivot.y, this.pivotVel.y] = springFollow(this.pivot.y, this.pivotVel.y, fp.y, ty, T.followFreqY, dt);
+    fp.set(tx, ty, tz);
     // Never let the lag grow unbounded (very fast motion / long frames).
     const maxLag = T.maxLag;
     this.tmpP.set(this.pivot.x - target.x, 0, this.pivot.z - target.z);
@@ -200,10 +244,14 @@ export class ThirdPersonCamera {
       this.pivot.x = target.x + (this.tmpP.x / lag) * maxLag;
       this.pivot.z = target.z + (this.tmpP.z / lag) * maxLag;
     }
-    if (Math.abs(this.pivot.y - ty) > 1.5) this.pivot.y = ty + Math.sign(this.pivot.y - ty) * 1.5;
+    if (Math.abs(this.pivot.y - ty) > 1.5) {
+      // Long falls: ride along at the limit instead of fighting the spring.
+      this.pivot.y = ty + Math.sign(this.pivot.y - ty) * 1.5;
+      this.pivotVel.y = this.moveVelY;
+    }
 
     // FOV widens a touch while sprinting.
-    const fov = damp(this.camera.fov, sprinting ? T.sprintFov : T.fov, T.fovRate, dt);
+    const fov = damp(this.camera.fov, this.baseFov + (sprinting ? this.sprintFovBoost : 0), T.fovRate, dt);
     if (Math.abs(fov - this.camera.fov) > 1e-4) {
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
