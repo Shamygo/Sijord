@@ -70,14 +70,16 @@ export class NetClient {
   }
 }
 
-/** Server URL: `?server=` overrides; otherwise the same host on the default port. */
-export function defaultServerUrl(): string {
-  const params = new URLSearchParams(location.search);
-  const override = params.get('server');
-  if (override) return override;
-  const host = location.hostname || 'localhost';
+/**
+ * The Node co-op server to use, if any: `?server=ws://host:port`, or `?server=local` for this
+ * machine on the default port. Without it the game uses peer-to-peer co-op.
+ */
+export function serverOverride(): string | null {
+  const v = new URLSearchParams(location.search).get('server');
+  if (!v) return null;
+  if (v !== 'local') return v;
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${proto}://${host}:${DEFAULT_SERVER_PORT}`;
+  return `${proto}://${location.hostname || 'localhost'}:${DEFAULT_SERVER_PORT}`;
 }
 
 function round(s: PlayerSnapshot): PlayerSnapshot {

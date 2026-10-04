@@ -1,16 +1,24 @@
 # Sijord
 
-A two-player, open world monster-catching adventure in the browser, inspired by Palworld and the mainline Pokemon games. Built with TypeScript and Three.js, with a small Node WebSocket server for co-op. Desktop builds for Windows and Mac come later (see the roadmap).
+A two-player, open world monster-catching adventure in the browser, inspired by Palworld and the mainline Pokemon games. Built with TypeScript and Three.js, with peer-to-peer co-op for two players. Desktop builds for Windows and Mac come later (see the roadmap).
 
 ## Play it
 
+The easiest way: build one file and double-click it.
+
 ```bash
 npm install
-npm run dev        # the game, at http://localhost:5173
-npm run server     # the co-op server, on ws://localhost:8787 (optional for solo play)
+npm run build:single   # writes dist-single/sijord.html
 ```
 
-To play together, both players open the game and type the same world code on the title screen. If you are on different machines, run the server on one of them and have the other open the game with `?server=ws://<that-machine's-ip>:8787` added to the URL.
+Open `sijord.html` in Chrome or Edge on Windows or Mac. To play together, both players open the game and type the **same world code** on the title screen. Co-op is peer-to-peer: the two browsers find each other through public relays and then connect directly, so nothing needs hosting.
+
+For development, `npm run dev` serves the game at http://localhost:5173.
+
+### Co-op fallbacks
+
+- If the public relays are blocked on your network, run `npm run relay` on one machine and open the game with `?relay=ws://<that-machine's-ip>:8090` added to the URL on both.
+- `npm run server` starts the original WebSocket server; open the game with `?server=ws://<ip>:8787` (or `?server=local`) to use it instead.
 
 ### Controls
 

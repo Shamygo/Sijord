@@ -10,10 +10,14 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:single": "tsc --noEmit && vite build --mode single && node -e \"require('fs').renameSync('dist-single/index.html','dist-single/sijord.html')\"",
+    "relay": "node -e \"import('@trystero-p2p/ws-relay/server').then(m=>{m.createWsRelayServer({port:Number(process.env.PORT||8090)});console.log('relay on',process.env.PORT||8090)})\""
   },
   "dependencies": {
+    "@trystero-p2p/ws-relay": "^0.26.0",
     "three": "^0.186.1",
+    "trystero": "^0.26.0",
     "ws": "^8.22.0"
   },
   "devDependencies": {
@@ -23,6 +27,7 @@
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vite": "^8.3.2",
+    "vite-plugin-singlefile": "^2.3.3",
     "vitest": "^5.0.3"
   }
 }

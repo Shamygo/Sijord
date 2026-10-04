@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { PlayerProfile } from '../../shared/types';
-import { NetClient, defaultServerUrl } from '../net/client';
+import { NetClient, serverOverride, type NetEvents } from '../net/client';
+import { P2PClient } from '../net/p2p';
 import { Professor } from '../npc/professor';
 import { createAvatar } from '../player/avatar';
 import { PlayerController } from '../player/controller';
@@ -24,8 +25,9 @@ export class Game {
   private avatar;
   private professor: Professor;
   private hud: Hud;
-  private net: NetClient;
+  private net: { send(s: ReturnType<PlayerController['snapshot']>, nowMs: number): void };
   private partners = new Map<string, { remote: RemotePlayer; profile: PlayerProfile }>();
+  private slot: 0 | 1 = 0;
   private flags: Set<string>;
   private talking = false;
   private timer = new THREE.Timer();
@@ -70,18 +72,21 @@ export class Game {
     this.spawn(0);
     this.refreshQuests();
 
-    this.net = new NetClient({
+    const events: NetEvents = {
       onStatus: (s) => {
         const text = {
           connecting: 'Connecting to co-op server...',
           online: `World "${save.room}" · waiting for your partner`,
-          offline: 'Solo mode (co-op server not running)',
+          offline: 'Solo mode (could not reach co-op)',
           full: `World "${save.room}" already has two players · playing solo`,
         }[s];
         this.hud.setNetStatus(text);
       },
       onWelcome: (slot, peers) => {
-        if (!this.flags.has('left-town')) this.spawn(slot);
+        // Second to arrive takes house 2, unless they've already walked off.
+        const home = this.world.anchors.playerSpawns[slot === 0 ? 1 : 0];
+        if (slot !== this.slot && this.controller.position.distanceTo(home) < 3) this.spawn(slot);
+        this.slot = slot;
         for (const p of peers) {
           this.addPartner(p.id, p.profile);
           if (p.s) this.partners.get(p.id)!.remote.push(p.s, performance.now());
@@ -101,8 +106,18 @@ export class Game {
         this.hud.showToast(`${p.profile.name} left`);
         this.updatePartnerStatus();
       },
-    });
-    this.net.connect(defaultServerUrl(), save.room, save.profile);
+    };
+    // Default co-op is peer-to-peer (nothing to host). `?server=ws://...` uses the Node server instead.
+    const server = serverOverride();
+    if (server) {
+      const ws = new NetClient(events);
+      ws.connect(server, save.room, save.profile);
+      this.net = { send: (s, now) => ws.sendState(s, now) };
+    } else {
+      const p2p = new P2PClient(events);
+      p2p.connect(save.room, save.profile, new URLSearchParams(location.search).get('relay'));
+      this.net = p2p;
+    }
 
     addEventListener('resize', () => this.resize());
     this.resize();
@@ -223,7 +238,7 @@ export class Game {
 
     this.professor.update(dt);
     for (const p of this.partners.values()) p.remote.update(dt, now);
-    this.net.sendState(snap, now);
+    this.net.send(snap, now);
 
     // Also keeps the sun's shadow camera centred on the player.
     this.world.update(dt, this.elapsed, this.controller.position);
