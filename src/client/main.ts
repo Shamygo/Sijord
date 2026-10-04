@@ -15,12 +15,12 @@ async function boot(): Promise<void> {
   const save = { profile, room: title.room, flags: sameTrainer ? saved.flags : [] };
   writeSave(save);
   // Building the world takes a moment; paint a loading screen first.
-  const loading = h('div.screen', {}, h('div.title-card', {}, h('h1.logo', {}, 'Sijord'), h('p.subtitle', {}, 'Growing the world...')));
+  const loading = h('div.screen', { style: 'z-index:50' }, h('div.title-card', {}, h('h1.logo', {}, 'Sijord'), h('p.subtitle', {}, 'Growing the world...')));
   app.append(loading);
   await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 30)));
   const game = new Game(app, save);
+  await game.start();
   loading.remove();
-  game.start();
   if (import.meta.env.DEV) (window as unknown as { sijord: Game }).sijord = game;
 }
 

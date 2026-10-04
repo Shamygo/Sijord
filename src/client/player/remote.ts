@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Appearance, MoveAnim, PlayerProfile, PlayerSnapshot } from '../../shared/types';
 import { createAvatar } from './avatar';
-import type { Avatar } from './types';
+import type { Avatar, GroundFn } from './types';
 
 /** Interpolation tunables for remote players. */
 export const REMOTE_TUNING = {
@@ -88,6 +88,7 @@ export class RemotePlayer {
   private hasState = false;
   private anim: MoveAnim = 'idle';
   private speed = 0;
+  private tired = false;
   private readonly tmp = new THREE.Vector3();
 
   constructor(profile: PlayerProfile | { name: string; appearance: Appearance }) {
@@ -154,12 +155,14 @@ export class RemotePlayer {
       yaw = a.s.yaw;
       this.speed = a.s.speed;
       this.anim = a.s.anim;
+      this.tired = isTired(a.s);
     } else if (renderT <= b.t) {
       const k = (renderT - a.t) / (b.t - a.t);
       target.set(a.s.x + (b.s.x - a.s.x) * k, a.s.y + (b.s.y - a.s.y) * k, a.s.z + (b.s.z - a.s.z) * k);
       yaw = lerpAngle(a.s.yaw, b.s.yaw, k);
       this.speed = a.s.speed + (b.s.speed - a.s.speed) * k;
       this.anim = k < 0.5 ? a.s.anim : b.s.anim;
+      this.tired = isTired(k < 0.5 ? a.s : b.s);
     } else {
       // Past the newest sample: extrapolate briefly along the last velocity, then hold.
       const span = Math.max(1, b.t - a.t);
@@ -168,6 +171,7 @@ export class RemotePlayer {
       target.set(b.s.x + (b.s.x - a.s.x) * k, b.s.y + (b.s.y - a.s.y) * k, b.s.z + (b.s.z - a.s.z) * k);
       yaw = b.s.yaw;
       this.anim = b.s.anim;
+      this.tired = isTired(b.s);
       // Ease the animation speed down once we've stopped hearing from them.
       const stale = Math.min(1, (renderT - b.t) / T.maxExtrapolateMs);
       this.speed = b.s.speed * (1 - 0.6 * stale);
@@ -186,7 +190,21 @@ export class RemotePlayer {
       this.displayYaw = lerpAngle(this.displayYaw, yaw, 1 - Math.exp(-T.yawSmooth * dt));
     }
     this.apply();
-    this.avatar.animate(dt, { speed: this.speed, anim: this.anim });
+    // World position + yaw let the avatar plant its feet, lean into turns and detect jumps.
+    this.avatar.animate(dt, {
+      speed: this.speed,
+      anim: this.anim,
+      x: this.displayPos.x,
+      y: this.displayPos.y,
+      z: this.displayPos.z,
+      yaw: this.displayYaw,
+      tired: this.tired,
+    });
+  }
+
+  /** Terrain height function so the partner's feet sit exactly on slopes. Optional. */
+  setGround(fn: GroundFn | null): void {
+    this.avatar.setGround(fn);
   }
 
   private apply(): void {
@@ -199,6 +217,11 @@ export class RemotePlayer {
     disposeSprite(this.nameTag);
     this.root.clear();
   }
+}
+
+/** Snapshots may carry the controller's optional `tired` animation hint. */
+function isTired(s: PlayerSnapshot): boolean {
+  return (s as PlayerSnapshot & { tired?: unknown }).tired === true;
 }
 
 function disposeSprite(s: THREE.Sprite): void {

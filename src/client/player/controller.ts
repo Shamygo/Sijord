@@ -200,6 +200,7 @@ export class PlayerController {
     let vdx = speed > 1e-4 ? vel.x / speed : dirX;
     let vdz = speed > 1e-4 ? vel.z / speed : dirZ;
 
+    let skidding = false;
     if (hasInput) {
       if (speed < 0.4) {
         // From (near) rest, push straight along the wish direction.
@@ -208,8 +209,10 @@ export class PlayerController {
       } else {
         const diff = wrapAngle(Math.atan2(dirX, dirZ) - Math.atan2(vdx, vdz));
         if (Math.abs(diff) > T.skidAngle && ground) {
-          // Hard reversal: plant and skid before turning round.
+          // Hard reversal: plant and skid to a stop before turning round (no push along the
+          // old direction while sliding).
           speed = moveTowards(speed, 0, T.skidDecel * dt);
+          skidding = true;
         } else {
           const fast = smoothstep(T.walkSpeed * 0.8, T.sprintSpeed, speed);
           const steer = (T.steerRateSlow + (T.steerRateFast - T.steerRateSlow) * fast) * control;
@@ -219,7 +222,9 @@ export class PlayerController {
           vdz = Math.cos(a);
         }
       }
-      if (speed < targetSpeed) {
+      if (skidding) {
+        // Speed already handled above.
+      } else if (speed < targetSpeed) {
         const falloff = 1 - T.accelFalloff * clamp(speed / Math.max(targetSpeed, 1e-3), 0, 1);
         speed = Math.min(targetSpeed, speed + T.groundAccel * falloff * control * dt);
       } else if (speed > targetSpeed) {
@@ -416,13 +421,16 @@ export class PlayerController {
   }
 
   snapshot(): PlayerSnapshot {
-    return {
+    const s: PlayerSnapshot & { tired: boolean } = {
       x: this.position.x,
       y: this.position.y,
       z: this.position.z,
       yaw: this.yaw,
       speed: this.horizontalSpeed,
       anim: this.anim,
+      // Animation hint (avatars play the out-of-breath pose); optional for receivers.
+      tired: this.exhausted,
     };
+    return s;
   }
 }

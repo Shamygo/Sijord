@@ -1,10 +1,14 @@
 import * as THREE from 'three';
 import { GLSL_NOISE } from './noise';
 import { CELL, GRID_HALF, GRID_N, WATER_LEVEL } from './layout';
-import { SKY } from './sky';
+import { GLSL_SKY, SKY } from './sky';
 import { worldUniforms } from './shared';
 
-/** One stylised water sheet at WATER_LEVEL over the east of the map (river, lake, pond). */
+/**
+ * Stylised water over the east of the map (river, lake, pond): turquoise shallows over sand that
+ * deepen to blue, sky + cloud reflections with Fresnel, darker bank reflections near the shore,
+ * sun glints and sparkles, and soft animated foam lines along the beaches.
+ */
 export function createWater(depthTex: THREE.Texture): THREE.Mesh {
   const minX = -GRID_HALF, maxX = -60, minZ = -GRID_HALF, maxZ = GRID_HALF;
   const geo = new THREE.PlaneGeometry(maxX - minX, maxZ - minZ, 1, 1);
@@ -18,10 +22,6 @@ export function createWater(depthTex: THREE.Texture): THREE.Mesh {
         uDepth: { value: null },
         uSunDir: { value: SKY.sunDir },
         uSunColor: { value: SKY.sunColor },
-        uSky: { value: SKY.horizon },
-        uZenith: { value: SKY.zenith },
-        uShallow: { value: new THREE.Color(0x48d8c8) },
-        uDeep: { value: new THREE.Color(0x1763c4) },
         uGrid: { value: new THREE.Vector3(GRID_HALF, CELL, V) },
       },
     ]),
@@ -36,16 +36,18 @@ export function createWater(depthTex: THREE.Texture): THREE.Mesh {
         #include <fog_vertex>
       }`,
     fragmentShader: /* glsl */ `
-      uniform sampler2D uDepth; uniform vec3 uSunDir; uniform vec3 uSunColor; uniform vec3 uSky; uniform vec3 uZenith;
-      uniform vec3 uShallow; uniform vec3 uDeep; uniform vec3 uGrid; uniform float uTime;
+      uniform sampler2D uDepth; uniform vec3 uSunDir; uniform vec3 uSunColor;
+      uniform vec3 uGrid; uniform float uTime;
       varying vec3 vW;
       #include <fog_pars_fragment>
       ${GLSL_NOISE}
+      ${GLSL_SKY}
       vec2 waveGrad(vec2 p, float t) {
         float e = 0.35;
-        float a = wNoise(p * 0.35 + vec2(t * 0.15, t * 0.08)) + wNoise(p * 0.9 - vec2(t * 0.22, -t * 0.12)) * 0.5;
-        float bx = wNoise((p + vec2(e, 0.0)) * 0.35 + vec2(t * 0.15, t * 0.08)) + wNoise((p + vec2(e, 0.0)) * 0.9 - vec2(t * 0.22, -t * 0.12)) * 0.5;
-        float bz = wNoise((p + vec2(0.0, e)) * 0.35 + vec2(t * 0.15, t * 0.08)) + wNoise((p + vec2(0.0, e)) * 0.9 - vec2(t * 0.22, -t * 0.12)) * 0.5;
+        vec2 o1 = vec2(t * 0.15, t * 0.08), o2 = -vec2(t * 0.22, -t * 0.12);
+        float a = wNoise(p * 0.35 + o1) + wNoise(p * 0.9 + o2) * 0.5;
+        float bx = wNoise((p + vec2(e, 0.0)) * 0.35 + o1) + wNoise((p + vec2(e, 0.0)) * 0.9 + o2) * 0.5;
+        float bz = wNoise((p + vec2(0.0, e)) * 0.35 + o1) + wNoise((p + vec2(0.0, e)) * 0.9 + o2) * 0.5;
         return vec2(bx - a, bz - a) / e;
       }
       void main() {
@@ -54,27 +56,52 @@ export function createWater(depthTex: THREE.Texture): THREE.Mesh {
         float depth = texture2D(uDepth, uv).r * 6.6 - 0.6;
         if (depth < -0.05) discard;
         float t = uTime;
-        vec2 gr = waveGrad(vW.xz, t) * 0.55 + waveGrad(vW.xz * 2.7 + 13.0, t * 1.4) * 0.25;
+        vec3 Vv = cameraPosition - vW;
+        float dist = length(Vv);
+        Vv /= dist;
+        float calm = smoothstep(60.0, 300.0, dist);
+        vec2 gr = waveGrad(vW.xz * 0.6, t) * 0.3 + waveGrad(vW.xz * 1.9 + 13.0, t * 1.4) * 0.12;
+        // at grazing angles ripples merge into a calm sheen
+        float graze = 1.0 - smoothstep(0.03, 0.35, Vv.y);
+        gr *= (1.0 - calm * 0.75) * (1.0 - graze * 0.55);
         vec3 n = normalize(vec3(-gr.x, 1.0, -gr.y));
-        vec3 V = normalize(cameraPosition - vW);
-        float fres = pow(1.0 - max(dot(n, V), 0.0), 4.0);
-        vec3 base = mix(uShallow, uDeep, smoothstep(0.1, 3.2, depth));
-        vec3 R = reflect(-V, n);
-        vec3 skyRef = mix(uSky, uZenith, clamp(R.y, 0.0, 1.0) * 0.8);
-        vec3 col = mix(base, skyRef, 0.04 + fres * 0.45);
+        float ndv = max(dot(normalize(mix(n, vec3(0.0, 1.0, 0.0), 0.5)), Vv), 0.0);
+        float fres = 0.02 + 0.98 * pow(1.0 - ndv, 5.0);
+        // body colour by depth
+        vec3 overSand = vec3(0.36, 0.62, 0.56);
+        vec3 shallow = vec3(0.08, 0.42, 0.52);
+        vec3 mid = vec3(0.035, 0.22, 0.4);
+        vec3 deep = vec3(0.02, 0.12, 0.28);
+        vec3 base = mix(overSand, shallow, smoothstep(0.0, 0.55, depth));
+        base = mix(base, mid, smoothstep(0.4, 1.7, depth));
+        base = mix(base, deep, smoothstep(1.5, 3.4, depth));
         float diff = max(dot(n, uSunDir), 0.0);
-        col *= 0.75 + diff * 0.35;
-        float spec = pow(max(dot(R, uSunDir), 0.0), 140.0);
-        col += uSunColor * spec * 2.2;
-        // sparkles
-        float sp = wNoise(vW.xz * 1.7 + t * 0.6) * wNoise(vW.xz * 2.3 - t * 0.5);
-        col += uSunColor * smoothstep(0.66, 0.8, sp) * 0.15;
-        // soft foam at the shoreline
-        float foamN = wNoise(vW.xz * 0.9 + vec2(t * 0.3, -t * 0.2));
-        float foamBand = smoothstep(0.5, 0.0, depth + (foamN - 0.5) * 0.35 + sin(t * 1.3 + vW.x * 0.25 + vW.z * 0.2) * 0.06);
-        col = mix(col, vec3(0.97, 0.99, 1.0), foamBand * 0.85);
-        float alpha = mix(0.55, 0.93, smoothstep(0.0, 1.6, depth));
-        alpha = max(alpha, foamBand * 0.9);
+        vec3 body = base * (0.55 + diff * 0.55);
+        // reflection: sky gradient + soft cloud blobs, darker green banks near the shore
+        vec3 R = reflect(-Vv, n);
+        R.y = abs(R.y);
+        vec3 refl = skyGradient(R);
+        vec2 cuv = R.xz / (R.y + 0.15) * 0.9 + vec2(t * 0.004, 0.0);
+        float cl = smoothstep(0.55, 0.78, wFbm(cuv * 0.8));
+        refl = mix(refl, vec3(0.95, 0.96, 1.0), cl * 0.5);
+        float bank = smoothstep(2.2, 0.2, depth) * (1.0 - smoothstep(0.0, 0.3, R.y));
+        refl = mix(refl, vec3(0.1, 0.17, 0.1), bank * 0.6);
+        vec3 col = mix(body, refl * 0.92, clamp(fres * 1.05, 0.0, 0.85));
+        // sun glint + sparkles
+        float spec = pow(max(dot(R, uSunDir), 0.0), 220.0);
+        col += uSunColor * spec * 3.0;
+        float sp = wNoise(vW.xz * 2.1 + t * 0.7) * wNoise(vW.xz * 2.9 - t * 0.55);
+        col += uSunColor * smoothstep(0.78, 0.9, sp) * (0.12 + spec * 2.0) * (1.0 - calm) * (1.0 - graze * 0.7);
+        // foam lines lapping at the shore
+        float fn = wNoise(vW.xz * 0.8 + vec2(t * 0.25, -t * 0.18));
+        float wave = sin(t * 1.2 - depth * 9.0 + fn * 3.0) * 0.5 + 0.5;
+        float foamBand = smoothstep(0.3, 0.0, depth + (fn - 0.5) * 0.2);
+        float foam = foamBand * (0.45 + 0.4 * smoothstep(0.55, 0.95, wave));
+        foam = max(foam, smoothstep(0.92, 1.0, wave) * smoothstep(0.7, 0.2, depth) * 0.4);
+        col = mix(col, vec3(0.92, 0.96, 0.98), foam * 0.7);
+        float alpha = mix(0.5, 0.95, smoothstep(0.0, 1.4, depth));
+        alpha = max(alpha, foam * 0.9);
+        alpha = max(alpha, fres);
         gl_FragColor = vec4(col, alpha);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>

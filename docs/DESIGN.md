@@ -469,13 +469,15 @@ Typical early income: wild battles (50-200), roaming trainers (300-1,500), quest
 
 ### 7.2 The five classes
 
+Classes start deliberately small: one modest edge and one real cost. The game is meant to be hard, so the strong abilities (spotting rare spawns, calming aggressive Pokemon, extra base cores, field revives, reading boss items) are deep skill-tree nodes, not starting perks.
+
 | id (code) | Class | Fantasy | Innate perk | Trade-off |
 |---|---|---|---|---|
-| `ranger` | **Ranger** | Wilderness scout and pathfinder | +15% max stamina, mounts +5% speed, sees tracks of nearby rare creatures | Crafting stations work 15% slower. Shop prices +5% (no city contacts) |
-| `tamer` | **Tamer** | Creature whisperer | +10% catch rate, -0.10 aggroChance, over-cap obedience +2 | -15% carry weight. Base creatures work 10% slower when the Tamer isn't nearby (they miss them) |
-| `artisan` | **Artisan** | Builder, engineer, industrialist | Crafting -15% material cost, +1 base core, tools last 2x longer | -10% catch rate. -10% battle XP for their creatures |
-| `scholar` | **Scholar** | Researcher and tactician | +20% XP for player and creatures. Sees wild levels, natures and abilities at a glance. Boss scout boards show held items | -15% max HP. Hunger and thirst drain 10% faster ("forgets to eat") |
-| `medic` | **Medic** | Field healer and survivalist | Heals creatures 10% HP after each battle. Hunger and thirst drain 20% slower. Can revive a partner instantly | -10% stamina. Cannot carry more than 3 mounts in the party at once (the herbal pack takes space) |
+| `ranger` | **Ranger** | Wilderness scout and pathfinder | +8% max stamina | Crafting takes 10% longer |
+| `tamer` | **Tamer** | Creature whisperer | +5% catch rate | -10% max HP |
+| `artisan` | **Artisan** | Builder, engineer, industrialist | Crafting costs 8% fewer materials | -5% catch rate |
+| `scholar` | **Scholar** | Researcher and tactician | +8% XP for player and creatures | Hunger and thirst drain 10% faster |
+| `medic` | **Medic** | Field healer and survivalist | Hunger and thirst drain 10% slower | -8% max stamina |
 
 ### 7.3 Skill trees
 Each class has **3 branches** of about 8 nodes plus a **capstone** (about 27 skills, plus ranks, roughly 85 points). Nodes need a prerequisite in the same branch. The capstone needs 12 points spent in its branch.
