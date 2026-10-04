@@ -4,7 +4,9 @@ A two-player, open world monster-catching adventure in the browser, inspired by 
 
 ## Play it
 
-The easiest way: build one file and double-click it.
+Online at https://shamygo.github.io/Sijord/ once GitHub Pages is on (every push to `main` redeploys it).
+
+Offline: build one file and double-click it.
 
 ```bash
 npm install
