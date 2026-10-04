@@ -14,7 +14,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 
 | # | Milestone | Playable result | Rough size |
 |---|---|---|---|
-| M1 | Hometown and co-op presence | Walk around Bramblewick with a friend and talk to Professor Hazel | In progress |
+| M1 | Hometown and co-op presence | Walk around Bramblewick with a friend and talk to Professor Hazel | Done |
 | M2 | First creatures and battles | Pick a starter and fight wild double battles near Bramblewick | L |
 | M3 | Catching, party and the first route | Catch creatures (overworld and in battle) across the starter biome, with aggression | L |
 | M4 | Survival and crafting core | Hunger, thirst and stamina, gathering, T0-T1 crafting, Poke Ball crafting, tools and armour | L |
@@ -32,7 +32,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 
 ---
 
-## M1: Hometown and co-op presence *(in progress)*
+## M1: Hometown and co-op presence *(done; 60 fps on real hardware unverified)*
 
 **Scope**
 - Third-person character controller: fluid but weighty acceleration and turning, sprint, jump, landing recovery. Orbit camera with collision.

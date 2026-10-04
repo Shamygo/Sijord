@@ -31,6 +31,8 @@ For development, `npm run dev` serves the game at http://localhost:5173.
 | Shift | Sprint (uses stamina) |
 | Space | Jump |
 | E | Talk / interact, advance dialogue |
+| M / B / P / J | Map, bag, party, quests |
+| Esc | Pause and settings (rebind keys, sensitivity, FOV, quality) |
 | Mouse wheel | Zoom the camera |
 
 ## What is in this milestone
@@ -39,6 +41,8 @@ Milestone 1 is the foundation: the trainer creator with five classes, third-pers
 
 ## Docs
 
+- [Handoff](docs/HANDOFF.md): current state, known gaps and what's next. Start here.
+- [Vision](docs/VISION.md): the owner's original spec and feedback, verbatim.
 - [Game design](docs/DESIGN.md): every system in the full game.
 - [Roadmap](docs/ROADMAP.md): the milestones from here to release.
 - [Dex plan](docs/DEX_PLAN.md): how the regional dex is chosen, and the new species.
