@@ -7,7 +7,7 @@ Everything a new contributor (human or Claude) needs to pick up this project fro
 - **Owner:** Simon, GitHub [`Shamygo`](https://github.com/Shamygo). He builds this with a friend who collaborates in this repo. They play it together as two-player co-op.
 - **The game:** a Palworld-style ("Power World" in Simon's words), third-person 3D, open world Pokemon game in the browser, later packaged for Windows and Mac. Two-player co-op is the core. Battles are hard on purpose.
 - **Simon's own words** are in [VISION.md](VISION.md): the full spec plus his feedback. Read it first. It outranks every other doc.
-- **Art target:** [reference/art-reference.png](reference/art-reference.png). See [The art reference](#the-art-reference) below.
+- **Art target: use the reference picture.** [reference/art-reference.png](reference/art-reference.png) is the image Simon attached to his spec, and it is the visual target for everything the player sees: terrain, sky, water, foliage, characters, creatures, towns and HUD. Open the image itself (not just the description) before any visual work, screenshot the game from a similar angle, and compare side by side. Simon asked for the game to look "exactly like" it. See [The art reference](#the-art-reference) below for a written breakdown.
 
 ## How Simon likes to work
 
@@ -100,9 +100,30 @@ From DESIGN §18. None answered yet. Proceed on the current default and flag it.
 
 Keep closing the visual gaps above alongside M2, since Simon judges every build by how it looks.
 
+## Project history
+
+All of this happened on 2026-10-04 in a private Claude project ("Sijord Pokemon Game") that only Simon could join. Everything from its project chat and all three of its threads is summarised here, so nothing else needs to be looked up.
+
+**Project chat (setup)**
+- Simon asked to add his friend to the Claude project. That wasn't possible (private project), so they agreed to collaborate through GitHub instead. Simon created https://github.com/Shamygo/Sijord, added his friend as a collaborator there, and added the repo to the project. The friend works in the repo but never saw the Claude chats.
+
+**Thread 1: "Build the next feature"** (suggested by the app, before Simon described the game)
+- The repo was empty. Claude picked TypeScript + Phaser + Vite and opened **PR #1**, a 2D tile overworld (grid movement, collision, tall grass, 14 tests), and created `main` with a one-line README. It was never merged. Simon then described a 3D game, which made PR #1 obsolete. Close it if it's still open.
+
+**Thread 2: "Open world Pokemon game"** (the main build)
+- Simon posted the full spec (see [VISION.md](VISION.md)) with the reference picture attached.
+- Claude chose TypeScript + Three.js, wrote DESIGN, ROADMAP and DEX_PLAN, and built milestone 1 in **PR #2**, using parallel agents for docs, world, player and co-op.
+- Claude asked two questions at the end of PR #2: should gyms wait for an offline partner or offer an AI partner, and 10 gyms or 8? Simon never answered (see Open questions).
+- "Set it so me and my friend can play": co-op was switched from the Node server to peer-to-peer (Trystero over public Nostr relays), and a single-file `sijord.html` build was added.
+- Hosting back-and-forth: Simon asked for a github.io site, then for one only collaborators could see (impossible without GitHub Enterprise), then settled on public. He made the repo public and set Pages to GitHub Actions; Claude merged PR #2 and confirmed the site loads.
+- Simon played it and asked for big changes (VISION.md §3). **PR #3** delivered them and was merged. Claude's own note on what still didn't match the reference is under Known gaps.
+
+**Thread 3: "Handoff context in the repo"**
+- Simon asked for everything a new project would need to be in the repo, which produced this file, VISION.md, CLAUDE.md and the reference image (PR #4). He then asked that the handoff make the reference picture the explicit visual target and cover every thread, which is this section.
+
 ## The art reference
 
-[reference/art-reference.png](reference/art-reference.png) is the target look. It shows a stylised, painterly, Palworld-like scene:
+[reference/art-reference.png](reference/art-reference.png) is the target look. Always open the image itself for visual work; this description is only a summary. It shows a stylised, painterly, Palworld-like scene:
 - A trainer in a red hoodie with a black backpack (red ball emblem) walks away from the camera up a dirt path through bright, saturated, wind-blown grass with small white flowers. An orange fox-like partner creature with a cream tail walks alongside.
 - Left: tall grey layered cliffs topped with grass and mossy stone ruins with arches. Round, fluffy broadleaf trees and scattered grey boulders.
 - Right and distance: a deep blue river with sandy banks and a wooden bridge, cliffs and stone arches across the water, a red-roofed castle town with a spire on a plateau, and big snowy mountains behind, softened by blue atmospheric haze. Clear deep-blue sky with a few thin clouds. Warm late-morning sun.
