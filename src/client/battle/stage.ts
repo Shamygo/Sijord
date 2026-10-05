@@ -3,6 +3,7 @@ import type { Pos } from '../../shared/battle/engine';
 import type { MajorStatus, TypeName } from '../../shared/battle/types';
 import { createCreatureModel, type CreatureModel } from '../creatures';
 import type { World } from '../world/types';
+import { smoothFacing } from '../player/locomotion';
 import { resolveCircle } from '../core/collision';
 import { ACTION_RULES } from '../../shared/battle/action';
 import { makeArenaRing, makeArenaWall, makeBall, Particles, Projectile, TYPE_COLORS } from './fx';
@@ -21,6 +22,9 @@ interface Slot {
   external: boolean;
   remoteSpeed?: number;
   receivedAt?: number;
+  remoteTarget?: boolean;
+  remoteYaw?: number;
+  moveSpeed?: number;
 }
 
 interface Tween {
@@ -72,7 +76,7 @@ export class BattleStage {
   private dying = new Map<THREE.Group, CreatureModel>();
   private ringFade = 0;
   private closing = false;
-  private pilots = new Map<string, {x: number; z: number; sprint: boolean; dodge: boolean; cooldown: number; dash: number; dx: number; dz: number}>();
+  private pilots = new Map<string, {x: number; z: number; sprint: boolean; dodge: boolean; cooldown: number; dash: number; dx: number; dz: number; vx: number; vz: number}>();
   private actionMode = false;
 
   constructor(private world: World, center: THREE.Vector3, axisYaw: number) {
@@ -141,7 +145,7 @@ export class BattleStage {
 
   setActionMode(): void { this.actionMode = true; }
   pilot(p: Pos, input: {x: number; z: number; sprint: boolean; dodge: boolean}): void {
-    const old = this.pilots.get(key(p)) ?? {cooldown: 0, dash: 0, dx: 0, dz: 1};
+    const old = this.pilots.get(key(p)) ?? {cooldown: 0, dash: 0, dx: 0, dz: 1, vx: 0, vz: 0};
     this.pilots.set(key(p), {...old, ...input, x: Number.isFinite(input.x) ? Math.max(-1, Math.min(1, input.x)) : 0, z: Number.isFinite(input.z) ? Math.max(-1, Math.min(1, input.z)) : 0});
   }
   dodging(p: Pos): boolean { return (this.pilots.get(key(p))?.dash ?? 0) > 0; }
@@ -162,12 +166,20 @@ export class BattleStage {
       const speed = dash ? ACTION_RULES.dodgeSpeed : input.sprint ? ACTION_RULES.sprintSpeed : ACTION_RULES.walkSpeed;
       const dx = dash ? input.dx : length ? input.x / Math.max(1, length) : 0;
       const dz = dash ? input.dz : length ? input.z / Math.max(1, length) : 0;
-      const next = resolveCircle(s.spot.x + dx * speed * dt, s.spot.z + dz * speed * dt, s.model.radius, this.world.colliders);
+      // Ending a dodge must not carry dash-speed into ordinary movement.
+      const carriedSpeed=Math.hypot(input.vx,input.vz);
+      if(!dash && carriedSpeed>speed){input.vx*=speed/carriedSpeed;input.vz*=speed/carriedSpeed;}
+      const blend = 1 - Math.exp(-18 * dt);
+      input.vx = dash ? dx * speed : input.vx + (dx * speed - input.vx) * blend;
+      input.vz = dash ? dz * speed : input.vz + (dz * speed - input.vz) * blend;
+      const beforeX = s.spot.x, beforeZ = s.spot.z;
+      const next = resolveCircle(s.spot.x + input.vx * dt, s.spot.z + input.vz * dt, s.model.radius, this.world.colliders);
       const distance = Math.hypot(next.x - this.center.x, next.z - this.center.z);
       if (distance <= ACTION_RULES.fieldRadius && this.world.heightAt(next.x, next.z) >= this.world.waterLevel - 0.2) { s.spot.x = next.x; s.spot.z = next.z; this.ground(s.spot); }
       {
         s.root.position.copy(s.spot);
-        if (dx || dz) s.root.rotation.y = Math.atan2(dx, dz);
+        s.moveSpeed = dt > 0 ? Math.hypot(s.spot.x-beforeX,s.spot.z-beforeZ)/dt : 0;
+        if (s.moveSpeed > .05) s.root.rotation.y = smoothFacing(s.root.rotation.y, Math.atan2(input.vx, input.vz), dt);
       }
     }
   }
@@ -185,10 +197,11 @@ export class BattleStage {
       s.root = new THREE.Group(); s.root.add(s.model.root); s.root.userData.species = species;
       s.root.rotation.y = s.yaw; this.root.add(s.root);
     }
-    const now=performance.now(),dx=position[0]-s.root!.position.x,dz=position[2]-s.root!.position.z;
+    const now=performance.now(),dx=position[0]-s.spot.x,dz=position[2]-s.spot.z;
     s.remoteSpeed=s.receivedAt ? Math.min(6,Math.hypot(dx,dz)/Math.max(.016,(now-s.receivedAt)/1000)) : 0; s.receivedAt=now;
-    if(s.remoteSpeed>.1)s.root!.rotation.y=Math.atan2(dx,dz);
-    s.root!.position.fromArray(position); s.spot.copy(s.root!.position); s.root!.visible = visible;
+    if(s.remoteSpeed>.1)s.remoteYaw=Math.atan2(dx,dz);
+    if(!s.remoteTarget)s.root!.position.fromArray(position);
+    s.remoteTarget=true; s.spot.fromArray(position); s.root!.visible = visible;
   }
 
   removeMirror(p: Pos): void { this.clearSlot(p); }
@@ -411,7 +424,15 @@ export class BattleStage {
       pr.dispose();
     }
     this.projectiles = this.projectiles.filter((x) => !x.done);
-    for (const s of this.slots.values()) if (s.model && !s.external) s.model.update(dt, this.actionMode && this.pilots.has(key(s.pos)) ? Math.hypot(this.pilots.get(key(s.pos))!.x, this.pilots.get(key(s.pos))!.z) * 4 : s.remoteSpeed ?? 0);
+    for (const s of this.slots.values()) {
+      if(s.remoteTarget && s.root) {
+        const before=s.root.position.clone();
+        s.root.position.lerp(s.spot,1-Math.exp(-18*dt));
+        s.moveSpeed=dt>0?before.distanceTo(s.root.position)/dt:0;
+        if(s.remoteYaw!==undefined)s.root.rotation.y=smoothFacing(s.root.rotation.y,s.remoteYaw,dt);
+      }
+      if (s.model && !s.external) s.model.update(dt, s.moveSpeed ?? s.remoteSpeed ?? 0);
+    }
     for (const m of this.dying.values()) m.update(dt, 0);
     this.particles.update(dt);
     const mat = this.ring.material as THREE.MeshBasicMaterial;
@@ -435,6 +456,7 @@ export class BattleStage {
     s.root = null;
     s.model = null;
     s.external = false;
+    s.remoteTarget=false; s.remoteYaw=undefined; s.receivedAt=undefined; s.moveSpeed=undefined;
   }
 
   private drop(root: THREE.Group, model: CreatureModel | null): void {
