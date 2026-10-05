@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import type { World } from '../world/types';
 
 const SIZE = 256;
@@ -27,15 +28,34 @@ export class Minimap {
         const x = -world.halfSize + (px + 0.5) * this.metresPerPx;
         const z = -world.halfSize + (py + 0.5) * this.metresPerPx;
         const c = world.groundColorAt(x, z);
-        const shade = 0.9 + Math.max(-0.15, Math.min(0.15, (world.heightAt(x + 2, z + 2) - world.heightAt(x, z)) * 0.08));
+        const h = world.heightAt(x,z);
+        const shade = 0.95 + Math.max(-0.18, Math.min(0.18, (world.heightAt(x + 2, z + 2) - h) * 0.09));
+        const water = h < world.waterLevel;
+        const grass = c.g > c.r * 1.12;
         const i = (py * res + px) * 4;
-        img.data[i] = Math.min(255, c.r * 255 * shade);
-        img.data[i + 1] = Math.min(255, c.g * 255 * shade);
-        img.data[i + 2] = Math.min(255, c.b * 255 * shade);
+        img.data[i] = Math.min(255, (water ? 51 : grass ? 72+c.r*125 : 155+c.r*70) * shade);
+        img.data[i + 1] = Math.min(255, (water ? 123 : grass ? 105+c.g*125 : 135+c.g*70) * shade);
+        img.data[i + 2] = Math.min(255, (water ? 162 : grass ? 55+c.b*100 : 89+c.b*70) * shade);
         img.data[i + 3] = 255;
       }
     }
     tctx.putImageData(img, 0, 0);
+    // Paint the actual tree locations and building footprints, not a fictional map backdrop.
+    const matrix = new THREE.Matrix4(), position = new THREE.Vector3(), rotation = new THREE.Quaternion(), scale = new THREE.Vector3();
+    world.root.traverse(object => {
+      if (!(object instanceof THREE.BatchedMesh) || object.name !== 'trees') return;
+      for (let i=0;i<object.instanceCount;i++) {
+        object.getMatrixAt(i,matrix); matrix.decompose(position,rotation,scale);
+        const x=(position.x+world.halfSize)/this.metresPerPx,z=(position.z+world.halfSize)/this.metresPerPx,r=Math.max(1.1,scale.x*2.2/this.metresPerPx);
+        tctx.fillStyle='#345d48bb';tctx.beginPath();tctx.ellipse(x+.6,z+.8,r,r*.8,0,0,Math.PI*2);tctx.fill();
+        tctx.fillStyle='#527f55';tctx.beginPath();tctx.ellipse(x,z,r*.85,r*.72,0,0,Math.PI*2);tctx.fill();
+        tctx.fillStyle='#88a96899';tctx.beginPath();tctx.arc(x-r*.25,z-r*.2,r*.4,0,Math.PI*2);tctx.fill();
+      }
+    });
+    for(const c of world.colliders) if(c.kind === 'box' && c.maxX-c.minX>3 && c.maxZ-c.minZ>3 && c.maxX-c.minX<60) {
+      const x=(c.minX+world.halfSize)/this.metresPerPx,z=(c.minZ+world.halfSize)/this.metresPerPx,w=(c.maxX-c.minX)/this.metresPerPx,h=(c.maxZ-c.minZ)/this.metresPerPx;
+      tctx.fillStyle='#987661';tctx.fillRect(x,z,w,h);tctx.strokeStyle='#efe1bf';tctx.lineWidth=.7;tctx.strokeRect(x,z,w,h);
+    }
   }
 
   /**

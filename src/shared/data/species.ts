@@ -1,3 +1,4 @@
+import { POKEMON_VISUALS } from '../pokemon-visuals';
 import type { LearnEntry, SpeciesData, StatTable } from '../battle/types';
 
 /** Shorthand for a learnset: [[level, move], ...]. */
@@ -173,6 +174,11 @@ const LIST: SpeciesData[] = [
     learnset: learn([1, 'tackle'], [1, 'growl'], [1, 'tail-whip'], [7, 'quick-attack'], [10, 'bite'], [14, 'rock-smash'], [18, 'headbutt'], [22, 'helping-hand'], [26, 'take-down'], [30, 'crunch'], [32, 'follow-me'], [36, 'brick-break'], [40, 'bulk-up'], [44, 'close-combat'], [50, 'double-edge']),
   },
 ];
+
+for (const s of LIST) {
+  const visual = POKEMON_VISUALS[s.id];
+  if (visual) { s.name = visual.name; s.description = `${visual.name} · National Pokédex #${visual.dex}.`; }
+}
 
 export const SPECIES: Record<string, SpeciesData> = Object.fromEntries(LIST.map((s) => [s.id, s]));
 export const SPECIES_IDS = LIST.map((s) => s.id);

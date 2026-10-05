@@ -65,6 +65,7 @@ export interface BattleSetup {
   seed: number;
   kind: 'wild' | 'trainer';
   sides: [SideSetup, SideSetup];
+  hitTest?: (from: Pos, target: Pos, move: MoveData) => boolean;
 }
 
 export interface BattleMon {
@@ -205,7 +206,7 @@ export class Battle {
   /** Moves creatures wanted to learn while already knowing four (uid -> moves). */
   readonly pendingMoves = new Map<string, string[]>();
 
-  constructor(setup: BattleSetup) {
+  constructor(private setup: BattleSetup) {
     this.kind = setup.kind;
     this.rng = new Rng(setup.seed);
     this.sides = setup.sides.map((s, side) => this.buildSide(s, side as SideId)) as [Side, Side];
@@ -260,6 +261,15 @@ export class Battle {
   // ------------------------------------------------------------------------------------------
   // Public queries
   // ------------------------------------------------------------------------------------------
+
+  /** Co-op invitation is accepted before the opening send-outs, never halfway through a turn. */
+  invitePartner(team: TeamSetup): boolean {
+    if (this.turn !== 0 || this.activePositions().length || this.sides[0].teams.length !== 1 || !team.creatures.some(c => c.hp > 0)) return false;
+    if (this.sides[0].teams[0].mons.some(m => team.creatures.some(c => c.uid === m.uid))) return false;
+    this.sides[0].teams.push({ setup: team, mons: team.creatures.map((c, i) => this.buildMon(c, team.owner, i)) });
+    this.sides[0].slots[1] = team.owner;
+    return true;
+  }
 
   /** The creature at a position, or null when the position is empty. */
   at(p: Pos): BattleMon | null {
@@ -841,7 +851,7 @@ export class Battle {
       return 0;
     }
 
-    if (!this.accuracyCheck(user, target, move)) {
+    if ((this.setup.hitTest && !this.setup.hitTest(pos, tPos, move)) || !this.accuracyCheck(user, target, move)) {
       this.emit({ t: 'miss', pos, target: tPos, text: `${target.name} avoided the attack!` });
       return 0;
     }

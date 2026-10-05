@@ -7,8 +7,10 @@ import { moveData } from '../../shared/data/moves';
 import { SPECIES, species, STARTERS } from '../../shared/data/species';
 import { BattleDirector, arenaSpots, type BattleOutcome, type BattleStart } from '../battle/director';
 import { classInfo } from '../../shared/classes';
-import { STARTING_BAG } from '../../shared/items';
-import type { PlayerProfile } from '../../shared/types';
+import { STARTING_BAG, ITEMS } from '../../shared/items';
+import type { BattleControl, BattleFrame } from '../../shared/battle/session';
+import { RemoteBattle } from '../battle/remote';
+import type { PlayerProfile, PlayerSnapshot } from '../../shared/types';
 import { NetClient, serverOverride, type NetEvents } from '../net/client';
 import { P2PClient } from '../net/p2p';
 import { Professor } from '../npc/professor';
@@ -77,10 +79,20 @@ export class Game {
   private followerOut = true;
   private wild: WildManager;
   private battle: ActiveBattle | null = null;
+  private remoteBattle: RemoteBattle | null = null;
+  private remoteBattleHost: string | null = null;
+  private partnerBattles = new Map<string, BattleFrame>();
+  private battleControl: BattleControl | undefined;
+  private remoteFrame: BattleFrame | undefined;
+  private destination: {x:number;z:number;label:string} | null = null;
+  private appliedBattleResults = new Set<string>();
+  private guestSaveSignature = '';
+  private guestProgression: BattleOutcome | null = null;
+
   /** A scripted scene (starter pick, rival challenge) is running: no free movement. */
   private scripted = false;
   private partnerFollowers = new Map<string, PartnerFollower>();
-  private net: { send(s: ReturnType<PlayerController['snapshot']>, nowMs: number): void };
+  private net: { send(s: PlayerSnapshot, nowMs: number): void };
   private partners = new Map<string, { remote: RemotePlayer; profile: PlayerProfile }>();
   private slot: 0 | 1 = 0;
   private flags: Set<string>;
@@ -143,14 +155,23 @@ export class Game {
         const p = [...this.partners.values()][0];
         return p ? { x: p.remote.root.position.x, z: p.remote.root.position.z, name: p.profile.name } : null;
       },
+      destination: () => this.destination,
+      setDestination: p => {this.destination = p;},
       quests: () => this.quests,
       bag: () => this.save.bag ?? {},
       party: () => this.party,
       portrait: (sp: string) => this.portraits.get(sp),
+      trainerPortrait: () => this.portraits.trainer(save.profile.appearance),
+      useItem: (id,uid) => {
+        const c = this.party.find(c => c.uid === uid); const item = ITEMS[id]; const bag = this.save.bag!;
+        if (!c || !item?.heal || c.hp <= 0 || c.hp >= maxHp(c) || !bag[id] || this.battle || this.remoteBattleHost) return false;
+        c.hp = Math.min(maxHp(c),c.hp+item.heal); bag[id]--; this.onPartyChanged(); this.hud.showToast(`${displayName(c)} recovered HP`); return true;
+      },
       onPartyChanged: () => this.onPartyChanged(),
       levelCap: () => this.levelCap,
       settings: this.settings,
       onSettings: (s) => this.applySettings(s),
+      onSave: () => writeSave(this.save),
       onResume: () => this.input.requestLock(),
       onQuitToTitle: () => {
         writeSave(this.save);
@@ -160,7 +181,7 @@ export class Game {
     this.hud.el.append(this.menu.el);
     // Esc while playing releases the mouse; treat that as "pause" and open the menu.
     document.addEventListener('pointerlockchange', () => {
-      if (!this.input.locked && !this.talking && !this.menu.isOpen && !this.suppressPause && !this.battle && !this.scripted) this.openMenu('settings');
+      if (!this.input.locked && !this.talking && !this.menu.isOpen && !this.suppressPause && !this.remoteBattleHost && !this.battle && !this.scripted) this.openMenu('settings');
       this.suppressPause = false;
     });
     this.applySettings(this.settings);
@@ -197,9 +218,22 @@ export class Game {
         this.partners.get(id)?.remote.push(s, performance.now());
         const pf = this.partnerFollowers.get(id);
         // Only species this build knows; anything else from the wire is ignored.
+        if (s.battleFrame) this.partnerBattles.set(id, s.battleFrame); else this.partnerBattles.delete(id);
+        const hosted = this.battle?.director;
+        if (s.battleControl && hosted) {
+          const c = s.battleControl;
+          if (c.id === hosted.id && c.join && hosted.lobby) {
+            const party = c.join.party.filter(m => SPECIES[m.species] && isUsable(m)).slice(0,6);
+            if (party.length && hosted.acceptPartner(id, {owner:'partner', name:this.partners.get(id)?.profile.name ?? 'Partner', creatures:structuredClone(c.join.party.filter(m => SPECIES[m.species]).slice(0,6)), levelCap:Math.min(100,Math.max(1,c.join.levelCap)), xpMult:1})) this.hud.showToast('Partner joined the battle');
+          }
+          hosted.partnerControl(id,c);
+        }
+        if (this.remoteBattleHost === id) this.receiveRemoteBattle(s.battleFrame);
         if (pf) pf.lead = s.lead && !s.battle && SPECIES[s.lead] ? s.lead : null;
       },
       onPeerLeft: (id) => {
+        this.partnerBattles.delete(id); this.battle?.director.partnerLeft(id);
+        if (this.remoteBattleHost === id) { this.finishRemoteBattle(); this.hud.showToast('Partner disconnected', 'The shared battle ended on this device.'); }
         const p = this.partners.get(id);
         if (!p) return;
         this.scene.remove(p.remote.root);
@@ -230,6 +264,8 @@ export class Game {
     addEventListener('resize', () => this.resize());
     this.resize();
   }
+
+  showAssetFallback(): void { this.hud.showToast('Some models could not load', 'Playing with the original models. Reload to retry.', 5); }
 
   /** Dev-only hooks for automated play-testing. */
   debugTeleport(x: number, z: number, yaw = 0): void {
@@ -280,7 +316,10 @@ export class Game {
   private onInstant(a: Action | 'pause'): void {
     if (!this.started) return;
     // Battles and scripted scenes own the keyboard.
-    if (this.battle && this.battle.closing === null) return;
+    if ((this.battle && this.battle.closing === null) || this.remoteBattleHost) {
+      if (a === 'pause') this.releaseMouse();
+      return;
+    }
     if (this.scripted) return;
     if (a === 'pause') {
       // The menu closes itself on Esc; while talking, Esc does nothing.
@@ -288,6 +327,47 @@ export class Game {
       return;
     }
     if (!this.talking) this.onAction(a);
+  }
+
+  private joinRemoteBattle(id: string, frame: BattleFrame): void {
+    this.remoteBattleHost = id; this.remoteFrame = frame;
+    this.battleControl = {id:frame.id, join:{party:structuredClone(this.party),levelCap:this.levelCap}};
+    this.releaseMouse(); this.hud.setBattleMode(true); this.refreshFollower();
+    this.hud.showToast('Joining your friend’s battle');
+  }
+
+  private receiveRemoteBattle(frame?: BattleFrame): void {
+    if (!frame || (this.remoteFrame && frame.id !== this.remoteFrame.id)) {this.finishRemoteBattle(); return;}
+    this.remoteFrame = frame;
+    if (!frame.lobby && !frame.guest) {this.finishRemoteBattle(); this.hud.showToast('The battle has already started', 'Join before your friend chooses a mode.'); return;}
+    if (frame.guest && !this.remoteBattle) {
+      this.remoteBattle = new RemoteBattle(frame,this.world,this.scene,this.hud.el,this.portraits,c => {this.battleControl = {...this.battleControl,...c,join:undefined};},v => this.project(v));
+    }
+    this.remoteBattle?.receive(frame);
+    if (frame.result) {
+      const signature=JSON.stringify(frame.result.party);
+      if(signature!==this.guestSaveSignature){
+        this.guestSaveSignature=signature;
+        for(const updated of frame.result.party){const c=this.party.find(c=>c.uid===updated.uid);if(c)Object.assign(c,updated);}
+        writeSave(this.save);
+      }
+    }
+    if (frame.ended && frame.result && !this.appliedBattleResults.has(frame.id)) {
+      this.appliedBattleResults.add(frame.id);
+      if(frame.winner === 0 && frame.progressionFlag) {this.setFlag(frame.progressionFlag);this.updateNpcState();}
+      for (const updated of frame.result.party) {const c = this.party.find(c => c.uid === updated.uid); if(c) Object.assign(c,updated);}
+      this.battleControl = {id:frame.id,ack:true}; this.onPartyChanged();
+      this.guestProgression = {winner:frame.winner,escaped:frame.escaped,fainted:new Set(),pendingMoves:new Map(frame.result.pendingMoves)};
+    }
+  }
+
+  private finishRemoteBattle(): void {
+    for (const updated of this.remoteFrame?.result?.party ?? []) {const c = this.party.find(c => c.uid === updated.uid); if(c) Object.assign(c,updated);}
+    this.onPartyChanged();
+    this.remoteBattle?.dispose(); this.remoteBattle = null; this.remoteBattleHost = null; this.remoteFrame = undefined;
+    this.battleControl = undefined; this.hud.setBattleMode(false); this.refreshFollower();
+    this.hud.showToast('Back to exploring');
+    if (this.guestProgression) {const outcome = this.guestProgression; this.guestProgression = null; void (async()=>{await this.afterBattle(outcome);if(!this.party.some(isUsable))await this.blackout();})();}
   }
 
   private onAction(a: Action): void {
@@ -409,7 +489,7 @@ export class Game {
   private refreshFollower(): void {
     const lead = this.party.find(isUsable);
     this.follower.setSpecies(lead ? lead.species : null);
-    this.follower.setVisible(this.followerOut && !this.battle);
+    this.follower.setVisible(this.followerOut && !this.battle && !this.remoteBattleHost);
   }
 
   private healParty(): void {
@@ -518,6 +598,7 @@ export class Game {
     this.talking = false;
     const outcome = await this.runBattle({
       kind: 'trainer',
+      progressionFlag:'beat-rival',
       foes: this.rival.team(this.save.starter ?? this.party[0].species, randomSeed()),
       foeName: this.rival.name,
       foeAi: 't1',
@@ -585,6 +666,8 @@ export class Game {
         camera: this.cam.camera,
         hudRoot: this.hud.el,
         portraits: this.portraits,
+        connected: this.partners.size > 0,
+        trainerPosition: () => this.controller.position,
         project: (v) => this.project(v),
         onThrow: (side) => (side === 0 ? this.avatar.gesture('throw') : start.kind === 'trainer' && this.rival.gesture('throw')),
       },
@@ -601,7 +684,7 @@ export class Game {
       director.stage.close();
       active.closing = 0.9;
       this.hud.setBattleMode(false);
-      this.cam.snapBehind(this.controller.position, start.facing);
+      this.cam.snapBehind(this.controller.position, this.controller.yaw);
     }
     this.onPartyChanged();
     await this.afterBattle(outcome);
@@ -689,18 +772,30 @@ export class Game {
     return { x: ((p.x + 1) / 2) * w, y: ((1 - p.y) / 2) * ht, visible: p.z > -1 && p.z < 1 && Math.abs(p.x) < 1.1 && Math.abs(p.y) < 1.1 };
   }
 
-  private frame(): void {
+  debugAdvance(ms: number): void { for (let t = 0; t < ms; t += 1000 / 60) this.frame(1 / 60); }
+
+  debugText(): string {
+    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null });
+  }
+
+  private frame(step?: number): void {
     this.timer.update();
-    const dt = Math.min(this.timer.getDelta(), 0.1) * this.debugTimeScale;
+    const dt = (step ?? Math.min(this.timer.getDelta(), 0.1)) * this.debugTimeScale;
     this.elapsed += dt;
     this.gameMinutes += dt; // one real second is one in-game minute
     const now = performance.now();
     const input = this.input;
 
     const battle = this.battle;
-    const inBattle = !!battle && battle.closing === null;
+    const inBattle = (!!battle && battle.closing === null) || !!this.remoteBattleHost;
     const busy = this.talking || this.menu.isOpen || inBattle || this.scripted;
-    if (input.locked && !this.menu.isOpen && !inBattle) {
+    const view = this.remoteFrame;
+    const actionMode = inBattle && !battle?.director.lobby && (battle?.director.mode === 'action' || view?.mode === 'action');
+    const battleUi = battle?.director.ui ?? this.remoteBattle?.ui;
+    if (inBattle && input.consume('Tab') && battleUi) {
+      if (battleUi.toggleControls()) this.releaseMouse(); else input.requestLock();
+    }
+    if (input.locked && !this.menu.isOpen) {
       this.cam.onMouseDelta(input.mouseDX, input.mouseDY * (this.settings.invertY ? -1 : 1));
       this.cam.onWheel(input.wheel);
     }
@@ -710,7 +805,14 @@ export class Game {
     if (this.talking) {
       if (input.consumeAction('interact') || input.consume('Space') || input.consume('Enter')) this.hud.dialogue.next();
     }
-    if (busy) {
+    if (actionMode) {
+      const x = Math.sin(this.cam.yaw) * move.forward - Math.cos(this.cam.yaw) * move.right;
+      const z = Math.cos(this.cam.yaw) * move.forward + Math.sin(this.cam.yaw) * move.right;
+      const movement = {x,z,sprint:move.sprint,dodge:move.jump};
+      if (battle) battle.director.stage.pilot({side:0,slot:0},movement);
+      else if (view) this.battleControl = {...this.battleControl, id:view.id, movement:{...movement,dodgeToken:(this.battleControl?.movement?.dodgeToken ?? 0)+(move.jump ? 1 : 0)}};
+    }
+    if (this.talking || this.menu.isOpen || (this.scripted && !inBattle) || actionMode) {
       move.forward = move.right = 0;
       move.jump = move.sprint = false;
     }
@@ -732,7 +834,9 @@ export class Game {
         }
       }
     }
-    if (!inBattle) this.cam.update(dt, this.controller.position, this.world, move.sprint && snap.speed > 5);
+    this.remoteBattle?.update(dt);
+    const focus = actionMode ? battle?.director.stage.spot({side:0,slot:0}) ?? this.remoteBattle?.focus ?? this.controller.position : this.controller.position;
+    this.cam.update(dt, focus, this.world, move.sprint && snap.speed > 5);
 
     // Interaction
     if (!busy) {
@@ -741,12 +845,15 @@ export class Game {
       const nearRival = this.rival.visible && pos.distanceTo(this.rival.position) < TALK_RADIUS;
       const wildMon = !nearProf && !nearRival ? this.wild.nearestEngageable(pos) : null;
       const canFight = this.party.some(isUsable);
-      if (nearProf) this.hud.setPrompt(`Talk to ${this.professor.name}`);
+      const invite = [...this.partnerBattles].find(([,f]) => f.joinable && Math.hypot(pos.x-f.center[0],pos.z-f.center[2]) < 14);
+      if (invite && canFight) this.hud.setPrompt('Join your friend’s battle');
+      else if (nearProf) this.hud.setPrompt(`Talk to ${this.professor.name}`);
       else if (nearRival) this.hud.setPrompt(`Talk to ${this.rival.name}`);
       else if (wildMon) this.hud.setPrompt(canFight ? `Battle the wild ${displayName(wildMon.creature)} · Lv. ${wildMon.creature.level}` : `Wild ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
       else this.hud.setPrompt(null);
       if (input.consumeAction('interact')) {
-        if (nearProf) void this.talkToProfessor();
+        if (invite && canFight) this.joinRemoteBattle(invite[0],invite[1]);
+        else if (nearProf) void this.talkToProfessor();
         else if (nearRival) void this.talkToRival();
         else if (wildMon && canFight) void this.startWildBattle(wildMon, false);
       }
@@ -790,7 +897,7 @@ export class Game {
       pf.follower.update(dt, rp, p.remote.avatar.root.rotation.y, pf.speed, this.world);
     }
     const lead = this.follower.active ? this.follower.species ?? undefined : undefined;
-    this.net.send({ ...snap, lead, battle: inBattle || undefined }, now);
+    this.net.send({ ...snap, lead, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl }, now);
 
     // Also keeps the sun's shadow camera centred on the player.
     this.world.update(dt, this.elapsed, this.controller.position);
@@ -802,7 +909,7 @@ export class Game {
       this.cam.yaw,
       this.controller.stamina,
       this.controller.exhausted ?? false,
-      this.world.anchors.landmarks.map((l) => ({ x: l.position.x, z: l.position.z, label: l.label })),
+      this.world.anchors.landmarks.map((l) => ({ x: l.position.x, z: l.position.z, label: l.label })).concat(this.destination ? [this.destination] : []),
       partner ? { x: partner.x, z: partner.z } : undefined,
       this.gameMinutes,
     );

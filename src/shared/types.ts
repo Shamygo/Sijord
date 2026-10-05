@@ -1,8 +1,11 @@
+import type { BattleFrame, BattleControl } from './battle/session';
 /** Data shared by the browser client and the co-op server. */
 
 export type PlayerClassId = 'ranger' | 'tamer' | 'artisan' | 'scholar' | 'medic';
 
 export interface Appearance {
+  /** Omitted in old saves: defaults to Red. */
+  trainerModel?: 'red' | 'custom';
   /** CSS hex colours, e.g. "#f1c27d". */
   skinTone: string;
   hairColor: string;
@@ -36,6 +39,8 @@ export interface PlayerSnapshot {
   lead?: string;
   /** True while the player is in a battle. */
   battle?: boolean;
+  battleFrame?: BattleFrame;
+  battleControl?: BattleControl;
 }
 
 export const DEFAULT_APPEARANCE: Appearance = {

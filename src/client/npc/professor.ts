@@ -18,6 +18,7 @@ export class Professor {
 
   constructor(position: THREE.Vector3, yaw: number) {
     this.avatar = createAvatar({
+      trainerModel: 'custom',
       skinTone: '#c68642',
       hairColor: '#e8e2d0',
       hairStyle: 3,
@@ -87,8 +88,8 @@ export class Professor {
   starterLines(): DialogueLine[] {
     return [
       { speaker: NAME, text: "My assistants have this year's partners settled at last. Three of them, and every one is waiting for a trainer." },
-      { speaker: NAME, text: 'Fernfawn, the Grass type: steady and patient, and tougher than it looks. Cindlet, the Fire type: quick and fierce, but fragile. Splashpup, the Water type: bouncy, sturdy and hard to knock down.' },
-      { speaker: NAME, text: 'Which one will walk with you?', choices: ['Fernfawn (Grass)', 'Cindlet (Fire)', 'Splashpup (Water)'] },
+      { speaker: NAME, text: 'Bulbasaur, the Grass type: steady and patient, and tougher than it looks. Charmander, the Fire type: quick and fierce, but fragile. Squirtle, the Water type: bouncy, sturdy and hard to knock down.' },
+      { speaker: NAME, text: 'Which one will walk with you?', choices: ['Bulbasaur (Grass)', 'Charmander (Fire)', 'Squirtle (Water)'] },
     ];
   }
 
@@ -96,8 +97,8 @@ export class Professor {
     return [
       { speaker: NAME, text: `${starterName}! I thought so. It hasn't taken its eyes off you since you walked up.` },
       { speaker: NAME, text: 'One more thing. Every battle in Sijord is a double battle: two Pokemon a side, all at once. One partner is not enough.' },
-      { speaker: NAME, text: "My Hjordpup had a litter this spring, and this pup keeps herding everyone towards you. Take her along. She'll fight beside your new partner." },
-      { speaker: '', text: `You received ${starterName} and Hjordpup!` },
+      { speaker: NAME, text: "My Growlithe had a litter this spring, and this pup keeps herding everyone towards you. Take her along. She'll fight beside your new partner." },
+      { speaker: '', text: `You received ${starterName} and Growlithe!` },
       { speaker: NAME, text: 'Bring them back to me whenever they get hurt, and I will patch them up. Wild Pokemon out on the meadow do not go easy on beginners.' },
     ];
   }

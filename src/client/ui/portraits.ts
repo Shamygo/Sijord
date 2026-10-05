@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import type { Appearance } from '../../shared/types';
+import { createAvatar } from '../player/avatar';
 import { createCreatureModel } from '../creatures';
 
 /**
@@ -35,6 +37,20 @@ export class Portraits {
       this.failed = true;
     }
     return this.renderer;
+  }
+
+  async trainer(appearance: Appearance): Promise<string> {
+    const r = this.ensure(); if (!r) return '';
+    const avatar = createAvatar(appearance);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    avatar.animate(0.016,{speed:0,anim:'idle'});
+    this.scene.add(avatar.root); avatar.root.rotation.y = -0.2;
+    r.setSize(320,440); this.camera.aspect = 320/440; this.camera.updateProjectionMatrix();
+    this.camera.position.set(0,1.2,3.5); this.camera.lookAt(0,0.95,0);
+    r.render(this.scene,this.camera); const url = r.domElement.toDataURL('image/png');
+    this.scene.remove(avatar.root); avatar.dispose();
+    r.setSize(this.size,this.size); this.camera.aspect = 1; this.camera.updateProjectionMatrix();
+    return url;
   }
 
   /** Image URL of a species' portrait ('' if WebGL is unavailable). */

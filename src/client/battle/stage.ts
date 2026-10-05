@@ -3,6 +3,8 @@ import type { Pos } from '../../shared/battle/engine';
 import type { MajorStatus, TypeName } from '../../shared/battle/types';
 import { createCreatureModel, type CreatureModel } from '../creatures';
 import type { World } from '../world/types';
+import { resolveCircle } from '../core/collision';
+import { ACTION_RULES } from '../../shared/battle/action';
 import { makeArenaRing, makeArenaWall, makeBall, Particles, Projectile, TYPE_COLORS } from './fx';
 
 export function key(p: Pos): string {
@@ -17,6 +19,8 @@ interface Slot {
   root: THREE.Group | null;
   /** Owned by the wild manager: never disposed here. */
   external: boolean;
+  remoteSpeed?: number;
+  receivedAt?: number;
 }
 
 interface Tween {
@@ -68,6 +72,8 @@ export class BattleStage {
   private dying = new Map<THREE.Group, CreatureModel>();
   private ringFade = 0;
   private closing = false;
+  private pilots = new Map<string, {x: number; z: number; sprint: boolean; dodge: boolean; cooldown: number; dash: number; dx: number; dz: number}>();
+  private actionMode = false;
 
   constructor(private world: World, center: THREE.Vector3, axisYaw: number) {
     this.root.name = 'battle';
@@ -80,6 +86,7 @@ export class BattleStage {
     this.foeTrainerSpot = this.ground(this.center.clone().addScaledVector(this.axis, ARENA.trainer + 0.2).addScaledVector(this.right, -0.6));
     this.ring = makeArenaRing(this.center, this.radius, (x, z) => world.heightAt(x, z));
     this.wall = makeArenaWall(this.center, this.radius, (x, z) => world.heightAt(x, z));
+    this.wall.visible = false; // A field marker, not a movement barrier.
     this.root.add(this.ring, this.wall, this.particles.points);
     for (const side of [0, 1] as const) {
       for (const slot of [0, 1] as const) {
@@ -125,6 +132,66 @@ export class BattleStage {
   occupied(p: Pos): boolean {
     return !!this.slots.get(key(p))?.root;
   }
+
+  telegraph(p: Pos, seconds: number): void {
+    const marker = new THREE.Mesh(new THREE.RingGeometry(ACTION_RULES.hitRadius - 0.1,ACTION_RULES.hitRadius,40),new THREE.MeshBasicMaterial({color:p.side === 0 ? '#ff6b61' : '#ffe277',transparent:true,opacity:0.85,side:THREE.DoubleSide,depthWrite:false}));
+    marker.rotation.x = -Math.PI/2; marker.position.copy(this.spot(p)); marker.position.y += 0.08; this.root.add(marker);
+    this.tween(seconds, k => {marker.material.opacity = .5 + Math.sin(k*20)*.3;}, () => {this.root.remove(marker);marker.geometry.dispose();marker.material.dispose();});
+  }
+
+  setActionMode(): void { this.actionMode = true; }
+  pilot(p: Pos, input: {x: number; z: number; sprint: boolean; dodge: boolean}): void {
+    const old = this.pilots.get(key(p)) ?? {cooldown: 0, dash: 0, dx: 0, dz: 1};
+    this.pilots.set(key(p), {...old, ...input, x: Number.isFinite(input.x) ? Math.max(-1, Math.min(1, input.x)) : 0, z: Number.isFinite(input.z) ? Math.max(-1, Math.min(1, input.z)) : 0});
+  }
+  dodging(p: Pos): boolean { return (this.pilots.get(key(p))?.dash ?? 0) > 0; }
+  private updatePilots(dt: number): void {
+    if (!this.actionMode) return;
+    for (const [k, input] of this.pilots) {
+      const s = this.slots.get(k); if (!s?.root || !s.model) continue;
+      input.cooldown = Math.max(0, input.cooldown - dt);
+      if (input.dodge && input.cooldown === 0) {
+        input.dash = ACTION_RULES.dodgeSeconds; input.cooldown = ACTION_RULES.dodgeCooldown;
+        const length = Math.hypot(input.x, input.z);
+        input.dx = length > 0 ? input.x / length : Math.sin(s.root.rotation.y);
+        input.dz = length > 0 ? input.z / length : Math.cos(s.root.rotation.y);
+      }
+      input.dodge = false;
+      const dash = input.dash > 0; input.dash = Math.max(0, input.dash - dt);
+      const length = Math.hypot(input.x, input.z);
+      const speed = dash ? ACTION_RULES.dodgeSpeed : input.sprint ? ACTION_RULES.sprintSpeed : ACTION_RULES.walkSpeed;
+      const dx = dash ? input.dx : length ? input.x / Math.max(1, length) : 0;
+      const dz = dash ? input.dz : length ? input.z / Math.max(1, length) : 0;
+      const next = resolveCircle(s.spot.x + dx * speed * dt, s.spot.z + dz * speed * dt, s.model.radius, this.world.colliders);
+      const distance = Math.hypot(next.x - this.center.x, next.z - this.center.z);
+      if (distance <= ACTION_RULES.fieldRadius && this.world.heightAt(next.x, next.z) >= this.world.waterLevel - 0.2) { s.spot.x = next.x; s.spot.z = next.z; this.ground(s.spot); }
+      {
+        s.root.position.copy(s.spot);
+        if (dx || dz) s.root.rotation.y = Math.atan2(dx, dz);
+      }
+    }
+  }
+
+  snapshotPosition(p: Pos): [number, number, number] {
+    return (this.slots.get(key(p))?.root?.position ?? this.spot(p)).toArray() as [number, number, number];
+  }
+
+  /** Remote players see the host's actual positions without owning its combat simulation. */
+  mirror(p: Pos, species: string, position: [number, number, number], visible: boolean): void {
+    const s = this.slots.get(key(p))!;
+    if (s.root?.userData.species !== species) {
+      this.clearSlot(p);
+      s.model = createCreatureModel(species);
+      s.root = new THREE.Group(); s.root.add(s.model.root); s.root.userData.species = species;
+      s.root.rotation.y = s.yaw; this.root.add(s.root);
+    }
+    const now=performance.now(),dx=position[0]-s.root!.position.x,dz=position[2]-s.root!.position.z;
+    s.remoteSpeed=s.receivedAt ? Math.min(6,Math.hypot(dx,dz)/Math.max(.016,(now-s.receivedAt)/1000)) : 0; s.receivedAt=now;
+    if(s.remoteSpeed>.1)s.root!.rotation.y=Math.atan2(dx,dz);
+    s.root!.position.fromArray(position); s.spot.copy(s.root!.position); s.root!.visible = visible;
+  }
+
+  removeMirror(p: Pos): void { this.clearSlot(p); }
 
   /** A wild creature already standing in the world steps into its place in the ring. */
   adopt(p: Pos, root: THREE.Group, model: CreatureModel): number {
@@ -207,7 +274,7 @@ export class BattleStage {
     const root = s.root;
     const model = s.model;
     const self = targets.length === 1 && targets[0].side === p.side && targets[0].slot === p.slot;
-    if (category === 'physical' && targets.length && !self) {
+    if (category === 'physical' && targets.length && !self && !this.actionMode) {
       // Lunge at the (first) target and spring back.
       model.play('attack');
       const home = s.spot.clone();
@@ -327,6 +394,7 @@ export class BattleStage {
 
   /** Brief per-frame motion: tweens, projectiles, particles, creature animation. */
   update(dt: number): void {
+    this.updatePilots(dt);
     // Run tweens; tweens can schedule more tweens.
     const list = this.tweens;
     this.tweens = [];
@@ -343,7 +411,7 @@ export class BattleStage {
       pr.dispose();
     }
     this.projectiles = this.projectiles.filter((x) => !x.done);
-    for (const s of this.slots.values()) if (s.model && !s.external) s.model.update(dt, 0);
+    for (const s of this.slots.values()) if (s.model && !s.external) s.model.update(dt, this.actionMode && this.pilots.has(key(s.pos)) ? Math.hypot(this.pilots.get(key(s.pos))!.x, this.pilots.get(key(s.pos))!.z) * 4 : s.remoteSpeed ?? 0);
     for (const m of this.dying.values()) m.update(dt, 0);
     this.particles.update(dt);
     const mat = this.ring.material as THREE.MeshBasicMaterial;

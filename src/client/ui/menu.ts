@@ -1,3 +1,5 @@
+import catalogue from '../assets/pokemon-catalogue.json';
+import { assetUrl } from '../assets/loader';
 import { creatureStats, displayName, isUsable, maxHp } from '../../shared/battle/creature';
 import { NATURES } from '../../shared/battle/natures';
 import { xpForLevel } from '../../shared/battle/stats';
@@ -14,22 +16,27 @@ import { h } from './dom';
 import type { Quest } from './hud';
 import type { Minimap } from './minimap';
 
-export type MenuTab = 'map' | 'bag' | 'party' | 'quests' | 'settings';
+export type MenuTab = 'map' | 'bag' | 'party' | 'quests' | 'settings' | 'pokedex';
 
 export interface MenuDeps {
   world: World;
   minimap: Minimap;
   player(): { x: number; z: number; yaw: number };
   partner(): { x: number; z: number; name: string } | null;
+  destination(): {x:number;z:number;label:string} | null;
+  setDestination(p: {x:number;z:number;label:string} | null): void;
   quests(): Quest[];
   bag(): Record<string, number>;
   party(): Creature[];
   portrait(species: string): string;
+  trainerPortrait(): Promise<string>;
+  useItem(id: string, uid: string): boolean;
   /** The party order changed in the menu. */
   onPartyChanged(): void;
   levelCap(): number;
   settings: Settings;
   onSettings(s: Settings): void;
+  onSave(): void;
   onResume(): void;
   onQuitToTitle(): void;
 }
@@ -39,6 +46,7 @@ const TABS: { id: MenuTab; label: string; action?: Action }[] = [
   { id: 'bag', label: 'Bag', action: 'bag' },
   { id: 'party', label: 'Party', action: 'party' },
   { id: 'quests', label: 'Quests', action: 'quests' },
+  { id: 'pokedex', label: 'Pokédex' },
   { id: 'settings', label: 'Settings' },
 ];
 
@@ -54,10 +62,13 @@ export class GameMenu {
   private selectedMon = 0;
   private listening: Action | null = null;
   private map: MapView | null = null;
+  private trainerImage = '';
+  private itemTarget = false;
 
   constructor(private deps: MenuDeps) {
+    void deps.trainerPortrait().then(src => {this.trainerImage = src; if (this.open_ && this.tab === 'party') this.render();});
     this.el.append(
-      h('div.menu-panel', {}, h('div.menu-head', {}, this.tabBar, h('button.menu-close', { onclick: () => this.close(), title: 'Close (Esc)' }, '✕')), this.body),
+      h('div.menu-panel', {}, h('div.menu-head', {}, this.tabBar, h('button.act', {onclick: (e: Event)=>{this.deps.onSave();const button=e.currentTarget as HTMLButtonElement;button.textContent='Saved';setTimeout(()=>{button.textContent='Save progress';},1500);}}, 'Save progress'), h('button.menu-close', { onclick: () => this.close(), title: 'Close (Esc)' }, '✕')), this.body, h('div.menu-footer', {}, 'Esc · Back to exploring')),
     );
     this.el.addEventListener('mousedown', (e) => {
       if (e.target === this.el) this.close();
@@ -135,7 +146,7 @@ export class GameMenu {
           'button.menu-tab' + (t.id === this.tab ? '.on' : ''),
           { onclick: () => this.open(t.id) },
           t.label,
-          t.action ? h('span.key', {}, keyLabel(this.deps.settings.keys[t.action])) : h('span.key', {}, 'Esc'),
+          t.action ? h('span.key', {}, keyLabel(this.deps.settings.keys[t.action])) : null,
         ),
       ),
     );
@@ -155,6 +166,9 @@ export class GameMenu {
         break;
       case 'quests':
         this.body.replaceChildren(this.renderQuests());
+        break;
+      case 'pokedex':
+        this.body.replaceChildren(this.renderPokedex());
         break;
       case 'settings':
         this.body.replaceChildren(this.renderSettings());
@@ -196,18 +210,38 @@ export class GameMenu {
                     this.selectedItem = id;
                     this.render();
                   },
-                }, h('span.bag-icon', {}, ITEMS[id].icon), h('span.bag-count', {}, `×${n}`)),
+                }, this.itemArt(id), h('span.bag-count', {}, `×${n}`)),
               )
             : [h('p.empty', {}, 'Nothing here yet.')]),
         ),
         h(
           'div.bag-detail',
           {},
-          info ? h('h3', {}, info.name) : h('h3', {}, 'Bag'),
+          info ? h('h3', {}, this.itemArt(selected!), info.name) : h('h3', {}, 'Bag'),
           h('p', {}, info ? info.description : 'Gather materials out in the wild, and buy supplies in towns. Prices in Sijord are steep.'),
+          info?.heal && selected ? h('button.btn', {onclick: () => {this.itemTarget = !this.itemTarget; this.render();}}, 'Use on Pokémon') : null,
+          this.itemTarget && info?.heal && selected ? h('div.item-targets', {}, ...this.deps.party().map(c => h('button.act', {disabled:c.hp <= 0 || c.hp >= maxHp(c), onclick: () => {this.deps.useItem(selected,c.uid); this.itemTarget = false; this.render();}}, h('img', {src:this.deps.portrait(c.species),alt:''}), `${displayName(c)} · ${c.hp}/${maxHp(c)}`))) : null,
         ),
       ),
     );
+  }
+
+  private itemArt(id: string): HTMLElement {
+    const item = ITEMS[id];
+    return item.sprite ? h('img.bag-icon', {src:assetUrl(`items/${item.sprite}.png`),alt:item.name}) : h('span.bag-icon', {}, item.icon);
+  }
+
+  private renderPokedex(): HTMLElement {
+    const search = h('input.dex-search', {placeholder:'Search Pokémon, number or form', 'aria-label':'Search Pokédex'});
+    const list = h('div.dex-list');
+    const draw = () => {
+      const term = search.value.toLowerCase();
+      const entries = catalogue.models.filter(m => `${m.name} ${m.dex} ${m.form}`.toLowerCase().includes(term));
+      list.replaceChildren(...entries.slice(0,150).map(m => h('a.dex-entry', {href:assetUrl(`pokemon.html?model=${encodeURIComponent(m.id)}`),target:'_blank',rel:'noopener'}, h('span', {}, String(m.dex ?? '—').padStart(3,'0')), h('b', {},m.name), h('small', {},m.form === 'regular' ? 'Regular' : m.form), h('span', {},m.animations.length ? 'Animated ↗' : 'View model ↗'))));
+      if (!entries.length) list.append(h('p.empty', {}, 'No matching Pokémon.'));
+    };
+    search.addEventListener('input',draw);draw();
+    return h('div.dex-screen', {}, h('h2', {},'Pokédex · model collection'), h('p.hint-dark', {},`${catalogue.models.length.toLocaleString()} models and forms. Search to narrow the list; the first 150 matches are shown. World encounters currently use 21 species.`), search,list);
   }
 
   private renderParty(): HTMLElement {
@@ -242,7 +276,8 @@ export class GameMenu {
     return h(
       'div.party-screen',
       {},
-      h('div.mon-list', {}, ...cards, h('p.hint-dark', {}, 'The first two healthy Pokemon in your party lead every battle. Reorder to pick your leads.')),
+      h('div.trainer-preview', {}, this.trainerImage ? h('img', {src:this.trainerImage,alt:'Your trainer'}) : null, h('span', {}, 'Your team')),
+      h('div.mon-list', {}, ...cards, h('p.hint-dark', {}, 'Solo: the first two healthy Pokémon lead. Co-op: each trainer commands one. Reorder to choose your lead.')),
       this.renderMon(party, this.selectedMon),
     );
   }
@@ -404,17 +439,22 @@ class MapView {
   /** Screen pixels per metre. */
   private scale = 1;
   private dragging = false;
+  private dragged = false;
+  private info = h('div.map-info');
   private onUp = () => (this.dragging = false);
 
   constructor(private deps: MenuDeps) {
     const p = deps.player();
     this.viewX = p.x;
     this.viewZ = p.z;
-    this.el.append(this.canvas, h('div.map-legend', {}, h('span', {}, '▲ You'), h('span.legend-partner', {}, '● Partner'), h('span.legend-quest', {}, '◆ Quest'), h('span', {}, 'Drag to pan · scroll to zoom')));
-    this.canvas.addEventListener('mousedown', () => (this.dragging = true));
+    this.el.append(this.canvas, this.info, h('div.map-controls', {}, h('button.act', {onclick:()=>{const p=this.deps.player();this.viewX=p.x;this.viewZ=p.z;}}, 'Recenter'), h('button.act', {onclick:()=>{this.scale=Math.min(6,this.scale*1.3);}}, '+'), h('button.act', {onclick:()=>{this.scale=Math.max(.35,this.scale/1.3);}}, '−')), h('div.map-legend', {}, h('span', {}, '▲ You'), h('span.legend-partner', {}, '● Partner'), h('span.legend-quest', {}, '◆ Quest'), h('span', {}, 'Drag to pan · scroll to zoom')));
+    this.canvas.addEventListener('mousedown', () => {this.dragging = true;this.dragged = false;});
+    this.canvas.addEventListener('click', e => {if(this.dragged)return;const rect=this.canvas.getBoundingClientRect();const x=this.viewX-(e.clientX-rect.left-rect.width/2)/this.scale,z=this.viewZ-(e.clientY-rect.top-rect.height/2)/this.scale;this.deps.setDestination({x,z,label:'Destination'});this.drawInfo();});
+    this.drawInfo();
     addEventListener('mouseup', this.onUp);
     this.canvas.addEventListener('mousemove', (e) => {
       if (!this.dragging) return;
+      this.dragged = true;
       // Screen right is world -X (east), screen down is world -Z (south).
       this.viewX += e.movementX / this.scale;
       this.viewZ += e.movementY / this.scale;
@@ -423,6 +463,17 @@ class MapView {
       e.preventDefault();
       this.scale = Math.max(0.35, Math.min(6, this.scale * Math.exp(-e.deltaY * 0.0015)));
     });
+  }
+
+  private drawInfo(): void {
+    const landmarks = this.deps.world.anchors.landmarks;
+    const selected = h('select.map-place', {'aria-label':'Landmark'},...landmarks.map((l,i)=>h('option',{value:String(i)},l.label)));
+    const detail = h('p');
+    const update = () => {const l=landmarks[Number(selected.value)],p=this.deps.player();if(l)detail.textContent=`${Math.round(Math.hypot(p.x-l.position.x,p.z-l.position.z))} m from you`;};
+    selected.addEventListener('change',update);update();
+    this.info.replaceChildren(h('h3', {},'Sijord region'), selected,detail,
+      h('button.act',{onclick:()=>{const l=landmarks[Number(selected.value)];if(l){this.deps.setDestination({x:l.position.x,z:l.position.z,label:l.label});this.viewX=l.position.x;this.viewZ=l.position.z;}}},'Set destination'),
+      h('button.act',{onclick:()=>this.deps.setDestination(null)},'Clear marker'),h('small',{},'Click the map to place a marker.'));
   }
 
   dispose(): void {
@@ -455,6 +506,8 @@ class MapView {
     ctx.drawImage(minimap.terrain, 0, 0);
     ctx.restore();
 
+    const destination = this.deps.destination();
+    if(destination){const [x,y]=toScreen(destination.x,destination.z);dot(ctx,x,y,9,'#62ddff');label(ctx,destination.label,x,y-18,13,'#dcf8ff');}
     // Settlement boundaries (no building inside these).
     for (const r of world.regions) {
       const [sx, sy] = toScreen(r.centerX, r.centerZ);
@@ -470,7 +523,7 @@ class MapView {
     for (const l of world.anchors.landmarks) {
       const [sx, sy] = toScreen(l.position.x, l.position.z);
       dot(ctx, sx, sy, 5, '#ffffff');
-      if (s > 1.2) label(ctx, l.label, sx, sy - 12, 12, '#ffffff');
+      if (s > 3.5) label(ctx, l.label, sx, sy - 12, 12, '#ffffff');
     }
     const q = this.deps.quests().find((x) => !x.done && x.target);
     if (q?.target) {

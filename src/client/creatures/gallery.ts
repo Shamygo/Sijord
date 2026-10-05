@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { preloadGameplayAssets } from '../assets/loader';
+import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
+await preloadGameplayAssets();
 import { RenderPipeline, type GraphicsQuality } from '../core/render';
 import { createAvatar, type Avatar } from '../player';
 import { DEFAULT_APPEARANCE } from '../../shared/types';
@@ -226,7 +229,7 @@ function makeActor(id: string, model: CreatureModel, slot: THREE.Vector2, yaw: n
   if (view.labels && view.cam === 'row') {
     tag = document.createElement('div');
     tag.className = 'tag';
-    tag.textContent = id;
+    tag.textContent = POKEMON_VISUALS[id]?.name ?? id;
     document.body.append(tag);
   }
   return { id, model, slot: slot.clone(), yaw, tag, clock: 0, stage: 0, stageT: 0, ang: 0, speedNow: 0 };

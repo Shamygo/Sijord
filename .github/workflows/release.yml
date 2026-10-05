@@ -1,7 +1,7 @@
 name: Publish playable build
 
 # Builds the one-file game and attaches it to the "latest" release.
-# An offline copy of the game alongside the GitHub Pages site.
+# Downloadable code; imported models load from the public site, with offline procedural fallbacks.
 on:
   push:
     branches: [main]

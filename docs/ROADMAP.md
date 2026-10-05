@@ -219,3 +219,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 **Scope:** a balance pass (caps, prices, AI, catch rates), an art pass to the target painterly look, audio and music, the accessibility pass, a performance pass, onboarding and tutorials, and a bug bash.
 
 **Exit criterion:** an external playtest group of 10 pairs completes the game with no blocking bugs, and the median "difficulty felt fair" rating is 4/5 or higher.
+
+### Character assets (2026-10-05)
+
+The existing 21 gameplay slots now use animated imported Pokémon models, with Red as an available/default trainer. A library contains 1,322 available models/forms. This completes the asset-import layer; it does not mark unimplemented encounters, canonical stats or later milestones complete. See MODEL_ASSETS.md.
