@@ -51,7 +51,7 @@ The later request for multiplayer free-roam battles expands the original vision'
 
 ## Validation performed
 
-- All **154 tests** pass; typecheck plus regular and downloadable builds pass. Regression tests cover delayed and in-flight pointer races, visual-save migration, ladder ascent/pause/descent/letting go/stamina exhaustion/landing/walking off, steep slopes and wall collision.
+- All **155 tests** pass; typecheck plus regular and downloadable builds pass. Regression tests cover delayed and in-flight pointer races, visual-save migration, ladder ascent/pause/descent/letting go/stamina exhaustion/landing/walking off, steep slopes and wall collision.
 - Every published Pokémon/item/portrait/trainer hash and trainer/creature clip list checked by the asset verifier.
 - Real browser pointer acquisition, release on menu opening, repeated Bag/Party/Save interactions, queued retry cancellation, scripted-battle Tab capture/release with commands guarded, and Hazel guide checked without browser errors.
 - Fresh creator exercised Rei/Red/custom selections, then began a new save and inspected the actual empty-party menu. Bulbasaur face framing corrected after screenshot review.

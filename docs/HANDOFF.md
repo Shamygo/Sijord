@@ -68,7 +68,7 @@ In dev builds the running game is exposed as `window.sijord` for debugging, with
 npm install
 npm run dev            # http://localhost:5173
 npm run typecheck
-npm test               # 154 tests in the current polish build
+npm test               # 155 tests in the current polish build
 npm run build          # dist/ (what GitHub Pages serves)
 npm run build:single   # dist-single/sijord.html, game code in a double-clickable file; imported art still needs internet
 ```
@@ -165,4 +165,4 @@ Validation: 140 unit tests, typecheck, regular and single-file builds; all publi
 
 Pointer retries are cancelled on overlay opening and checked against live menu/dialogue/battle-command state. Closing menus keeps the cursor available until an explicit gameplay click. Panels/tabs/buttons animate and respect reduced motion. Empty parties now show a trainer, compact slots and a functional Hazel destination guide. The explorer has paged portrait cards, search/form/animation filtering, pause/reset and responsive layout; 971 pinned local portraits are verified in CI. Rei has source-model provenance and eight retargeted CC0 clips (idle/walk/run/jump/fall/land/climb/throw), with matte lit materials shared by Pokémon. Old default-Red saves migrate visuals only; custom appearances and subsequent explicit Red choices persist. Climb snapshots propagate through co-op. Two raised timber lookouts support landing/walking/falling, and steep terrain supports held-key climbing with collision/water limits and stamina. Six substantial street buildings, porches, lattice windows, tile details, stalls and broad paths improve Bramblewick; storefronts remain decorative. See MODEL_ASSETS.md for exact source limitations.
 
-Validation: 154 tests pass, published model/item/portrait/trainer hashes and clip lists verified, desktop/mobile explorer filters and animation controls exercised, real pointer acquisition/release and delayed retry cancellation checked, and two-peer tests reran both battle modes with Rei, shared commands and guest action movement. Local peer tests do not establish cross-home NAT reachability.
+Validation: 155 tests pass, published model/item/portrait/trainer hashes and clip lists verified, desktop/mobile explorer filters and animation controls exercised, real pointer acquisition/release and delayed retry cancellation checked, and two-peer tests reran both battle modes with Rei, shared commands and guest action movement. Local peer tests do not establish cross-home NAT reachability.

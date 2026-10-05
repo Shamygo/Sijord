@@ -26,3 +26,5 @@ Original prompt: Download and add all available Pokémon 3D models and animation
 2026-10-05: User requested a durable Claude handoff explaining exactly what changed and why. Updated the existing top-level CLAUDE.md with a prominent latest-feedback entrypoint, added docs/POLISH_HANDOFF.md, preserved exact requests in VISION.md, corrected stale current-state/known-gap/roadmap descriptions, and stored the supplied UI/Arceus references plus actual before/after screenshots in the repo.
 
 2026-10-05: Final real-pointer battle check passed: scripted rival-style battles can still enter mouse look with Tab, and reopening commands releases/guards the cursor. This avoids an over-broad scripted-scene guard blocking camera control during battles.
+
+2026-10-05: Cursor capture generations also reject a cancelled in-flight request after its overlay has closed again. Added the late-grant regression; the current suite has 155 tests. Public polish work is tracked in PR #9; durable Claude notes and supplied references are included.

@@ -12,6 +12,7 @@ export class Input {
   /** When the pointer was last released; browsers refuse to re-lock for about a second after Esc. */
   private unlockedAt = 0;
   private lockRequest = 0;
+  private captureRequest = 0;
 
   /**
    * `onInstant` receives menu-type actions the moment the key goes down, rather than on the next
@@ -53,7 +54,7 @@ export class Input {
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.canvas;
       // A browser can grant an in-flight request after a menu has already opened.
-      if(this.locked && !this.canCapture()){this.lockRequest++;this.locked=false;document.exitPointerLock();}
+      if(this.locked && (this.captureRequest !== this.lockRequest || !this.canCapture())){this.lockRequest++;this.locked=false;document.exitPointerLock();}
       if (!this.locked) this.unlockedAt = performance.now();
     });
   }
@@ -63,6 +64,7 @@ export class Input {
     const request = ++this.lockRequest;
     const attempt = () => {
       if (request !== this.lockRequest || !this.canCapture()) return;
+      this.captureRequest=request;
       try {
         const r = this.canvas.requestPointerLock() as unknown;
         if (r instanceof Promise) r.catch(() => {});
