@@ -1,9 +1,9 @@
 import type * as THREE from 'three';
 
 /** Static obstacles on the ground plane. Players are resolved as circles against these. */
-export type Collider =
+export type Collider = (
   | { kind: 'circle'; x: number; z: number; r: number }
-  | { kind: 'box'; minX: number; maxX: number; minZ: number; maxZ: number };
+  | { kind: 'box'; minX: number; maxX: number; minZ: number; maxZ: number }) & {maxY?:number};
 
 export type SettlementTier = 'small' | 'medium' | 'large';
 
@@ -29,6 +29,10 @@ export interface WorldAnchors {
   landmarks: { id: string; label: string; position: THREE.Vector3 }[];
 }
 
+export interface ClimbPoint {
+  id:string; bottom:{x:number;y:number;z:number}; top:{x:number;y:number;z:number}; landing:{x:number;y:number;z:number}; yaw:number;
+}
+export interface Platform {minX:number;maxX:number;minZ:number;maxZ:number;y:number}
 export interface World {
   /** Everything the world adds to the scene lives under this node. */
   root: THREE.Object3D;
@@ -36,6 +40,8 @@ export interface World {
   heightAt(x: number, z: number): number;
   /** Sea / lake surface height; players cannot walk below it yet (no swimming in M1). */
   waterLevel: number;
+  climbs?: ClimbPoint[];
+  surfaceHeightAt?(x:number,z:number,feetY:number):number;
   colliders: Collider[];
   regions: Region[];
   anchors: WorldAnchors;

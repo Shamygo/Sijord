@@ -2,7 +2,7 @@ import type { GraphicsQuality } from './render';
 
 /** Rebindable actions. Esc is reserved for the pause menu. */
 export type Action =
-  | 'forward' | 'back' | 'left' | 'right' | 'sprint' | 'jump' | 'interact'
+  | 'forward' | 'back' | 'left' | 'right' | 'sprint' | 'jump' | 'climb' | 'interact'
   | 'map' | 'bag' | 'party' | 'quests' | 'throw' | 'partner';
 
 export const ACTION_LABELS: Record<Action, string> = {
@@ -12,6 +12,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   right: 'Move right',
   sprint: 'Sprint',
   jump: 'Jump',
+  climb: 'Climb',
   interact: 'Talk / interact',
   map: 'Open map',
   bag: 'Open bag',
@@ -28,6 +29,7 @@ export const DEFAULT_KEYS: Record<Action, string> = {
   right: 'KeyD',
   sprint: 'ShiftLeft',
   jump: 'Space',
+  climb: 'KeyC',
   interact: 'KeyE',
   map: 'KeyM',
   bag: 'KeyB',

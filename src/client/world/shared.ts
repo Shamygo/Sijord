@@ -124,7 +124,7 @@ export function signTexture(lines: string[], opts: { w?: number; h?: number; bg?
   ctx.font = opts.font ?? `bold ${size}px Georgia, 'Times New Roman', serif`;
   ctx.shadowColor = 'rgba(40,20,5,0.7)';
   ctx.shadowBlur = 6;
-  lines.forEach((ln, i) => ctx.fillText(ln, w / 2, h * ((i + 0.5) / lines.length) * 0.9 + h * 0.05));
+  lines.forEach((ln, i) => ctx.fillText(ln, w / 2, h * ((i + 0.5) / lines.length) * 0.9 + h * 0.05, w * .9));
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;

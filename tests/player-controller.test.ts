@@ -237,3 +237,32 @@ describe('PlayerController', () => {
     expect(c.position.z).toBeLessThanOrEqual(10);
   });
 });
+
+describe('climbing',()=>{
+  function ladderWorld():World {
+    const world=fakeWorld();world.climbs=[{id:'lookout',bottom:{x:0,y:0,z:0},top:{x:0,y:4.8,z:0},landing:{x:0,y:4.8,z:1.2},yaw:0}];
+    world.surfaceHeightAt=(x,z,y)=>Math.abs(x)<2&&z>=.9&&z<=3.1&&y>=4.5?4.8:0;
+    return world;
+  }
+  it('ascends a ladder, reports climbing, spends stamina, and stays on the landing',()=>{
+    const w=ladderWorld(),c=spawn(w);run(c,w,{...idle,climb:true},1);expect(c.position.y).toBeGreaterThan(1);expect(c.anim).toBe('climb');expect(c.stamina).toBeLessThan(1);run(c,w,{...idle,climb:true},3);run(c,w,idle,.5);expect(c.position.y).toBeCloseTo(4.8);expect(c.climbing).toBe(false);expect(c.anim).toBe('idle');
+  });
+  it('pauses on the ladder when released and descends with back plus climb',()=>{
+    const w=ladderWorld(),c=spawn(w);run(c,w,{...idle,climb:true},1);const y=c.position.y;run(c,w,idle,.5);expect(c.position.y).toBeCloseTo(y);run(c,w,{...idle,forward:-1,climb:true},2);expect(c.position.y).toBeCloseTo(0);expect(c.climbing).toBe(false);
+  });
+  it('lets go on jump, falls safely and does not immediately reattach',()=>{
+    const w=ladderWorld(),c=spawn(w);run(c,w,{...idle,climb:true},1);c.update(DT,{...idle,jump:true},0,w);expect(c.climbing).toBe(false);run(c,w,idle,2);expect(c.position.y).toBeCloseTo(0);expect(c.grounded).toBe(true);
+  });
+  it('falls after walking off the raised platform',()=>{
+    const w=ladderWorld(),c=spawn(w);run(c,w,{...idle,climb:true},4);run(c,w,fwd,2);run(c,w,idle,1);expect(c.position.z).toBeGreaterThan(3.1);expect(c.position.y).toBeCloseTo(0);
+  });
+  it('climbs a steep slope with the held climb key, while preserving the ordinary slope limit',()=>{
+    const w=fakeWorld({heightAt:(_x,z)=>z*1.6});const c=spawn(w);run(c,w,{...fwd,climb:true},2);expect(c.position.z).toBeGreaterThan(1);expect(c.position.y).toBeCloseTo(c.position.z*1.6);expect(c.anim).toBe('climb');const ordinary=spawn(w);run(ordinary,w,fwd,2);expect(ordinary.position.z).toBeLessThan(c.position.z);
+  });
+  it('drops from a ladder when stamina runs out',()=>{
+    const w=ladderWorld(),c=spawn(w);c.stamina=.02;run(c,w,{...idle,climb:true},.5);expect(c.climbing).toBe(false);run(c,w,idle,1);expect(c.position.y).toBeCloseTo(0);expect(c.grounded).toBe(true);
+  });
+  it('cannot climb through a solid wall',()=>{
+    const w=fakeWorld({heightAt:(_x,z)=>z*1.6,colliders:[{kind:'box',minX:-4,maxX:4,minZ:.4,maxZ:1}]});const c=spawn(w);run(c,w,{...fwd,climb:true},3);expect(c.position.z).toBeLessThan(.4);
+  });
+});

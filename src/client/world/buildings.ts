@@ -77,6 +77,10 @@ export function gableRoof(b: GeoBuilder, f: Frame, w: number, d: number, top: nu
       box(b, f, [w + overhang * 2, 0.2, len], [0, ly, lz], tmpC.getHex(), [s * theta, 0, 0]);
     }
   }
+  // Narrow tile seams break the broad roof into ceramic strips.
+  for(const side of [1,-1]) for(let x=-w/2;x<=w/2;x+=.62){
+    box(b,f,[.045,.045,slopeLen],[x,top+rise-half*Math.tan(theta)/2+.17,side*half/2],base.clone().multiplyScalar(.76).getHex(),[side*theta,0,0]);
+  }
   // ridge cap
   box(b, f, [w + overhang * 2 + 0.1, 0.32, 0.5], [0, top + rise + 0.12, 0], base.clone().multiplyScalar(0.7).getHex());
 }
@@ -153,6 +157,11 @@ export function cottage(kit: Kit, x: number, y: number, z: number, yaw: number, 
   if (o.chimney !== false) {
     box(b, f, [0.8, rise + 1.6, 0.8], [w * 0.28, top + (rise + 1.6) / 2 + 0.2, -d * 0.18], COL.stoneDark);
     box(b, f, [0.95, 0.2, 0.95], [w * 0.28, top + rise + 1.9, -d * 0.18], COL.stone);
+  }
+  // Horizontal timber slats and deep eaves ground the village in its Hisui-inspired style.
+  for(let y=.65;y<Math.min(top-.1,2.45);y+=.27){
+    box(b,f,[w-.25,.035,.045],[0,y,d/2+.035],COL.woodLight);
+    for(const side of [-1,1])box(b,f,[.045,.035,d-.25],[side*(w/2+.035),y,0],COL.woodLight);
   }
   // door with awning and step
   const dz = d / 2;
@@ -443,4 +452,33 @@ export function cart(kit: Kit, x: number, y: number, z: number, yaw: number): vo
   const swap = Math.abs(Math.sin(yaw)) > 0.5;
   const hw = swap ? 1.4 : 1.0, hd = swap ? 1.0 : 1.4;
   kit.colliders.push({ kind: 'box', minX: x - hw, maxX: x + hw, minZ: z - hd, maxZ: z + hd });
+}
+
+/** A substantial two-storey street shop with shaded timber porch and an illustrated sign. */
+export function streetHouse(kit:Kit,x:number,y:number,z:number,yaw:number,label:string,roof:number):void {
+  cottage(kit,x,y,z,yaw,{w:10,d:7,wallH:5.4,roof,shutter:0x4b625b,wall:0xd9cfb8,floors:2,chimney:false});
+  const f=new Frame(x,y,z,yaw),b=kit.solid;
+  // Wide overhanging porch, lattice upper windows, wood decking and exposed rafters.
+  box(b,f,[10.4,.16,2.3],[0,2.85,4.45],roof,[-.12,0,0]);
+  for(const sx of [-4.4,4.4]){
+    box(b,f,[.16,2.75,.16],[sx,1.42,5.1],COL.woodDark);
+    const p=f.p(sx,0,5.1);kit.colliders.push({kind:'circle',x:p[0],z:p[2],r:.14});
+  }
+  for(let sx=-4.3;sx<=4.4;sx+=.6)box(b,f,[.065,.13,2.1],[sx,2.7,4.3],COL.woodDark);
+  for(let sx=-4.4;sx<=4.4;sx+=.3)box(b,f,[.28,.09,1.8],[sx,.065,4.35],sx%1<.5?COL.woodLight:COL.wood);
+  for(const window of [-3,0,3])for(let sx=-.48;sx<=.5;sx+=.24)box(b,f,[.045,1,.15],[window+sx,4.68,3.68],COL.woodDark);
+  box(b,f,[3.4,.75,.12],[0,3.55,3.64],COL.woodDark);
+  addSignBoard(kit.extras,f,signTexture([label],{w:768,h:160,bg:'#dfdac7',fg:'#3b4b4a',font:'bold 48px Georgia'}),3.2,.62,[0,3.55,3.73],0);
+  // Cloth doorway curtains and brackets for lanterns.
+  for(const sx of [-.36,.36])box(b,f,[.67,.8,.035],[sx,2.05,3.75],0x38566c);
+  for(const sx of [-3.8,3.8]){box(b,f,[.06,.35,.3],[sx,2.25,3.95],COL.woodDark);cyl(b,f,.15,.15,.44,[sx,2.05,4.1],0xe8dab3,12);}
+}
+
+export function marketStall(kit:Kit,x:number,y:number,z:number,yaw:number,color:number):void {
+  const f=new Frame(x,y,z,yaw),b=kit.solid;
+  for(const sx of [-1.8,1.8])for(const sz of [-1.1,1.1])box(b,f,[.11,2.4,.11],[sx,1.2,sz],COL.woodDark);
+  for(let i=0;i<8;i++)box(b,f,[.48,.05,2.9],[-1.68+i*.48,2.47,0],i%2?0xe8dfc7:color,[-.13,0,0]);
+  box(b,f,[3.5,.14,1.3],[0,1.05,.4],COL.woodLight);box(b,f,[3.5,.85,.08],[0,.57,1.03],COL.wood);
+  for(let i=0;i<12;i++){const cx=-1.4+(i%6)*.52,cz=Math.floor(i/6)*.5+.15;b.add(new THREE.IcosahedronGeometry(.17,1),[0xb7583d,0xdab453,0x82934b][i%3],f.p(cx,1.26,cz),f.r());}
+  kit.colliders.push({kind:'box',minX:x-1.8,maxX:x+1.8,minZ:z-.75,maxZ:z+1.1});
 }

@@ -3,7 +3,7 @@ import type { Appearance } from '../../shared/types';
 import { instantiateAsset, loadAsset, loadedAsset, trainerUrl } from '../assets/loader';
 import type { AnimateInput, Avatar, GroundFn } from './types';
 
-/** Red's Pokémon Masters skin, retargeted from Sijord's terrain-aware locomotion and throw rig. */
+/** Imported trainer skins, with baked keyframes where supplied and a terrain-aware fallback. */
 export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar {
   const root = driver.root;
   let visual: ReturnType<typeof instantiateAsset> | undefined;
@@ -11,11 +11,16 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
   let disposed = false, generation = 0, current = appearance;
   type Link = { source: THREE.Object3D; target: THREE.Object3D; alignment: THREE.Quaternion };
   let links: Link[] = [];
+  let mixer: THREE.AnimationMixer | undefined, active: THREE.AnimationAction | undefined;
+  let clips: THREE.AnimationClip[] = [], gestureTime = 0, landingTime = 0;
+  let previousAnim: AnimateInput['anim'] = 'idle';
+  const setClip = (name:string,once=false) => {const clip=clips.find(c=>c.name===name);if(!clip||!mixer)return;const next=mixer.clipAction(clip);if(next===active&&!once)return;next.reset().setLoop(once?THREE.LoopOnce:THREE.LoopRepeat,once?1:Infinity);next.clampWhenFinished=once;next.play();if(active&&active!==next)next.crossFadeFrom(active,.18,false);active=next;root.userData.currentClip=name;};
   let procedural = root.getObjectByName('avatar-body')!;
   let pelvis = procedural.getObjectByName('pelvis')!;
   const q = new THREE.Quaternion(), parentQ = new THREE.Quaternion();
 
   const removeVisual = () => {
+    mixer?.stopAllAction();if(mixer&&visual)mixer.uncacheRoot(visual.scene);mixer=undefined;active=undefined;clips=[];
     motion?.removeFromParent(); visual?.release(); visual = undefined; motion = undefined; links = [];
     procedural.visible = true;
   };
@@ -23,11 +28,13 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
     const request = ++generation;
     if (current.trainerModel === 'custom' || typeof document === 'undefined') { removeVisual(); root.userData.trainerModel = 'custom'; return; }
     try {
-      const asset = loadedAsset(trainerUrl()) ?? await loadAsset(trainerUrl(), true);
+      const asset = loadedAsset(trainerUrl(current.trainerModel)) ?? await loadAsset(trainerUrl(current.trainerModel), true);
       if (disposed || request !== generation) return;
       removeVisual();
       visual = instantiateAsset(asset);
-      motion = new THREE.Group(); motion.name = 'trainer:red'; root.add(motion); motion.add(visual.scene);
+      motion = new THREE.Group(); motion.name = 'trainer:'+ (current.trainerModel ?? 'rei'); root.add(motion); motion.add(visual.scene);
+      clips=asset.animations;
+      if(clips.length){mixer=new THREE.AnimationMixer(visual.scene);setClip('idle');mixer.update(0);}
       root.updateMatrixWorld(true);
       // Measure in trainer-local space; root may already have a world position and yaw.
       const savedPos = root.position.clone(), savedQ = root.quaternion.clone();
@@ -55,13 +62,14 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
       });
       root.position.copy(savedPos); root.quaternion.copy(savedQ); procedural.visible = false;
       root.userData.trainerModel = 'Red (Pokémon Masters)';
+      if(clips.length){links=[];root.userData.trainerModel='Rei (Pokémon Legends: Arceus)';root.userData.animations=clips.map(c=>c.name);}
       pose();
     } catch {
       if (!disposed && request === generation) { removeVisual(); root.userData.trainerModel = 'custom (asset unavailable)'; }
     }
   };
   const pose = () => {
-    if (!motion) return;
+    if (!motion || mixer) return;
     motion.position.y = pelvis.position.y - 0.875;
     root.updateMatrixWorld(true);
     for (const link of links) {
@@ -74,8 +82,20 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
   void attach();
   return {
     root,
-    animate(dt: number, snapshot: AnimateInput) { driver.animate(dt, snapshot); pose(); },
-    gesture(name) { driver.gesture(name); },
+    animate(dt: number, snapshot: AnimateInput) {
+      driver.animate(dt,snapshot);
+      if(mixer){
+        gestureTime=Math.max(0,gestureTime-dt);landingTime=Math.max(0,landingTime-dt);
+        if((previousAnim==='jump'||previousAnim==='fall')&&snapshot.anim==='idle'&&!gestureTime){setClip('land',true);landingTime=.3;}
+        if(snapshot.anim!=='idle')landingTime=0;
+        if(!gestureTime&&!landingTime)setClip(snapshot.anim);
+        if(active)active.timeScale=!gestureTime&&!landingTime&&snapshot.anim==='climb'?(snapshot.speed>.05?1:0):snapshot.anim==='walk'?THREE.MathUtils.clamp(snapshot.speed/4.5,.7,1.4):1;
+        mixer.update(dt);
+      }
+      else pose();
+      previousAnim=snapshot.anim;
+    },
+    gesture(name) { if(mixer){setClip(name,true);gestureTime=clips.find(c=>c.name===name)?.duration ?? 1;}else driver.gesture(name); },
     setGround(fn: GroundFn | null) { driver.setGround(fn); },
     setAppearance(next) {
       current = next;

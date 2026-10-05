@@ -177,7 +177,7 @@ export class RemotePlayer {
       this.speed = b.s.speed * (1 - 0.6 * stale);
       if (renderT - b.t > T.maxExtrapolateMs && this.anim !== 'jump' && this.anim !== 'fall') {
         this.speed = 0;
-        this.anim = 'idle';
+        if(this.anim !== 'climb')this.anim = 'idle';
       }
     }
 

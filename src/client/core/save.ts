@@ -5,6 +5,8 @@ const KEY = 'sijord.save.v1';
 
 export interface SaveData {
   profile: PlayerProfile;
+  /** Trainer visual migration, independent of party/progression. */
+  visualVersion?: number;
   room: string;
   /** Story flags, e.g. "met-professor", "left-town". */
   flags: string[];
@@ -23,7 +25,9 @@ export function loadSave(): SaveData | null {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const data = JSON.parse(raw) as SaveData;
-    return data?.profile?.appearance ? { ...data, flags: data.flags ?? [] } : null;
+    if (!data?.profile?.appearance) return null;
+    if (!data.visualVersion && data.profile.appearance.trainerModel === 'red') data.profile.appearance.trainerModel = 'rei';
+    return { ...data, visualVersion:2, flags:data.flags ?? [] };
   } catch {
     return null;
   }
@@ -31,7 +35,7 @@ export function loadSave(): SaveData | null {
 
 export function writeSave(data: SaveData): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(data));
+    localStorage.setItem(KEY, JSON.stringify({...data,visualVersion:2}));
   } catch {
     // Storage can be unavailable (private mode); the game still runs, it just won't remember.
   }

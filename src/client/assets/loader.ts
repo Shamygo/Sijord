@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
+import { worldCharacterMaterial } from './materials';
 import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
 
 /** Local files use the same paths on Pages and Vite. Single-file downloads use the published assets. */
@@ -59,11 +60,11 @@ export function loadAsset(url: string, pinned = false): Promise<GLTF> {
 
 export function loadedAsset(url: string): GLTF | undefined { return cache.get(url)?.asset; }
 export function pokemonUrl(dex: number): string { return assetUrl(`models/pokemon/${String(dex).padStart(3, '0')}.glb`); }
-export const trainerUrl = (): string => assetUrl('models/trainer/red.glb');
+export const trainerUrl = (model: 'red' | 'rei' | 'custom' = 'rei'): string => assetUrl(`models/trainer/${model === 'red' ? 'red' : 'rei'}.glb`);
 
 /** Complete gameplay assets before constructing portraits or the initial world creatures. */
 export async function preloadGameplayAssets(): Promise<void> {
-  const urls = [trainerUrl(), ...Object.values(POKEMON_VISUALS).map((v) => pokemonUrl(v.dex))];
+  const urls = [trainerUrl(), trainerUrl('red'), ...Object.values(POKEMON_VISUALS).map((v) => pokemonUrl(v.dex))];
   let next = 0;
   await Promise.all(Array.from({ length: 4 }, async () => {
     while (next < urls.length) {
@@ -83,7 +84,7 @@ export function instantiateAsset(asset: GLTF): { scene: THREE.Group; release: ()
   scene.traverse((o) => {
     const mesh = o as THREE.Mesh;
     if (!mesh.isMesh) return;
-    const copy = (m: THREE.Material) => { const c = m.clone(); materials.add(c); return c; };
+    const copy = (m: THREE.Material) => { const c = worldCharacterMaterial(m,url?.includes('/trainer/')); materials.add(c); return c; };
     mesh.material = Array.isArray(mesh.material) ? mesh.material.map(copy) : copy(mesh.material);
   });
   let disposed = false;

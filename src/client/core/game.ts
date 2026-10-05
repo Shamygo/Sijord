@@ -30,7 +30,7 @@ import type { World } from '../world/types';
 import { Input } from './input';
 import { RenderPipeline } from './render';
 import { writeSave, type SaveData } from './save';
-import { loadSettings, saveSettings, type Action, type Settings } from './settings';
+import { keyLabel, loadSettings, saveSettings, type Action, type Settings } from './settings';
 
 const TALK_RADIUS = 2.6;
 
@@ -120,7 +120,9 @@ export class Game {
     applyAtmosphere(this.scene);
     this.scene.add(this.world.root);
 
-    this.input = new Input(canvas, () => this.settings, (a) => this.onInstant(a));
+    this.input = new Input(canvas, () => this.settings, (a) => this.onInstant(a), () =>
+      !this.menu?.isOpen && !this.talking && (!this.scripted || !!(this.battle && this.battle.closing === null) || !!this.remoteBattleHost) &&
+      !(this.battle?.director.ui.commandsOpen || this.remoteBattle?.ui.commandsOpen));
     this.cam = new ThirdPersonCamera();
     this.pipeline = new RenderPipeline(this.renderer, this.scene, this.cam.camera, this.settings.quality);
     this.avatar = createAvatar(save.profile.appearance);
@@ -172,7 +174,7 @@ export class Game {
       settings: this.settings,
       onSettings: (s) => this.applySettings(s),
       onSave: () => writeSave(this.save),
-      onResume: () => this.input.requestLock(),
+      onResume: () => this.input.clearHeld(),
       onQuitToTitle: () => {
         writeSave(this.save);
         location.reload();
@@ -775,7 +777,7 @@ export class Game {
   debugAdvance(ms: number): void { for (let t = 0; t < ms; t += 1000 / 60) this.frame(1 / 60); }
 
   debugText(): string {
-    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null });
+    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null });
   }
 
   private frame(step?: number): void {
@@ -814,7 +816,7 @@ export class Game {
     }
     if (this.talking || this.menu.isOpen || (this.scripted && !inBattle) || actionMode) {
       move.forward = move.right = 0;
-      move.jump = move.sprint = false;
+      move.jump = move.sprint = move.climb = false;
     }
     this.controller.update(dt, move, this.cam.yaw, this.world);
     const snap = this.controller.snapshot();
@@ -850,6 +852,8 @@ export class Game {
       else if (nearProf) this.hud.setPrompt(`Talk to ${this.professor.name}`);
       else if (nearRival) this.hud.setPrompt(`Talk to ${this.rival.name}`);
       else if (wildMon) this.hud.setPrompt(canFight ? `Battle the wild ${displayName(wildMon.creature)} · Lv. ${wildMon.creature.level}` : `Wild ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
+      else if(this.controller.climbing)this.hud.setPrompt(`${keyLabel(this.settings.keys.climb)} ascend · ${keyLabel(this.settings.keys.back)} + ${keyLabel(this.settings.keys.climb)} descend · ${keyLabel(this.settings.keys.jump)} let go`,keyLabel(this.settings.keys.climb));
+      else if(this.controller.nearClimb(this.world))this.hud.setPrompt('Climb the lookout ladder',keyLabel(this.settings.keys.climb));
       else this.hud.setPrompt(null);
       if (input.consumeAction('interact')) {
         if (invite && canFight) this.joinRemoteBattle(invite[0],invite[1]);

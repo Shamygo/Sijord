@@ -1,6 +1,8 @@
 # Sijord: handoff
 
-Everything a new contributor (human or Claude) needs to pick up this project from the repository alone. Written 2026-10-04 after PR #3, updated 2026-10-05 after PR #6 (M2). Update the "Current state" and "Next up" sections whenever a milestone lands.
+Everything a new contributor (human or Claude) needs to pick up this project from the repository alone. Written 2026-10-04 after PR #3, updated 2026-10-05 for the Pokémon/free-roam release and world/UI polish. Update the "Current state" and "Next up" sections whenever a milestone lands.
+
+**Latest direct feedback:** Read [POLISH_HANDOFF.md](POLISH_HANDOFF.md) first. It explains the new requests, implemented changes, asset/animation provenance and remaining gaps. The latest reference images and before/after screenshots are stored in this repo.
 
 ## Who and what
 
@@ -66,23 +68,25 @@ In dev builds the running game is exposed as `window.sijord` for debugging, with
 npm install
 npm run dev            # http://localhost:5173
 npm run typecheck
-npm test               # 134 tests at the time of writing
+npm test               # 155 tests in the current polish build
 npm run build          # dist/ (what GitHub Pages serves)
-npm run build:single   # dist-single/sijord.html, the whole game in one double-clickable file
+npm run build:single   # dist-single/sijord.html, game code in a double-clickable file; imported art still needs internet
 ```
 
 - **Live site:** https://shamygo.github.io/Sijord/. `.github/workflows/pages.yml` runs tests, builds and deploys on every push to `main`. Pages source is set to "GitHub Actions". The repo is public, which is what makes free Pages hosting possible.
-- **Offline build:** `.github/workflows/release.yml` rebuilds `sijord.html` on every push to `main` and attaches it to the `latest` release ("Latest playable build").
+- **Downloadable build:** `.github/workflows/release.yml` rebuilds `sijord.html` on every push to `main` and attaches it to the `latest` release ("Latest playable build").
 - **Co-op:** both players type the same world code on the title screen. Default transport is peer-to-peer WebRTC via Trystero, using free public Nostr relays only for matchmaking, so nothing is hosted. Fallbacks: `npm run relay` plus `?relay=ws://<ip>:8090`, or `npm run server` plus `?server=ws://<ip>:8787` (or `?server=local`). Co-op over the public relays has not yet been confirmed on Simon's and his friend's real machines.
 - **Verifying visually:** Chromium and Playwright are typically available in Claude's cloud container. Run `npm run dev` or `npm run preview` and screenshot the game. Software rendering there is very slow, so judge frame rate on real hardware, not in the container. [DEV_NOTES.md](DEV_NOTES.md#how-to-play-test-in-a-claude-cloud-container) has the exact Playwright setup.
 
 ## Imported character update (2026-10-05)
 
-The 21 existing gameplay species now display animated Kanto Pokémon models and matching names. Red from Pokémon Masters is the default trainer, driven by Sijord locomotion and throw poses; custom trainers remain selectable. Existing save IDs and combat progression are preserved. A searchable [model library](https://shamygo.github.io/Sijord/pokemon.html) exposes 1,322 available models/forms, 404 with embedded clips. The original 151 have 869 clips. See [MODEL_ASSETS.md](MODEL_ASSETS.md) for exact coverage and limitations. Model import does not expand encounters to the full catalogue. Next: continue M3 catching, then add encounter/species data incrementally.
+The 21 existing gameplay species now display animated Kanto Pokémon models and matching names. Rei from Legends: Arceus is now the default trainer, using eight baked Quaternius CC0 keyframe clips retargeted to its rig. Red/custom remain selectable. These are not original Arceus animation clips. Existing save IDs and combat progression are preserved. A searchable [model library](https://shamygo.github.io/Sijord/pokemon.html) exposes 1,322 available models/forms, 404 with embedded clips. The original 151 have 869 clips. See [MODEL_ASSETS.md](MODEL_ASSETS.md) for exact coverage and limitations. Model import does not expand encounters to the full catalogue. Next: continue M3 catching, then add encounter/species data incrementally.
 
-## Current state (after PR #6)
+## Current state (M2 plus Pokémon, battle-mode and world/UI polish)
 
-**Merged:**
+**Current additions:** Animated Pokémon visuals for the 21 stable gameplay slots; the 1,322-entry self-hosted model explorer; 2,035 item icons and working medicine use; both free-roam turn-based and direct Pokémon action/dodge modes with host-authoritative shared encounters; default Rei with eight retargeted clips; menu pointer fixes and transitions; new empty-party guide; 971 explorer portraits; material/lighting integration; slope/ladder climbing and lookout platforms; six substantial Bramblewick street façades and stalls. See [POLISH_HANDOFF.md](POLISH_HANDOFF.md) for complete details and reasons.
+
+**Merged foundation/history:**
 - PR #2: 3D foundation, design docs and milestone 1. Trainer creator (looks plus class), weighty third-person movement and orbit camera, Bramblewick with both houses and Hazel's lab, Hazel's intro leading to Route 1, HUD with compass, minimap and quest tracker, two-player presence.
 - PR #3: second pass after Simon's feedback. Graphics reworked toward the reference (lush grass, fluffy trees, layered grey cliffs, blue river with sandy banks, haze, snowy mountains). Trainer rebuilt with walk, jog and sprint cycles, foot IK on slopes, start, stop, turn, skid, jump and land animations, idle fidgets and secondary motion. Classes nerfed to one perk and one cost. Menus: M map, B bag, P party, J quests, Esc pause and settings. Settings cover key rebinding, mouse sensitivity, invert look, FOV and quality (Low, Medium, High). Shader warm-up moved behind the loading screen so menu keys work immediately.
 - PR #4 and #5: this handoff (docs only).
@@ -93,12 +97,12 @@ The 21 existing gameplay species now display animated Kanto Pokémon models and 
 
 **Known gaps:**
 - Visuals vs the reference: clouds are puffier than the reference's wispy ones, cliffs look blocky up close, and there is no distant castle town on the skyline yet.
-- Co-op and battles: each player battles on their own screen. Wild herds are spawned per player, so your partner doesn't see the creatures you're fighting (they do see your lead creature following you). Shared encounters and co-op battles belong with M6 (gyms).
+- Co-op: shared encounter lobbies and both battle modes are implemented. Idle wild herds still spawn locally; general overworld herd synchronization and cross-home NAT verification remain open. Gyms/boss progression are still later milestones.
 - Battle balance is untested by humans. Sunniva's first team is her counter-starter at Lv. 5 holding an Oran Berry plus a Lv. 4 Finchlet, with T1 AI that focuses your starter. A script that always picks the first move and first target won 2 of 3 runs, so a thoughtful player should usually win and a careless one can lose.
-- Creature models vs the reference: softer and simpler than the reference fox (no fur strands, faceted tufts). Weakest reads: bird wings are slab-like and Skjaldhawk looks owl-ish; Sealkin and Selkira look alike and Selkira's cloak reads as a saddle; Forgelynx reads as a dog and Pyrolynx's legs are long; the fawn necks are plain tubes and Elkwarden's head is small; Hjordpup's tan markings barely show; Auroramoth's legs and Skjaldhawk's wingtips touch the ground. Some models are over the 6k triangle target (tests allow 8k small, 16k large).
+- Creature/character assets: catalogue coverage is 1,322 forms/models, not every Pokémon or implemented encounter. Only 21 gameplay species currently use these models. Rei's original game animation clips were unavailable; eight separate CC0 clips are retargeted. NPCs still use procedural avatars. Towns are improved but still lack Arceus-scale interiors, residents, commerce and environmental detail.
 - Battles in tall grass hide the lower half of the arena ring; the ring reads well on paths and in town.
 - Performance on Simon's and his friend's computers is unverified. Quality "Low" in settings is the escape hatch.
-- DESIGN §17 (controls) predates PR #3. The code is the truth for current bindings (`DEFAULT_KEYS` in `src/client/core/settings.ts`): WASD move, Shift sprint, Space jump, E interact, M map, B bag, P party, J quests, Q throw ball, F partner, Esc pause. §17 still lists B as build mode and Tab/I as inventory, so reconcile it when build mode lands.
+- DESIGN §17 (controls) predates PR #3. The code is the truth for current bindings (`DEFAULT_KEYS` in `src/client/core/settings.ts`): WASD move, Shift sprint, Space jump, E interact, M map, B bag, P party, J quests, Q throw ball, F partner, C climb, Esc pause. In battles, Tab toggles commands/mouse look, X switches and 1–4 selects moves. §17 still lists B as build mode and Tab/I as inventory, so reconcile it when build mode lands.
 
 ## Open questions waiting on Simon
 
@@ -114,7 +118,7 @@ From DESIGN §18. None answered yet. Proceed on the current default and flag it.
 
 Two M2 follow-ups fit naturally into M3: share wild herds between the two players (spawn from a shared seed and sync engagements), and tune battle difficulty from Simon's play-testing.
 
-Keep closing the visual gaps above alongside M3, since Simon judges every build by how it looks.
+Keep closing the visual gaps above alongside M3, since Simon judges every build by how it looks. Follow the newer Arceus town/trainer and UI references in POLISH_HANDOFF.md. Preserve both battle variants for side-by-side testing; do not collapse them into one mode without new feedback.
 
 ## Project history
 
@@ -151,8 +155,14 @@ All of this happened on 2026-10-04 in a private Claude project ("Sijord Pokemon 
 
 ## Public Pokémon update (2026-10-05)
 
-The user requested imported Pokémon models, a game trainer, public access, both free-roam turn-based and action/dodge battle modes with co-op, and the six supplied UI inspirations. See [MODEL_ASSETS.md](MODEL_ASSETS.md) for asset sources and exact coverage. All 1,322 selected models (404 animated, 8,518 clips) and 2,035 item sprites are self-hosted. Existing encounters still use the 21 save-compatible species slots. Red is the default; its rig uses adapted Sijord movement rather than original Masters clips.
+The user requested imported Pokémon models, a game trainer, public access, both free-roam turn-based and action/dodge battle modes with co-op, and the six supplied UI inspirations. See [MODEL_ASSETS.md](MODEL_ASSETS.md) for asset sources and exact coverage. All 1,322 selected models (404 animated, 8,518 clips) and 2,035 item sprites are self-hosted. Existing encounters still use the 21 save-compatible species slots. Rei is now the default, with eight baked, retargeted Quaternius clips; original Arceus player clips were unavailable. Red remains selectable and uses adapted Sijord movement rather than original Masters clips.
 
 At a battle lobby the host selects either mode. A nearby friend presses E to join first. The host resolves turns; the guest controls its own slot and receives committed party results. Tab switches commands/mouse look, X switches creatures, Space jumps in trainer mode and dashes in action mode. The dark/cyan menu includes medicine use, trainer/party details, map destination markers and a searchable model Pokédex. Manual Save progress supplements existing progress saves. Catching and fast travel remain unimplemented.
 
 Validation: 140 unit tests, typecheck, regular and single-file builds; all published asset hashes and clip lists verified; actual two-context WebRTC tests with a local signaling relay covered shared commands, turn completion, trainer movement, both players’ action movement/dodge inputs, guest result persistence, running and AI continuation after a guest leaves. Public-relay/NAT success on two different home networks is not established by those local tests.
+
+## World and interface polish (2026-10-05)
+
+Pointer retries are cancelled on overlay opening and checked against live menu/dialogue/battle-command state. Closing menus keeps the cursor available until an explicit gameplay click. Panels/tabs/buttons animate and respect reduced motion. Empty parties now show a trainer, compact slots and a functional Hazel destination guide. The explorer has paged portrait cards, search/form/animation filtering, pause/reset and responsive layout; 971 pinned local portraits are verified in CI. Rei has source-model provenance and eight retargeted CC0 clips (idle/walk/run/jump/fall/land/climb/throw), with matte lit materials shared by Pokémon. Old default-Red saves migrate visuals only; custom appearances and subsequent explicit Red choices persist. Climb snapshots propagate through co-op. Two raised timber lookouts support landing/walking/falling, and steep terrain supports held-key climbing with collision/water limits and stamina. Six substantial street buildings, porches, lattice windows, tile details, stalls and broad paths improve Bramblewick; storefronts remain decorative. See MODEL_ASSETS.md for exact source limitations.
+
+Validation: 155 tests pass, published model/item/portrait/trainer hashes and clip lists verified, desktop/mobile explorer filters and animation controls exercised, real pointer acquisition/release and delayed retry cancellation checked, and two-peer tests reran both battle modes with Rei, shared commands and guest action movement. Local peer tests do not establish cross-home NAT reachability.

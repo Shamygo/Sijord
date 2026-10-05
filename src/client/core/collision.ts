@@ -63,11 +63,12 @@ export function collidersNear(x: number, z: number, r: number, all: readonly Col
  * Push a circle of radius `r` at (x, z) out of every collider it overlaps.
  * Returns the corrected position. Runs a couple of passes so corners settle.
  */
-export function resolveCircle(x: number, z: number, r: number, all: readonly Collider[]): { x: number; z: number } {
+export function resolveCircle(x: number, z: number, r: number, all: readonly Collider[], feetY = -Infinity): { x: number; z: number } {
   const colliders = collidersNear(x, z, r + 2, all);
   for (let pass = 0; pass < 3; pass++) {
     let moved = false;
     for (const c of colliders) {
+      if(c.maxY!==undefined && feetY>=c.maxY-.05)continue;
       if (c.kind === 'circle') {
         const dx = x - c.x;
         const dz = z - c.z;

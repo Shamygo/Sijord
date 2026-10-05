@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { MoveAnim, PlayerSnapshot } from '../../shared/types';
 import { resolveCircle } from '../core/collision';
-import type { World } from '../world/types';
+import type { World, ClimbPoint } from '../world/types';
 import type { MoveInput } from './types';
 
 /** Movement tunables. Speeds in m/s, accelerations in m/s², angles in radians, times in s. */
@@ -104,6 +104,9 @@ export class PlayerController {
 
   readonly tuning: PlayerTuning;
 
+  private activeClimb: ClimbPoint | null = null;
+  private terrainClimbing = false;
+  private climbCooldown = 0;
   private yawVel = 0;
   private timeSinceGrounded = 0;
   private jumpBufferT = 0;
@@ -119,6 +122,7 @@ export class PlayerController {
   }
 
   teleport(pos: THREE.Vector3, yaw: number): void {
+    this.activeClimb=null;this.terrainClimbing=false;this.climbCooldown=0;
     this.position.copy(pos);
     this.velocity.set(0, 0, 0);
     this.yaw = yaw;
@@ -139,6 +143,8 @@ export class PlayerController {
     const dt = clamp(dtIn, 0, T.maxFrameDt);
     if (dt <= 0) return;
 
+    this.terrainClimbing=false;
+    this.climbCooldown=Math.max(0,this.climbCooldown-dt);
     // Jump edge detection happens once per frame; the buffer carries it across sub-steps.
     if (input.jump && !this.prevJump) this.jumpBufferT = T.jumpBuffer;
     this.prevJump = input.jump;
@@ -152,6 +158,25 @@ export class PlayerController {
     const T = this.tuning;
     const pos = this.position;
     const vel = this.velocity;
+
+    if(this.activeClimb){
+      const ladder=this.activeClimb;
+      if(input.jump || this.stamina<=0){
+        this.activeClimb=null;this.climbCooldown=.6;this.grounded=false;
+        pos.x-=Math.sin(ladder.yaw)*.8;pos.z-=Math.cos(ladder.yaw)*.8;vel.y=input.jump?4:0;this.jumpBufferT=0;return;
+      }
+      const speed=input.climb?(input.forward<-.1?-1.5:1.5):0;
+      this.stamina=Math.max(0,this.stamina-Math.abs(speed)*.055*dt);
+      pos.x=ladder.bottom.x;pos.z=ladder.bottom.z;pos.y+=speed*dt;this.yaw=ladder.yaw;
+      vel.set(0,speed,0);this.grounded=false;this.sprinting=false;
+      if(pos.y>=ladder.top.y){pos.set(ladder.landing.x,ladder.landing.y,ladder.landing.z);vel.set(0,0,0);this.activeClimb=null;this.grounded=true;this.climbCooldown=.5;}
+      else if(pos.y<ladder.bottom.y){pos.y=ladder.bottom.y;pos.x-=Math.sin(ladder.yaw)*.65;pos.z-=Math.cos(ladder.yaw)*.65;vel.set(0,0,0);this.activeClimb=null;this.grounded=true;this.climbCooldown=.5;}
+      return;
+    }
+    if(input.climb && this.climbCooldown===0 && !this.exhausted){
+      const ladder=this.nearClimb(world);
+      if(ladder){this.activeClimb=ladder;pos.set(ladder.bottom.x,Math.max(pos.y,ladder.bottom.y),ladder.bottom.z);vel.set(0,0,0);this.yaw=ladder.yaw;this.grounded=false;return;}
+    }
 
     // ---- Camera-relative wish direction ----------------------------------------------------
     const fx = Math.sin(cameraYaw);
@@ -171,6 +196,15 @@ export class PlayerController {
     const dirX = hasInput ? wx / wishMag : 0;
     const dirZ = hasInput ? wz / wishMag : 0;
 
+    const slope=this.gradient(world,pos.x,pos.z);const steepness=Math.hypot(slope.x,slope.z);
+    if(input.climb && hasInput && this.grounded && !this.exhausted && steepness>Math.tan(T.maxSlope) && steepness<5.7 && (slope.x*dirX+slope.z*dirZ)>0.35 && this.stamina>0){
+      const horizontal=1.45/Math.sqrt(1+steepness*steepness);
+      const x=pos.x+dirX*horizontal*dt,z=pos.z+dirZ*horizontal*dt,h=world.heightAt(x,z);
+      const resolved=resolveCircle(x,z,T.radius,world.colliders,pos.y);
+      if(Math.hypot(resolved.x-x,resolved.z-z)<.001 && h>=world.waterLevel-T.maxWaterDepth && Math.abs(x)<world.halfSize-T.radius && Math.abs(z)<world.halfSize-T.radius){
+        const oldY=pos.y;pos.set(x,h,z);vel.set(dirX*horizontal,(h-oldY)/dt,dirZ*horizontal);this.yaw=Math.atan2(dirX,dirZ);this.terrainClimbing=true;this.sprinting=false;this.stamina=Math.max(0,this.stamina-.1*dt);return;
+      }
+    }
     // ---- Stamina / sprint ------------------------------------------------------------------
     if (this.exhausted) {
       this.exhaustT -= dt;
@@ -303,7 +337,7 @@ export class PlayerController {
     }
 
     // Static colliders.
-    const r = resolveCircle(nx, nz, T.radius, world.colliders);
+    const r = resolveCircle(nx, nz, T.radius, world.colliders,yAfter);
     const pushX = r.x - nx;
     const pushZ = r.z - nz;
     const pushLen = Math.hypot(pushX, pushZ);
@@ -339,7 +373,7 @@ export class PlayerController {
     pos.z = nz;
 
     // ---- Ground contact ----------------------------------------------------------------------
-    const gy = world.heightAt(nx, nz);
+    const gy = this.groundAt(world,nx,nz,yAfter);
     if (this.grounded) {
       // Stay glued over bumps and down walkable slopes (uphill steps were vetted by canEnter).
       if (pos.y - gy <= T.groundSnap) {
@@ -376,8 +410,8 @@ export class PlayerController {
   private canEnter(world: World, ox: number, oz: number, nx: number, nz: number, y: number): boolean {
     const T = this.tuning;
     if (nx === ox && nz === oz) return true;
-    const h0 = world.heightAt(ox, oz);
-    const h1 = world.heightAt(nx, nz);
+    const h0 = this.groundAt(world,ox,oz,y);
+    const h1 = this.groundAt(world,nx,nz,y);
     // Deep water is a wall, unless we're already in it (then allow moving out / shallower).
     const deep = world.waterLevel - T.maxWaterDepth;
     if (h1 < deep && h1 < h0) return false;
@@ -410,7 +444,14 @@ export class PlayerController {
     };
   }
 
+  private groundAt(world:World,x:number,z:number,y:number):number {return world.surfaceHeightAt?.(x,z,y) ?? world.heightAt(x,z);}
+
+  nearClimb(world:World):ClimbPoint | null {
+    return world.climbs?.find(c=>Math.hypot(this.position.x-c.bottom.x,this.position.z-c.bottom.z)<1.35 && Math.abs(this.position.y-c.bottom.y)<1.1) ?? null;
+  }
+  get climbing():boolean {return !!this.activeClimb || this.terrainClimbing;}
   get anim(): MoveAnim {
+    if(this.climbing)return 'climb';
     // Brief drops (stairs, bumps) keep the grounded animation.
     if (!this.grounded && (this.velocity.y > 0.5 || this.airTime > 0.12)) {
       return this.velocity.y > 0 ? 'jump' : 'fall';
@@ -426,7 +467,7 @@ export class PlayerController {
       y: this.position.y,
       z: this.position.z,
       yaw: this.yaw,
-      speed: this.horizontalSpeed,
+      speed: this.climbing?Math.abs(this.velocity.y):this.horizontalSpeed,
       anim: this.anim,
       // Animation hint (avatars play the out-of-breath pose); optional for receivers.
       tired: this.exhausted,

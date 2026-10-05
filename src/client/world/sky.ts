@@ -3,11 +3,11 @@ import { GLSL_NOISE, mulberry32 } from './noise';
 
 /** Sky, sun and atmosphere settings (colours are sRGB hex, converted to linear by THREE.Color). */
 export const SKY = {
-  zenith: new THREE.Color(0x3d86e4),
-  mid: new THREE.Color(0x67a5ec),
-  horizon: new THREE.Color(0xb2d3f2),
+  zenith: new THREE.Color(0x538fae),
+  mid: new THREE.Color(0x83b4c3),
+  horizon: new THREE.Color(0xc1d9d1),
   /** Aerial-perspective haze: distant land fades toward this blue. */
-  fog: new THREE.Color(0x92b9e6),
+  fog: new THREE.Color(0xa0bfc5),
   sunHaze: new THREE.Color(0xf4e6cf),
   sunColor: new THREE.Color(0xfff0da),
   /** Direction towards the sun (from the south, slightly east, fairly high): looking north up
@@ -104,9 +104,9 @@ vec3 skyGradient(vec3 d) {
 `;
 
 export function createLights(root: THREE.Object3D): { sun: THREE.DirectionalLight; hemi: THREE.HemisphereLight } {
-  const hemi = new THREE.HemisphereLight(0xbcd8ff, 0x7d8a52, 1.25);
+  const hemi = new THREE.HemisphereLight(0xc4dce5, 0x6d7c60, 1.2);
   root.add(hemi);
-  const sun = new THREE.DirectionalLight(SKY.sunColor, 3.0);
+  const sun = new THREE.DirectionalLight(SKY.sunColor, 2.6);
   sun.position.copy(SKY.sunDir).multiplyScalar(150);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);

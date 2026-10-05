@@ -116,7 +116,7 @@ export function showCreator(parent: HTMLElement, initial?: PlayerProfile): Promi
         h('h2', {}, 'Create your trainer'),
         h('label.field', {}, 'Name', nameInput),
         h('h3', {}, 'Trainer'),
-        h('div.chips', {}, ...(['red', 'custom'] as const).map((model) => h('button.chip' + ((profile.appearance.trainerModel ?? 'red') === model ? '.on' : ''), { onclick: () => set('trainerModel', model) }, model === 'red' ? 'Red · Pokémon Masters' : 'Custom trainer'))),
+        h('div.chips', {}, ...(['rei', 'red', 'custom'] as const).map((model) => h('button.chip' + ((profile.appearance.trainerModel ?? 'rei') === model ? '.on' : ''), { onclick: () => set('trainerModel', model) }, model === 'rei' ? 'Rei · Legends: Arceus' : model === 'red' ? 'Red · Pokémon Masters' : 'Custom trainer'))),
         ...(profile.appearance.trainerModel === 'custom' ? [
           h('h3', {}, 'Skin'), swatches(SKIN, 'skinTone'),
           h('h3', {}, 'Hair'), chips(HAIR_STYLES, 'hairStyle'), swatches(HAIR, 'hairColor'),

@@ -157,6 +157,8 @@ export function createWorld(): World {
   const world: World = {
     root,
     heightAt,
+    climbs:town.climbs,
+    surfaceHeightAt(x,z,feetY){let h=heightAt(x,z);for(const p of town.platforms)if(feetY>=p.y-.3&&x>=p.minX&&x<=p.maxX&&z>=p.minZ&&z<=p.maxZ)h=Math.max(h,p.y);return h;},
     waterLevel: WATER_LEVEL,
     colliders,
     regions: [town.region],
