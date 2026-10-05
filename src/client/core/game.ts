@@ -165,6 +165,9 @@ export class Game {
       quests: () => this.quests,
       bag: () => this.save.bag ?? {},
       party: () => this.party,
+      box: () => (this.save.box ??= []),
+      nearPc: () => this.nearPc(),
+      dex: () => (this.save.dex ??= { seen: [], caught: [] }),
       portrait: (sp: string) => this.portraits.get(sp),
       trainerPortrait: () => this.portraits.trainer(save.profile.appearance),
       useItem: (id,uid) => {
@@ -540,6 +543,13 @@ export class Game {
     else if (!this.ballCount()) await this.giveBalls(3, false);
     this.professor.lookAt(null);
     this.endScene();
+  }
+
+  /** The PC sits in Hazel's lab: close to the lab or to Hazel counts. */
+  private nearPc(): boolean {
+    const p = this.controller.position;
+    const lab = this.world.anchors.landmarks.find((l) => l.id === 'lab')?.position ?? this.professor.position;
+    return Math.hypot(p.x - lab.x, p.z - lab.z) < 14 || Math.hypot(p.x - this.professor.position.x, p.z - this.professor.position.z) < 6;
   }
 
   private ballCount(): number {

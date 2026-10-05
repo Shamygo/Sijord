@@ -6,7 +6,9 @@ import { xpForLevel } from '../../shared/battle/stats';
 import type { Creature, StatName } from '../../shared/battle/types';
 import { ABILITIES } from '../../shared/data/abilities';
 import { moveData } from '../../shared/data/moves';
-import { species } from '../../shared/data/species';
+import { SPECIES_IDS, species } from '../../shared/data/species';
+import { PARTY_MAX } from '../../shared/items';
+import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
 import { ITEMS, ITEM_CATEGORIES, type ItemCategory } from '../../shared/items';
 import { TYPE_COLORS } from '../battle/fx';
 import { STATUS_LABEL } from '../battle/ui';
@@ -28,6 +30,11 @@ export interface MenuDeps {
   quests(): Quest[];
   bag(): Record<string, number>;
   party(): Creature[];
+  /** Creatures stored in the PC. */
+  box(): Creature[];
+  /** The PC in Hazel's lab is close enough to swap party and box. */
+  nearPc(): boolean;
+  dex(): { seen: string[]; caught: string[] };
   portrait(species: string): string;
   trainerPortrait(): Promise<string>;
   useItem(id: string, uid: string): boolean;
@@ -60,6 +67,9 @@ export class GameMenu {
   private bagCategory: ItemCategory = 'items';
   private selectedItem: string | null = null;
   private selectedMon = 0;
+  /** A PC box creature is selected instead of a party one. */
+  private selectedBox: number | null = null;
+  private selectedDex: string | null = null;
   private listening: Action | null = null;
   private map: MapView | null = null;
   private trainerImage = '';
@@ -110,7 +120,7 @@ export class GameMenu {
 
   /** Redraw after the data behind the open tab changed. */
   refresh(): void {
-    if (this.open_ && this.tab === 'party') this.render();
+    if (this.open_ && (this.tab === 'party' || this.tab === 'pokedex')) this.render();
   }
 
   /** Called each frame while open so the map shows live positions. */
@@ -231,17 +241,50 @@ export class GameMenu {
     return item.sprite ? h('img.bag-icon', {src:assetUrl(`items/${item.sprite}.png`),alt:item.name}) : h('span.bag-icon', {}, item.icon);
   }
 
+  /** The region Dex: every species in the game, silhouettes until seen, full entries once caught. */
   private renderPokedex(): HTMLElement {
-    const search = h('input.dex-search', {placeholder:'Search Pokémon, number or form', 'aria-label':'Search Pokédex'});
-    const list = h('div.dex-list');
-    const draw = () => {
-      const term = search.value.toLowerCase();
-      const entries = catalogue.models.filter(m => `${m.name} ${m.dex} ${m.form}`.toLowerCase().includes(term));
-      list.replaceChildren(...entries.slice(0,150).map(m => h('a.dex-entry', {href:assetUrl(`pokemon.html?model=${encodeURIComponent(m.id)}`),target:'_blank',rel:'noopener'}, h('img.dex-icon', {src:assetUrl(`pokemon-icons/${m.dex}.png`),alt:'',loading:'lazy'}), h('div.dex-name', {}, h('small',{},`#${String(m.dex ?? '—').padStart(3,'0')}`),h('b', {},m.name)), h('small', {},m.form === 'regular' ? 'Regular' : m.form), h('span', {},m.animations.length ? 'Animated ↗' : 'View model ↗'))));
-      if (!entries.length) list.append(h('p.empty', {}, 'No matching Pokémon.'));
+    const dex = this.deps.dex();
+    const seen = new Set(dex.seen);
+    const caught = new Set(dex.caught);
+    const ids = [...SPECIES_IDS].sort((x, y) => (POKEMON_VISUALS[x]?.dex ?? 9999) - (POKEMON_VISUALS[y]?.dex ?? 9999));
+    const sel = this.selectedDex && ids.includes(this.selectedDex) ? this.selectedDex : ids.find((id) => seen.has(id)) ?? ids[0];
+    const icon = (id: string) => {
+      const n = POKEMON_VISUALS[id]?.dex;
+      return n ? h('img.dex-icon' + (seen.has(id) ? '' : '.unseen'), { src: assetUrl(`pokemon-icons/${n}.png`), alt: '', loading: 'lazy' }) : h('span.dex-icon', {}, '?');
     };
-    search.addEventListener('input',draw);draw();
-    return h('div.dex-screen', {}, h('h2', {},'Pokémon explorer'), h('p.hint-dark', {},`${catalogue.models.length.toLocaleString()} models and forms. Search to narrow the list; the first 150 matches are shown. World encounters currently use 21 species.`), search,list);
+    const num = (id: string) => `#${String(POKEMON_VISUALS[id]?.dex ?? '?').padStart(3, '0')}`;
+    const cards = ids.map((id) =>
+      h(
+        'button.dex-card' + (id === sel ? '.on' : '') + (seen.has(id) ? '' : '.unseen'),
+        { onclick: () => { this.selectedDex = id; this.render(); } },
+        icon(id),
+        h('small', {}, num(id)),
+        h('b', {}, seen.has(id) ? species(id).name : '???'),
+        caught.has(id) ? h('span.dex-caught', { title: 'Caught' }, '◓') : null,
+      ),
+    );
+    const sp = species(sel);
+    const known = seen.has(sel);
+    const owned = caught.has(sel);
+    const statRow = (label: string, v: number) => h('div.stat-row', {}, h('span', {}, label), h('div.stat-bar', {}, h('i', { style: `width:${Math.min(100, (v / 160) * 100)}%` })), h('b', {}, String(v)));
+    const odds = sp.catchRate >= 190 ? 'Easy to catch' : sp.catchRate >= 120 ? 'Fairly easy to catch' : sp.catchRate >= 60 ? 'Hard to catch' : 'Very hard to catch';
+    const model = catalogue.models.find((m) => m.dex === POKEMON_VISUALS[sel]?.dex && m.form === 'regular');
+    const detail = h(
+      'div.dex-detail',
+      {},
+      h('div.dex-detail-head', {}, icon(sel), h('div', {}, h('small', {}, num(sel)), h('h3', {}, known ? sp.name : 'Unknown Pokémon'), known ? h('div.mon-types', {}, ...sp.types.map((t) => h('span.type-chip', { style: `background:${TYPE_COLORS[t]}` }, t))) : null)),
+      h('p.mon-desc', {}, known ? sp.description : 'Not seen yet. Explore Sijord to find it.'),
+      owned
+        ? h('div', {}, h('h3', {}, 'Base stats'), statRow('HP', sp.baseStats.hp), statRow('Attack', sp.baseStats.atk), statRow('Defense', sp.baseStats.def), statRow('Sp. Atk', sp.baseStats.spa), statRow('Sp. Def', sp.baseStats.spd), statRow('Speed', sp.baseStats.spe), h('p.hint-dark', {}, `${odds} · ${sp.temperament[0].toUpperCase() + sp.temperament.slice(1)} in the wild`))
+        : known ? h('p.hint-dark', {}, `Catch one to record its stats. ${sp.temperament === 'aggressive' || sp.temperament === 'territorial' ? 'It fights back if a throw fails.' : sp.temperament === 'skittish' ? 'It runs from a sprinting trainer.' : ''}`) : null,
+      known && model ? h('a.dex-link', { href: assetUrl(`pokemon.html?model=${encodeURIComponent(model.id)}`), target: '_blank', rel: 'noopener' }, 'View 3D model ↗') : null,
+    );
+    return h(
+      'div.dex-screen',
+      {},
+      h('div.dex-top', {}, h('h2', {}, 'Pokédex'), h('span.dex-count', {}, `Seen ${seen.size} · Caught ${caught.size} of ${ids.length}`), h('a.dex-link', { href: assetUrl('pokemon.html'), target: '_blank', rel: 'noopener' }, 'Model explorer ↗')),
+      h('div.dex-body', {}, h('div.dex-grid', {}, ...cards), detail),
+    );
   }
 
   private renderParty(): HTMLElement {
@@ -260,12 +303,14 @@ export class GameMenu {
 
     }
     this.selectedMon = Math.min(this.selectedMon, party.length - 1);
+    const box = this.deps.box();
+    if (this.selectedBox !== null && this.selectedBox >= box.length) this.selectedBox = null;
     const leads = party.filter(isUsable).slice(0, 2);
     const cards = party.map((c, i) => {
       const r = c.hp / maxHp(c);
       return h(
-        'button.mon-card' + (i === this.selectedMon ? '.on' : '') + (c.hp <= 0 ? '.fainted' : ''),
-        { onclick: () => { this.selectedMon = i; this.render(); } },
+        'button.mon-card' + (this.selectedBox === null && i === this.selectedMon ? '.on' : '') + (c.hp <= 0 ? '.fainted' : ''),
+        { onclick: () => { this.selectedMon = i; this.selectedBox = null; this.render(); } },
         h('img.mon-portrait', { src: this.deps.portrait(c.species), alt: '' }),
         h(
           'div.mon-main',
@@ -280,12 +325,22 @@ export class GameMenu {
       'div.party-screen',
       {},
       h('div.trainer-preview', {}, this.trainerImage ? h('img', {src:this.trainerImage,alt:'Your trainer'}) : null, h('span', {}, 'Your team')),
-      h('div.mon-list', {}, ...cards, h('p.hint-dark', {}, 'Solo: the first two healthy Pokémon lead. Co-op: each trainer commands one. Reorder to choose your lead.')),
-      this.renderMon(party, this.selectedMon),
+      h(
+        'div.mon-list',
+        {},
+        ...cards,
+        h('p.hint-dark', {}, 'Solo: the first two healthy Pokémon lead. Co-op: each trainer commands one. Reorder to choose your lead.'),
+        h('h3.box-head', {}, `PC box · ${box.length}`),
+        box.length
+          ? h('div.box-grid', {}, ...box.map((c, j) => h('button.box-slot' + (this.selectedBox === j ? '.on' : ''), { title: `${displayName(c)} Lv. ${c.level}`, onclick: () => { this.selectedBox = j; this.render(); } }, this.boxIcon(c.species), h('small', {}, `Lv. ${c.level}`))))
+          : h('p.hint-dark', {}, 'Pokémon you catch with a full party go here.'),
+        this.deps.nearPc() ? null : h('p.hint-dark', {}, 'Swap with the PC at Hazel’s lab.'),
+      ),
+      this.selectedBox !== null ? this.renderMon(box, this.selectedBox, true) : this.renderMon(party, this.selectedMon),
     );
   }
 
-  private renderMon(party: Creature[], i: number): HTMLElement {
+  private renderMon(party: Creature[], i: number, inBox = false): HTMLElement {
     const c = party[i];
     const sp = species(c.species);
     const stats = creatureStats(c);
@@ -325,7 +380,7 @@ export class GameMenu {
         h(
           'div',
           {},
-          h('h3.mon-title', {}, displayName(c), h('small', {}, ` ${sp.dex} · ${sp.name}`)),
+          h('h3.mon-title', {}, displayName(c), h('small', {}, ` #${String(POKEMON_VISUALS[c.species]?.dex ?? sp.dex).padStart(3, '0')} · ${sp.name}`)),
           h('div.mon-types', {}, ...sp.types.map((t) => h('span.type-chip', { style: `background:${TYPE_COLORS[t]}` }, t))),
           h('div.mon-xp', {}, h('span', {}, `Lv. ${c.level}`), h('div.xp-bar', {}, h('i', { style: `width:${Math.round(xpRatio * 100)}%` })), h('small', {}, c.level >= cap ? `At the level cap (${cap})` : `${Math.max(0, to - c.xp)} XP to Lv. ${c.level + 1}`)),
           h('p.mon-desc', {}, sp.description),
@@ -344,13 +399,51 @@ export class GameMenu {
         ),
         h('div', {}, h('h3', {}, 'Moves'), ...c.moves.map(move)),
       ),
-      h(
-        'div.set-buttons',
-        {},
-        h('button.btn.secondary', { disabled: i === 0, onclick: () => swap(i, i - 1) }, '▲ Move up'),
-        h('button.btn.secondary', { disabled: i === party.length - 1, onclick: () => swap(i, i + 1) }, '▼ Move down'),
-      ),
+      inBox
+        ? h(
+            'div.set-buttons',
+            {},
+            h('button.btn', { disabled: !this.deps.nearPc() || this.deps.party().length >= PARTY_MAX, onclick: () => this.withdraw(i) }, 'Take into party'),
+          )
+        : h(
+            'div.set-buttons',
+            {},
+            h('button.btn.secondary', { disabled: i === 0, onclick: () => swap(i, i - 1) }, '▲ Move up'),
+            h('button.btn.secondary', { disabled: i === party.length - 1, onclick: () => swap(i, i + 1) }, '▼ Move down'),
+            h('button.btn.secondary', { disabled: !this.canDeposit(i), onclick: () => this.deposit(i) }, 'Send to PC'),
+          ),
     );
+  }
+
+  private boxIcon(id: string): HTMLElement {
+    const n = POKEMON_VISUALS[id]?.dex;
+    return n ? h('img', { src: assetUrl(`pokemon-icons/${n}.png`), alt: '' }) : h('img', { src: this.deps.portrait(id), alt: '' });
+  }
+
+  /** Keep at least one Pokémon that can still fight in the party. */
+  private canDeposit(i: number): boolean {
+    const party = this.deps.party();
+    return this.deps.nearPc() && party.length > 1 && party.some((c, j) => j !== i && isUsable(c));
+  }
+
+  private deposit(i: number): void {
+    if (!this.canDeposit(i)) return;
+    const [c] = this.deps.party().splice(i, 1);
+    this.deps.box().push(c);
+    this.selectedMon = Math.max(0, i - 1);
+    this.deps.onPartyChanged();
+    this.render();
+  }
+
+  private withdraw(j: number): void {
+    const party = this.deps.party();
+    if (!this.deps.nearPc() || party.length >= PARTY_MAX) return;
+    const [c] = this.deps.box().splice(j, 1);
+    party.push(c);
+    this.selectedBox = null;
+    this.selectedMon = party.length - 1;
+    this.deps.onPartyChanged();
+    this.render();
   }
 
   private renderQuests(): HTMLElement {
