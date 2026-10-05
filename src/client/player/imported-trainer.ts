@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Appearance } from '../../shared/types';
 import { instantiateAsset, loadAsset, loadedAsset, trainerUrl } from '../assets/loader';
+import { locomotionRate, REI_STANCE_SPEED } from './locomotion';
 import type { AnimateInput, Avatar, GroundFn } from './types';
 
 /** Imported trainer skins, with baked keyframes where supplied and a terrain-aware fallback. */
@@ -14,13 +15,34 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
   let mixer: THREE.AnimationMixer | undefined, active: THREE.AnimationAction | undefined;
   let clips: THREE.AnimationClip[] = [], gestureTime = 0, landingTime = 0;
   let previousAnim: AnimateInput['anim'] = 'idle';
-  const setClip = (name:string,once=false) => {const clip=clips.find(c=>c.name===name);if(!clip||!mixer)return;const next=mixer.clipAction(clip);if(next===active&&!once)return;next.reset().setLoop(once?THREE.LoopOnce:THREE.LoopRepeat,once?1:Infinity);next.clampWhenFinished=once;next.play();if(active&&active!==next)next.crossFadeFrom(active,.18,false);active=next;root.userData.currentClip=name;};
+  let plantedFoot = -1;
+  const footAnchor = new THREE.Vector3();
+  let runFootHeight = 0;
+  let stanceSpeed: Record<'walk'|'run',number> = {...REI_STANCE_SPEED};
+  let stanceFeet: THREE.Object3D[] = [], stanceHeight = 0;
+  let lastPosition: {x:number;z:number} | undefined;
+  const setClip = (name: string, once = false) => {
+    const clip = clips.find(c => c.name === name);
+    if (!clip || !mixer) return;
+    const next = mixer.clipAction(clip);
+    if (next === active && !once) return;
+    const locomotion = active && ['walk', 'run'].includes(active.getClip().name) && ['walk', 'run'].includes(name);
+    const phase = locomotion ? (active!.time / active!.getClip().duration) % 1 : 0;
+    next.reset();
+    next.time = phase * clip.duration;
+    next.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, once ? 1 : Infinity);
+    next.clampWhenFinished = once;
+    next.play();
+    if (active && active !== next) next.crossFadeFrom(active, .18, false);
+    active = next;
+    root.userData.currentClip = name;
+  };
   let procedural = root.getObjectByName('avatar-body')!;
   let pelvis = procedural.getObjectByName('pelvis')!;
   const q = new THREE.Quaternion(), parentQ = new THREE.Quaternion();
 
   const removeVisual = () => {
-    mixer?.stopAllAction();if(mixer&&visual)mixer.uncacheRoot(visual.scene);mixer=undefined;active=undefined;clips=[];
+    mixer?.stopAllAction();if(mixer&&visual)mixer.uncacheRoot(visual.scene);mixer=undefined;active=undefined;clips=[];lastPosition=undefined;stanceFeet=[];plantedFoot=-1;
     motion?.removeFromParent(); visual?.release(); visual = undefined; motion = undefined; links = [];
     procedural.visible = true;
   };
@@ -43,6 +65,31 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
       visual.scene.scale.multiplyScalar(1.75 / Math.max(0.01, size.y));
       visual.scene.position.sub(new THREE.Vector3((box.min.x + box.max.x) / 2, box.min.y, (box.min.z + box.max.z) / 2).multiplyScalar(1.75 / Math.max(0.01, size.y)));
       root.updateMatrixWorld(true);
+      stanceFeet=['left_foot','right_foot'].flatMap(name=>{const foot=visual!.scene.getObjectByName(name);return foot?[foot]:[];});
+      if(mixer && stanceFeet.length===2) {
+        for(const name of ['walk','run'] as const) {
+          const clip=clips.find(c=>c.name===name);if(!clip)continue;
+          mixer.stopAllAction();const action=mixer.clipAction(clip);action.reset().play();
+          const samples:THREE.Vector3[][]=[];
+          for(let i=0;i<=120;i++) {
+            mixer.setTime(clip.duration*i/120);root.updateMatrixWorld(true);
+            samples.push(stanceFeet.map(f=>f.getWorldPosition(new THREE.Vector3())));
+          }
+          const low=stanceFeet.map((_,f)=>Math.min(...samples.map(row=>row[f].y)));
+          if(name==='run')runFootHeight=Math.min(...low);
+          const velocities:number[]=[];
+          for(let i=1;i<samples.length;i++)for(let f=0;f<2;f++) {
+            const previous=samples[i-1][f],foot=samples[i][f];
+            const backwards=(previous.z-foot.z)*120/clip.duration;
+            if(Math.max(previous.y,foot.y)<low[f]+.07 && backwards>0)velocities.push(backwards);
+          }
+          velocities.sort((a,b)=>a-b);
+          if(velocities.length)stanceSpeed[name]=velocities[Math.floor(velocities.length/2)];
+        }
+        mixer.stopAllAction();active=undefined;setClip('idle');mixer.update(0);root.updateMatrixWorld(true);
+        root.userData.stanceSpeed={...stanceSpeed};
+      }
+      if(stanceFeet.length)stanceHeight=Math.min(...stanceFeet.map(f=>f.getWorldPosition(new THREE.Vector3()).y));
       const source = (name: string, parent?: string) => (parent ? procedural.getObjectByName(parent)! : procedural).getObjectByName(name)!;
       const mapping: [string, THREE.Object3D, number?][] = [
         ['Hips', pelvis], ['Spine0', source('spine')], ['Spine1', source('chest')], ['Neck', source('neck')], ['Head', source('head')],
@@ -84,13 +131,58 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
     root,
     animate(dt: number, snapshot: AnimateInput) {
       driver.animate(dt,snapshot);
+      let travelSpeed = snapshot.speed;
+      if(snapshot.x!==undefined && snapshot.z!==undefined) {
+        if(lastPosition && dt>0) {
+          const distance=Math.hypot(snapshot.x-lastPosition.x,snapshot.z-lastPosition.z);
+          // A teleport is not a footstep. Normal motion uses resolved displacement, including walls.
+          if(distance<=Math.max(1,snapshot.speed*dt*4))travelSpeed=distance/dt;
+          else {plantedFoot=-1;if(motion){motion.position.x=0;motion.position.z=0;}}
+        }
+        lastPosition={x:snapshot.x,z:snapshot.z};
+      }
       if(mixer){
         gestureTime=Math.max(0,gestureTime-dt);landingTime=Math.max(0,landingTime-dt);
         if((previousAnim==='jump'||previousAnim==='fall')&&snapshot.anim==='idle'&&!gestureTime){setClip('land',true);landingTime=.3;}
         if(snapshot.anim!=='idle')landingTime=0;
-        if(!gestureTime&&!landingTime)setClip(snapshot.anim);
-        if(active)active.timeScale=!gestureTime&&!landingTime&&snapshot.anim==='climb'?(snapshot.speed>.05?1:0):snapshot.anim==='walk'?THREE.MathUtils.clamp(snapshot.speed/4.5,.7,1.4):1;
+        // 4.5 m/s exploration is a jog: use the running stride rather than a frantic walk.
+        const gait=snapshot.anim==='walk'&&travelSpeed>(active?.getClip().name==='run'?2.2:2.7)?'run':snapshot.anim;
+        if(!gestureTime&&!landingTime)setClip(gait);
+        if(active) {
+          active.timeScale=1;
+          if(!gestureTime&&!landingTime) {
+            if(gait==='climb')active.timeScale=snapshot.speed>.05?1:0;
+            else if(gait==='walk'||gait==='run')active.timeScale=locomotionRate(gait,travelSpeed,stanceSpeed[gait]);
+          }
+        }
+        root.userData.locomotionSpeed=travelSpeed;root.userData.animationRate=active?.timeScale;
+        if(motion)motion.position.y=0;
         mixer.update(dt);
+        if(motion && stanceFeet.length && (snapshot.anim==='walk'||snapshot.anim==='run'||snapshot.anim==='idle') && snapshot.grounded!==false) {
+          root.updateMatrixWorld(true);
+          const footHeight=Math.min(...stanceFeet.map(f=>f.getWorldPosition(new THREE.Vector3()).y))-root.position.y;
+          // Keep the support foot at its idle sole height; the source rig has a different hip bob.
+          const planted=stanceHeight-footHeight;
+          // Runs include a flight phase; retain it instead of pinning the feet during every frame.
+          motion.position.y=gait==='run'?Math.max(stanceHeight-runFootHeight,planted):planted;
+          root.updateMatrixWorld(true);
+          const feet=stanceFeet.map(f=>f.getWorldPosition(new THREE.Vector3()));
+          const support=feet[0].y<feet[1].y?0:1;
+          if((gait==='walk'||gait==='run')&&feet[support].y-root.position.y<stanceHeight+.07) {
+            if(plantedFoot===support) {
+              // Retargeted left/right strides differ slightly. Hold the support foot in the world
+              // with a small visual hip correction; physics and the collision capsule stay authoritative.
+              const correction=footAnchor.clone().sub(feet[support]);correction.y=0;
+              correction.applyQuaternion(root.quaternion.clone().invert());
+              motion.position.x=THREE.MathUtils.clamp(motion.position.x+correction.x,-.3,.3);
+              motion.position.z=THREE.MathUtils.clamp(motion.position.z+correction.z,-.3,.3);
+            } else {plantedFoot=support;footAnchor.copy(feet[support]);}
+          } else plantedFoot=-1;
+        } else plantedFoot=-1;
+        if(plantedFoot<0 && motion) {
+          const decay=Math.exp(-14*dt);motion.position.x*=decay;motion.position.z*=decay;
+        }
+        root.userData.plantedFoot=plantedFoot;
       }
       else pose();
       previousAnim=snapshot.anim;

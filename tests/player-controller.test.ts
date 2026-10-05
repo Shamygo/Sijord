@@ -266,3 +266,44 @@ describe('climbing',()=>{
     const w=fakeWorld({heightAt:(_x,z)=>z*1.6,colliders:[{kind:'box',minX:-4,maxX:4,minZ:.4,maxZ:1}]});const c=spawn(w);run(c,w,{...fwd,climb:true},3);expect(c.position.z).toBeLessThan(.4);
   });
 });
+
+describe('natural jump recovery', () => {
+  it('plants briefly before accepting a buffered repeat jump', () => {
+    const w=fakeWorld(),c=spawn(w);
+    c.update(DT,{...fwd,jump:true},0,w);
+    let landingFrame=-1, nextTakeoff=-1;
+    for(let i=0;i<100;i++) {
+      const wasGrounded=c.grounded;
+      c.update(DT,{...fwd,jump:i%2===0},0,w);
+      if(!wasGrounded&&c.grounded&&landingFrame<0)landingFrame=i;
+      if(landingFrame>=0&&wasGrounded&&!c.grounded){nextTakeoff=i;break;}
+    }
+    expect(landingFrame).toBeGreaterThan(0);
+    expect(nextTakeoff-landingFrame).toBeGreaterThanOrEqual(4);
+    expect(nextTakeoff-landingFrame).toBeLessThan(10);
+  });
+  it('brakes airborne momentum when movement is released', () => {
+    const w=fakeWorld(),c=spawn(w);
+    run(c,w,sprint,1);
+    c.update(DT,{...sprint,jump:true},0,w);
+    run(c,w,idle,.3);
+    expect(c.grounded).toBe(false);
+    expect(c.horizontalSpeed).toBeLessThan(6);
+    expect(c.horizontalSpeed).toBeGreaterThan(3);
+  });
+  it('cannot gain sprint speed by steering or pressing sprint in mid-air', () => {
+    const w=fakeWorld(),c=spawn(w);
+    run(c,w,fwd,1);
+    c.update(DT,{...fwd,jump:true},0,w);
+    for(let i=0;i<25;i++) {
+      c.update(DT,{...sprint,right:i%2?1:-1},0,w);
+      expect(c.horizontalSpeed).toBeLessThanOrEqual(PLAYER_TUNING.walkSpeed+.001);
+    }
+  });
+  it('faces its travel direction through a reversal instead of walking backwards', () => {
+    const w=fakeWorld(),c=spawn(w);run(c,w,fwd,1);
+    c.update(DT,{...fwd,forward:-1},0,w);
+    expect(c.velocity.z).toBeGreaterThan(0);
+    expect(Math.abs(c.yaw)).toBeLessThan(.01);
+  });
+});

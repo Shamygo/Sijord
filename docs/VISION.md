@@ -85,3 +85,12 @@ Then, with the existing empty-party UI and Arceus battle/terrain/town screenshot
 And for the next Claude session:
 
 > continue and whne you're finished leave notes that for certain claude when coming back into the repo will see, and know exactly what was changed and why I wanted it changed
+
+
+## 2026-10-05 movement feedback (direct user requests)
+
+> the walking animation isnt lined up with speed of walking so you get this floating moonwalk effect, also when you jump quickly in succession you get this sort of bhop effect, still want fluid feeling movement, but feels like controlling a videogame car when spam jumping in an unrealistic way if that makes sense. can you fix these
+
+> also when controlling pokemon in battle, the model of the pokemon quickly jumps body to wherever your wasd movement is, making it not fluid
+
+Preserve responsive movement and both co-op test modes. Align visible steps with actual travel, avoid repeated-jump momentum tricks, and make direct Pokémon turns continuous.

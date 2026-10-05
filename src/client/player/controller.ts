@@ -26,7 +26,7 @@ export const PLAYER_TUNING = {
   /** Fraction of ground acceleration / steering available in the air. */
   airControl: 0.3,
   /** Horizontal drag in the air with no input (m/s²). */
-  airDrag: 1.5,
+  airDrag: 8,
   /** Facing: max turn rate at rest and at sprint (rad/s), and spring frequency. */
   turnRateMax: (720 * Math.PI) / 180,
   turnRateAtSprint: (380 * Math.PI) / 180,
@@ -38,7 +38,10 @@ export const PLAYER_TUNING = {
   maxFallSpeed: 40,
   jumpSpeed: 8.2,
   coyoteTime: 0.12,
-  jumpBuffer: 0.15,
+  jumpBuffer: 0.18,
+  /** Brief foot plant after landing; buffered presses still work. */
+  landingRecovery: 0.075,
+  landingRetention: 0.9,
 
   /** Slopes steeper than this cannot be climbed and slide the player back down. */
   maxSlope: (45 * Math.PI) / 180,
@@ -115,6 +118,8 @@ export class PlayerController {
   private sinceSprint = 10;
   private exhaustT = 0;
   private airTime = 0;
+  private landingRecoveryT = 0;
+  private airSpeedLimit = PLAYER_TUNING.walkSpeed;
   private onSteep = false;
 
   constructor(tuning: Partial<PlayerTuning> = {}) {
@@ -132,6 +137,9 @@ export class PlayerController {
     this.timeSinceGrounded = 0;
     this.jumpBufferT = 0;
     this.airTime = 0;
+    this.landingRecoveryT = 0;
+    this.jumpedSinceGrounded = false;
+    this.prevJump = false;
   }
 
   get horizontalSpeed(): number {
@@ -235,7 +243,20 @@ export class PlayerController {
     let vdz = speed > 1e-4 ? vel.z / speed : dirZ;
 
     let skidding = false;
-    if (hasInput) {
+    if (!ground) {
+      // Apply limited forces along input, rather than steering existing momentum like a car.
+      // A jump cannot increase the take-off speed; releasing input brakes in the air as well.
+      const limit = Math.min(topSpeed, this.airSpeedLimit);
+      const tx = hasInput ? dirX * limit * wishMag : 0;
+      const tz = hasInput ? dirZ * limit * wishMag : 0;
+      const delta = Math.hypot(tx - vel.x, tz - vel.z);
+      const amount = Math.min(1, (hasInput ? T.groundAccel * T.airControl : T.airDrag) * dt / Math.max(delta, 1e-6));
+      vel.x += (tx - vel.x) * amount;
+      vel.z += (tz - vel.z) * amount;
+      speed = Math.hypot(vel.x, vel.z);
+      vdx = speed > 1e-4 ? vel.x / speed : 0;
+      vdz = speed > 1e-4 ? vel.z / speed : 0;
+    } else if (hasInput) {
       if (speed < 0.4) {
         // From (near) rest, push straight along the wish direction.
         vdx = dirX;
@@ -280,7 +301,8 @@ export class PlayerController {
 
     // ---- Facing: damped spring towards the move direction, rate-limited -----------------------
     let faceTarget: number | null = null;
-    if (hasInput) faceTarget = Math.atan2(dirX, dirZ);
+    if (speed > 0.4) faceTarget = Math.atan2(vel.x, vel.z);
+    else if (hasInput) faceTarget = Math.atan2(dirX, dirZ);
     else if (speed > 1.0) faceTarget = Math.atan2(vel.x, vel.z);
     if (faceTarget !== null) {
       const diff = wrapAngle(faceTarget - this.yaw);
@@ -296,9 +318,11 @@ export class PlayerController {
     this.yaw = wrapAngle(this.yaw + this.yawVel * dt);
 
     // ---- Jump --------------------------------------------------------------------------------
+    this.landingRecoveryT = Math.max(0, this.landingRecoveryT - dt);
     this.jumpBufferT = Math.max(0, this.jumpBufferT - dt);
-    const canJump = !this.jumpedSinceGrounded && this.timeSinceGrounded <= T.coyoteTime && !this.onSteep;
+    const canJump = this.landingRecoveryT === 0 && !this.jumpedSinceGrounded && this.timeSinceGrounded <= T.coyoteTime && !this.onSteep;
     if (this.jumpBufferT > 0 && canJump) {
+      this.airSpeedLimit = Math.max(T.walkSpeed, this.horizontalSpeed);
       vel.y = T.jumpSpeed;
       this.grounded = false;
       this.jumpedSinceGrounded = true;
@@ -380,6 +404,7 @@ export class PlayerController {
         pos.y = gy;
       } else {
         // Walked off a ledge: start falling, coyote time running.
+        this.airSpeedLimit = Math.max(T.walkSpeed, this.horizontalSpeed);
         this.grounded = false;
         vel.y = 0;
       }
@@ -387,6 +412,10 @@ export class PlayerController {
       pos.y = yAfter;
       if (pos.y <= gy) {
         this.lastLandingSpeed = Math.max(0, -vel.y);
+        if (this.airTime > 0.12) {
+          this.landingRecoveryT = T.landingRecovery;
+          vel.x *= T.landingRetention; vel.z *= T.landingRetention;
+        }
         pos.y = gy;
         vel.y = 0;
         this.grounded = true;
