@@ -7,7 +7,7 @@ import { moveData } from '../../shared/data/moves';
 import { SPECIES, species, STARTERS } from '../../shared/data/species';
 import { BattleDirector, arenaSpots, type BattleOutcome, type BattleStart } from '../battle/director';
 import { classInfo } from '../../shared/classes';
-import { STARTING_BAG, ITEMS } from '../../shared/items';
+import { ITEMS, PARTY_MAX, STARTING_BAG } from '../../shared/items';
 import type { BattleControl, BattleFrame } from '../../shared/battle/session';
 import { RemoteBattle } from '../battle/remote';
 import type { PlayerProfile, PlayerSnapshot } from '../../shared/types';
@@ -133,6 +133,9 @@ export class Game {
     this.professor = new Professor(a.professor, a.professorYaw);
     this.scene.add(this.professor.root);
     this.party = save.party ??= [];
+    save.box ??= [];
+    save.dex ??= { seen: [], caught: [] };
+    for (const c of this.party) this.markDex(c.species, true);
     // Sunniva waits beside her aunt once the player has a partner.
     this.rival = new Rival(this.world, a.professor.clone().add(new THREE.Vector3(2.8, 0, 1.4)), a.professorYaw - 0.5);
     this.scene.add(this.rival.root);
@@ -359,7 +362,7 @@ export class Game {
       if(frame.winner === 0 && frame.progressionFlag) {this.setFlag(frame.progressionFlag);this.updateNpcState();}
       for (const updated of frame.result.party) {const c = this.party.find(c => c.uid === updated.uid); if(c) Object.assign(c,updated);}
       this.battleControl = {id:frame.id,ack:true}; this.onPartyChanged();
-      this.guestProgression = {winner:frame.winner,escaped:frame.escaped,fainted:new Set(),pendingMoves:new Map(frame.result.pendingMoves)};
+      this.guestProgression = {winner:frame.winner,escaped:frame.escaped,fainted:new Set(),pendingMoves:new Map(frame.result.pendingMoves),caught:[],ballsUsed:{}};
     }
   }
 
@@ -523,6 +526,7 @@ export class Game {
       const [pick] = await this.hud.dialogue.play(this.professor.starterLines());
       this.giveStarter(STARTERS[pick] ?? STARTERS[0]);
       await this.hud.dialogue.play(this.professor.starterChosenLines(species(this.party[0].species).name));
+      await this.giveBalls(5, true);
       this.professor.lookAt(null);
       await this.rivalChallenge();
       return;
@@ -531,14 +535,54 @@ export class Game {
       await this.hud.dialogue.play(this.professor.healLines());
       this.healParty();
     } else await this.hud.dialogue.play(this.professor.repeatLines());
+    // Saves from before catching existed get the starter gift late; an empty bag gets a small refill.
+    if (!this.flags.has('got-balls')) await this.giveBalls(5, true);
+    else if (!this.ballCount()) await this.giveBalls(3, false);
     this.professor.lookAt(null);
     this.endScene();
+  }
+
+  private ballCount(): number {
+    const bag = this.save.bag ?? {};
+    return Object.entries(bag).reduce((n, [id, c]) => n + (ITEMS[id]?.category === 'balls' ? c : 0), 0);
+  }
+
+  private async giveBalls(count: number, gift: boolean): Promise<void> {
+    await this.hud.dialogue.play(gift ? this.professor.ballGiftLines(count) : this.professor.ballRefillLines(count));
+    const bag = (this.save.bag ??= {});
+    bag['poke-ball'] = (bag['poke-ball'] ?? 0) + count;
+    this.setFlag('got-balls');
+    writeSave(this.save);
+    if (this.menu?.isOpen) this.menu.refresh();
+  }
+
+  /** Record a species as seen, or caught (which implies seen). */
+  private markDex(id: string, caught: boolean): void {
+    const dex = (this.save.dex ??= { seen: [], caught: [] });
+    if (!dex.seen.includes(id)) dex.seen.push(id);
+    if (caught && !dex.caught.includes(id)) dex.caught.push(id);
+  }
+
+  /** Wild creatures caught in a battle join the party, or go to the PC box when it's full. */
+  private async storeCaught(caught: Creature[]): Promise<void> {
+    for (const c of caught) {
+      c.ot = this.save.profile.name;
+      this.markDex(c.species, true);
+      if (this.party.length < PARTY_MAX) {
+        this.party.push(c);
+        this.hud.showToast(`${displayName(c)} joined your team!`, `Lv. ${c.level} ${species(c.species).name}`, 3);
+      } else {
+        (this.save.box ??= []).push(c);
+        this.hud.showToast(`${displayName(c)} was sent to the PC`, 'Your party is full. Swap it in at Hazel\'s lab.', 3.5);
+      }
+    }
   }
 
   private giveStarter(starter: string): void {
     const rng = new Rng(randomSeed());
     const ot = this.save.profile.name;
     this.party.push(createCreature(starter, 5, rng, { ot }), createCreature('hjordpup', 5, rng, { ot }));
+    for (const c of this.party) this.markDex(c.species, true);
     this.save.starter = starter;
     this.setFlag('got-starter');
     this.updateNpcState();
@@ -649,7 +693,7 @@ export class Game {
       facing,
       intro,
     });
-    this.wild.leaveBattle(list, outcome.fainted);
+    this.wild.leaveBattle(list, outcome.fainted, new Set(outcome.caught.map((c) => c.uid)));
     if (outcome.winner === 1) await this.blackout();
   }
 
@@ -661,6 +705,9 @@ export class Game {
     if (this.menu.isOpen) this.menu.close();
     // Turn to face the ring.
     this.controller.teleport(this.controller.position.clone(), start.facing);
+    for (const f of start.foes) this.markDex(f.species, false);
+    const bag = (this.save.bag ??= {});
+    const balls = Object.fromEntries(Object.entries(bag).filter(([id, n]) => ITEMS[id]?.category === 'balls' && n > 0));
     const director = new BattleDirector(
       {
         world: this.world,
@@ -673,7 +720,15 @@ export class Game {
         project: (v) => this.project(v),
         onThrow: (side) => (side === 0 ? this.avatar.gesture('throw') : start.kind === 'trainer' && this.rival.gesture('throw')),
       },
-      { ...start, playerName: this.save.profile.name, party: this.party, levelCap: this.levelCap, xpMult: 1 },
+      {
+        ...start,
+        playerName: this.save.profile.name,
+        party: this.party,
+        levelCap: this.levelCap,
+        xpMult: 1,
+        balls,
+        catchMult: classInfo(this.save.profile.playerClass).modifiers.catchRate,
+      },
     );
     const active: ActiveBattle = { director, wild: [], closing: null };
     this.battle = active;
@@ -688,6 +743,11 @@ export class Game {
       this.hud.setBattleMode(false);
       this.cam.snapBehind(this.controller.position, this.controller.yaw);
     }
+    for (const [id, n] of Object.entries(outcome.ballsUsed)) {
+      bag[id] = Math.max(0, (bag[id] ?? 0) - n);
+      if (!bag[id]) delete bag[id];
+    }
+    await this.storeCaught(outcome.caught);
     this.onPartyChanged();
     await this.afterBattle(outcome);
     return outcome;

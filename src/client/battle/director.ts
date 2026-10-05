@@ -7,6 +7,7 @@ import { Battle, type AiKind, type BattleEvent, type Pos, type Choice, type Team
 import { randomSeed } from '../../shared/battle/rng';
 import type { Creature } from '../../shared/battle/types';
 import { moveData } from '../../shared/data/moves';
+import { ITEMS } from '../../shared/items';
 import type { CreatureModel } from '../creatures';
 import { THROW_RELEASE } from '../player/avatar-clips';
 import type { Portraits } from '../ui/portraits';
@@ -41,6 +42,10 @@ export interface BattleStart {
   facing: number;
   /** Opening line, e.g. "Sunniva wants to battle!". */
   intro?: string;
+  /** Balls in the player's bag (id -> count); only offered in wild battles. */
+  balls?: Record<string, number>;
+  /** The trainer class's catch-rate lean. */
+  catchMult?: number;
 }
 
 export interface BattleOutcome {
@@ -50,6 +55,10 @@ export interface BattleOutcome {
   fainted: Set<string>;
   /** Moves creatures want to learn but have no room for (uid -> moves). */
   pendingMoves: Map<string, string[]>;
+  /** Wild creatures caught, in order. */
+  caught: Creature[];
+  /** Balls thrown (id -> count), to take out of the bag. */
+  ballsUsed: Record<string, number>;
 }
 
 export interface DirectorDeps {
@@ -112,6 +121,8 @@ export class BattleDirector {
   private fainted = new Set<string>();
   /** Wild creatures standing in the world, by uid, until they step into the ring. */
   private wildActors = new Map<string, WildActor>();
+  /** Balls thrown so far (id -> count). */
+  private ballsUsed: Record<string, number> = {};
   private keyDown = (e: KeyboardEvent) => {
     if (e.code === 'Enter') this.hurry = true;
   };
@@ -132,7 +143,7 @@ export class BattleDirector {
       hitTest: (from, target, move) => this.mode !== 'action' || from.side === target.side || move.target === 'self' || spatialHit(this.aims.get(key(target)) ?? this.stage.spot(target), this.stage.spot(target), this.stage.dodging(target)),
       kind: start.kind,
       sides: [
-        { teams: [{ owner: PLAYER_ID, name: start.playerName, creatures: start.party, levelCap: start.levelCap, xpMult: start.xpMult }], slots: [PLAYER_ID, PLAYER_ID] },
+        { teams: [{ owner: PLAYER_ID, name: start.playerName, creatures: start.party, levelCap: start.levelCap, xpMult: start.xpMult, catchMult: start.catchMult }], slots: [PLAYER_ID, PLAYER_ID] },
         { teams: [{ owner: FOE_ID, name: start.foeName, creatures: start.foes, ai: start.foeAi }], slots: [FOE_ID, FOE_ID] },
       ],
     });
@@ -174,15 +185,17 @@ export class BattleDirector {
         continue;
       }
       if (this.battle.phase === 'move') {
+        const chosen: Choice[] = [];
         for (let i = 0; i < human.length; ) {
           const r = human[i];
           this.ui.caption(null);
-          const c = r.owner === 'partner' ? await this.askPartner('move', this.movePrompt(r.pos, false)) : await this.ui.promptMove(this.movePrompt(r.pos, i > 0));
+          const c = r.owner === 'partner' ? await this.askPartner('move', this.movePrompt(r.pos, false)) : await this.ui.promptMove(this.movePrompt(r.pos, i > 0, chosen.slice(0, i)));
           if (c === 'back') {
             i = Math.max(0, i - 1);
             continue;
           }
           this.battle.choose(r.pos, c);
+          chosen[i] = c;
           // Running ends the decision round for the whole side.
           if (c.kind === 'run') break;
           i++;
@@ -206,6 +219,8 @@ export class BattleDirector {
       escaped: this.battle.escaped,
       fainted: this.fainted,
       pendingMoves: new Map(this.battle.pendingMoves),
+      caught: [...this.battle.caught],
+      ballsUsed: this.ballsUsed,
     };
   }
 
@@ -262,10 +277,23 @@ export class BattleDirector {
     return kind === 'replace' || this.guestGone ? chooseAction(this.battle, pos, kind) : {kind: 'pass'};
   }
 
-  private movePrompt(pos: Pos, canBack: boolean): MovePrompt {
+  /** Balls still in the bag, less those already thrown and those picked earlier this round. */
+  private ballsLeft(pending: Choice[]): { id: string; name: string; count: number }[] {
+    const out: { id: string; name: string; count: number }[] = [];
+    for (const [id, n] of Object.entries(this.start.balls ?? {})) {
+      const reserved = pending.filter((c) => c.kind === 'ball' && c.ball === id).length;
+      const count = n - (this.ballsUsed[id] ?? 0) - reserved;
+      if (count > 0) out.push({ id, name: ITEMS[id]?.name ?? id, count });
+    }
+    return out;
+  }
+
+  private movePrompt(pos: Pos, canBack: boolean, pending: Choice[] = []): MovePrompt {
     const b = this.battle;
     const mon = b.at(pos)!;
     const owner = b.slotOwner(pos);
+    // Only the host's own trainer throws from the host's bag.
+    const throws = b.kind === 'wild' && owner === PLAYER_ID;
     const team = b.team(owner);
     const foes = b.foesOf(pos);
     return {
@@ -284,6 +312,8 @@ export class BattleDirector {
       bench: b.bench(owner).map((m) => ({ index: team.indexOf(m), label: `${m.name}  Lv. ${m.creature.level}`, hp: m.hp, maxHp: m.maxHp, portrait: this.deps.portraits.get(m.species.id) })),
       canRun: b.kind === 'wild',
       canBack,
+      balls: throws ? this.ballsLeft(pending) : [],
+      ballTargets: throws ? foes.map((t) => ({ pos: t, label: this.targetLabel(t, pos) })) : [],
     };
   }
 
@@ -402,8 +432,27 @@ export class BattleDirector {
           await this.say(e.text, 1.4);
           break;
         }
+        case 'throw': {
+          await this.until(() => !this.stage.busy);
+          this.ui.caption(e.text ?? null);
+          if (e.pos.side === 0) this.deps.onThrow?.(0);
+          await this.wait(THROW_RELEASE);
+          break;
+        }
+        case 'catch': {
+          this.ballsUsed[e.ball] = (this.ballsUsed[e.ball] ?? 0) + 1;
+          const from = e.pos.side === 0 ? (this.deps.trainerPosition?.() ?? this.stage.trainerSpot) : this.stage.foeTrainerSpot;
+          const d = this.stage.catchSequence(e.target, from, e.ball, e.shakes, e.caught);
+          await this.wait(d);
+          if (e.caught) {
+            this.displayed.delete(key(e.target));
+            this.ui.removePlate(key(e.target));
+          }
+          await this.say(e.text, e.caught ? 1.6 : 1.1);
+          break;
+        }
         case 'end':
-          await this.say(e.text, 1.4);
+          await this.say(e.text, e.reason === 'catch' ? 0.4 : 1.4);
           break;
         default:
           await this.say(e.text, 0.85);

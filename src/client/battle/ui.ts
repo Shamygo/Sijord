@@ -41,6 +41,10 @@ export interface MovePrompt {
   canRun: boolean;
   /** Can undo the previous slot's choice. */
   canBack: boolean;
+  /** Balls in the bag (wild battles only), with what's left after earlier slots this turn. */
+  balls?: { id: string; name: string; count: number }[];
+  /** Wild creatures a ball can be thrown at. */
+  ballTargets?: { pos: Pos; label: string }[];
 }
 
 export const STATUS_LABEL: Record<MajorStatus, string> = { brn: 'BRN', par: 'PAR', psn: 'PSN', tox: 'TOX', slp: 'SLP', frz: 'FRZ' };
@@ -244,6 +248,7 @@ export class BattleUi {
             'div.panel-actions',
             {},
             h('button.act', { onclick: () => switchMenu(), disabled: !p.bench.length }, h('span.key', {}, 'X'), ' Switch'),
+            targets.length ? h('button.act', { onclick: () => ballMenu(), disabled: !canThrow }, h('span.key', {}, 'B'), ` Ball${canThrow ? '' : ' (none)'}`) : null,
             p.canRun ? h('button.act', { onclick: () => done({ kind: 'run' }) }, h('span.key', {}, 'R'), ' Run') : null,
             p.canBack ? h('button.act.back', { onclick: () => done('back') }, h('span.key', {}, 'Esc'), ' Back') : null,
           ),
@@ -253,6 +258,7 @@ export class BattleUi {
           const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
           if (n >= 0 && n < p.moves.length && p.moves[n].pp > 0) pick(n);
           else if (e.code === 'KeyX' && p.bench.length) switchMenu();
+          else if (e.code === 'KeyB' && canThrow) ballMenu();
           else if (e.code === 'KeyR' && p.canRun) done({ kind: 'run' });
           else if ((e.code === 'Escape' || e.code === 'Backspace') && p.canBack) done('back');
         });
@@ -271,6 +277,35 @@ export class BattleUi {
         this.onKeys((e) => {
           const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
           if (n >= 0 && n < m.targets.length) done({ kind: 'move', move: i, target: m.targets[n].pos });
+          else if (e.code === 'Escape' || e.code === 'Backspace') main();
+        });
+      };
+      const balls = (p.balls ?? []).filter((b) => b.count > 0);
+      const targets = p.ballTargets ?? [];
+      const canThrow = balls.length > 0 && targets.length > 0;
+      const ballMenu = () => {
+        if (balls.length === 1) return ballTarget(balls[0].id);
+        this.panel.replaceChildren(
+          h('div.panel-head', {}, h('span', {}, 'Throw which ball?')),
+          h('div.target-grid', {}, ...balls.map((b, j) => h('button.target-btn', { onclick: () => ballTarget(b.id) }, h('span.move-key', {}, String(j + 1)), `${b.name} ×${b.count}`))),
+          h('div.panel-actions', {}, h('button.act.back', { onclick: () => main() }, h('span.key', {}, 'Esc'), ' Back')),
+        );
+        this.onKeys((e) => {
+          const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
+          if (n >= 0 && n < balls.length) ballTarget(balls[n].id);
+          else if (e.code === 'Escape' || e.code === 'Backspace') main();
+        });
+      };
+      const ballTarget = (ball: string) => {
+        if (targets.length === 1) return done({ kind: 'ball', ball, target: targets[0].pos });
+        this.panel.replaceChildren(
+          h('div.panel-head', {}, h('span', {}, 'Throw at...')),
+          h('div.target-grid', {}, ...targets.map((t, j) => h('button.target-btn', { onclick: () => done({ kind: 'ball', ball, target: t.pos }) }, h('span.move-key', {}, String(j + 1)), t.label))),
+          h('div.panel-actions', {}, h('button.act.back', { onclick: () => main() }, h('span.key', {}, 'Esc'), ' Back')),
+        );
+        this.onKeys((e) => {
+          const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
+          if (n >= 0 && n < targets.length) done({ kind: 'ball', ball, target: targets[n].pos });
           else if (e.code === 'Escape' || e.code === 'Backspace') main();
         });
       };
