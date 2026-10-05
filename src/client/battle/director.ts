@@ -75,6 +75,8 @@ export interface DirectorDeps {
   onThrow?(side: 0 | 1): void;
   connected?: boolean;
   trainerPosition?(): THREE.Vector3;
+  /** Solo battles skip the mode picker and start in this mode. */
+  soloMode?: BattleFrame['mode'];
 }
 
 /**
@@ -158,7 +160,8 @@ export class BattleDirector {
 
   async run(): Promise<BattleOutcome> {
     this.ui.show();
-    this.mode = await this.ui.lobby(!!this.deps.connected);
+    // With a friend online the picker doubles as the lobby they can join; solo it can be skipped.
+    this.mode = !this.deps.connected && this.deps.soloMode ? this.deps.soloMode : await this.ui.lobby(!!this.deps.connected);
     this.lobby = false; this.ui.setMode(this.mode);
     if (this.mode === 'action') this.stage.setActionMode();
     if (this.start.intro) await this.say(this.start.intro, 1.4);

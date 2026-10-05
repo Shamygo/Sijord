@@ -503,6 +503,20 @@ export class GameMenu {
           h('span'),
         ),
         toggle('Show FPS', s.showFps, (v) => (s.showFps = v)),
+        h('h3', {}, 'Battles'),
+        h(
+          'label.set-row',
+          {},
+          h('span', {}, 'Solo battle mode'),
+          h(
+            'div.chips',
+            {},
+            ...([['ask', 'Ask each time'], ['tactical', 'Turn-based'], ['action', 'Action']] as const).map(([m, label]) =>
+              h('button.chip' + (s.battleMode === m ? '.on' : ''), { onclick: () => { s.battleMode = m; commit(); } }, label),
+            ),
+          ),
+          h('span'),
+        ),
         toggle('Show controls hint', s.showControlsHint, (v) => (s.showControlsHint = v)),
       ),
       h(
