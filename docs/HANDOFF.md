@@ -25,6 +25,7 @@ Everything a new contributor (human or Claude) needs to pick up this project fro
 | [DESIGN.md](DESIGN.md) | Every system in the full game: world, settlements, adaptive gyms and level caps, battles and boss AI, catching and aggression, survival craft, classes and skill trees, riding, gimmicks, story, quests, gyms, multiplayer, controls. §18 lists open questions |
 | [ROADMAP.md](ROADMAP.md) | Milestones M1 to M14 plus 1.0, each with scope and an exit criterion |
 | [DEX_PLAN.md](DEX_PLAN.md) | How mainline games pick a regional dex, Sijord's rule (~400 returning + 100 new), regional forms, and all 100 new species |
+| [DEV_NOTES.md](DEV_NOTES.md) | Code gotchas (axes, colliders, shader warm-up, rendering, rig, saves, co-op) and how to play-test in a Claude cloud container |
 | [README.md](../README.md) | How to play, run, build and test |
 | [screenshots/](screenshots/) | Screenshots of the current build |
 
@@ -73,7 +74,7 @@ npm run build:single   # dist-single/sijord.html, the whole game in one double-c
 - **Live site:** https://shamygo.github.io/Sijord/. `.github/workflows/pages.yml` runs tests, builds and deploys on every push to `main`. Pages source is set to "GitHub Actions". The repo is public, which is what makes free Pages hosting possible.
 - **Offline build:** `.github/workflows/release.yml` rebuilds `sijord.html` on every push to `main` and attaches it to the `latest` release ("Latest playable build").
 - **Co-op:** both players type the same world code on the title screen. Default transport is peer-to-peer WebRTC via Trystero, using free public Nostr relays only for matchmaking, so nothing is hosted. Fallbacks: `npm run relay` plus `?relay=ws://<ip>:8090`, or `npm run server` plus `?server=ws://<ip>:8787` (or `?server=local`). Co-op over the public relays has not yet been confirmed on Simon's and his friend's real machines.
-- **Verifying visually:** Chromium and Playwright are typically available in Claude's cloud container. Run `npm run dev` or `npm run preview` and screenshot the game. Software rendering there is very slow, so judge frame rate on real hardware, not in the container.
+- **Verifying visually:** Chromium and Playwright are typically available in Claude's cloud container. Run `npm run dev` or `npm run preview` and screenshot the game. Software rendering there is very slow, so judge frame rate on real hardware, not in the container. [DEV_NOTES.md](DEV_NOTES.md#how-to-play-test-in-a-claude-cloud-container) has the exact Playwright setup.
 
 ## Current state (after PR #6)
 
