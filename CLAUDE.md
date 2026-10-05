@@ -6,7 +6,7 @@ A two-player co-op, Palworld-style, third-person 3D open world Pokemon game in t
 
 **Start here:** [docs/HANDOFF.md](docs/HANDOFF.md) has the current state, known gaps, open questions and what's next. Simon's own spec and feedback are in [docs/VISION.md](docs/VISION.md), and they outrank every other doc.
 
-How the project got here (every thread and decision) is in [HANDOFF.md](docs/HANDOFF.md#project-history). Other docs: [DESIGN.md](docs/DESIGN.md) (all systems), [ROADMAP.md](docs/ROADMAP.md) (milestones M1 to M14), [DEX_PLAN.md](docs/DEX_PLAN.md) (species).
+How the project got here (every thread and decision) is in [HANDOFF.md](docs/HANDOFF.md#project-history). Other docs: [DESIGN.md](docs/DESIGN.md) (all systems), [ROADMAP.md](docs/ROADMAP.md) (milestones M1 to M14), [DEX_PLAN.md](docs/DEX_PLAN.md) (species), [DEV_NOTES.md](docs/DEV_NOTES.md) (code gotchas and how to play-test). Read DEV_NOTES before touching rendering, collisions, input, the rig or co-op.
 
 ## Commands
 
