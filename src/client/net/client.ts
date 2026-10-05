@@ -84,5 +84,5 @@ export function serverOverride(): string | null {
 
 function round(s: PlayerSnapshot): PlayerSnapshot {
   const r = (v: number) => Math.round(v * 100) / 100;
-  return { x: r(s.x), y: r(s.y), z: r(s.z), yaw: r(s.yaw), speed: r(s.speed), anim: s.anim };
+  return { ...s, x: r(s.x), y: r(s.y), z: r(s.z), yaw: r(s.yaw), speed: r(s.speed), anim: s.anim };
 }

@@ -1,7 +1,9 @@
 import * as THREE from 'three';
+import type { BattleFrame, BattleControl } from '../../shared/battle/session';
+import { ACTION_RULES, spatialHit } from '../../shared/battle/action';
 import { chooseAction } from '../../shared/battle/ai';
 import { displayName } from '../../shared/battle/creature';
-import { Battle, type AiKind, type BattleEvent, type Pos } from '../../shared/battle/engine';
+import { Battle, type AiKind, type BattleEvent, type Pos, type Choice, type TeamSetup } from '../../shared/battle/engine';
 import { randomSeed } from '../../shared/battle/rng';
 import type { Creature } from '../../shared/battle/types';
 import { moveData } from '../../shared/data/moves';
@@ -13,8 +15,6 @@ import { ARENA, BattleStage, key } from './stage';
 import { BattleUi, type MovePrompt } from './ui';
 
 export const PLAYER_ID = 'player';
-/** Lens per shot: a longer lens over the shoulder, so the foes fill more of the frame. */
-const SHOT_FOV = { overview: 50, command: 42, action: 46 } as const;
 const FOE_ID = 'foe';
 
 export interface WildActor {
@@ -25,6 +25,7 @@ export interface WildActor {
 
 export interface BattleStart {
   kind: 'wild' | 'trainer';
+  progressionFlag?: 'beat-rival';
   playerName: string;
   party: Creature[];
   levelCap: number;
@@ -63,6 +64,8 @@ export interface DirectorDeps {
   placeFoeTrainer?(pos: THREE.Vector3, yaw: number): void;
   /** A trainer on `side` throws a ball (plays their throw gesture). */
   onThrow?(side: 0 | 1): void;
+  connected?: boolean;
+  trainerPosition?(): THREE.Vector3;
 }
 
 /**
@@ -76,7 +79,6 @@ export function arenaSpots(playerPos: THREE.Vector3, facing: number): { center: 
   return { center, foeTrainer: center.clone().addScaledVector(axis, ARENA.trainer + 0.2).addScaledVector(right, -0.6) };
 }
 
-type Shot = { kind: 'overview' } | { kind: 'command'; pos: Pos } | { kind: 'action'; from: Pos; to: Pos | null; flip: boolean };
 
 /**
  * Runs one battle from start to finish: builds the engine and the in-world stage, plays every
@@ -87,23 +89,34 @@ export class BattleDirector {
   readonly stage: BattleStage;
   readonly ui = new BattleUi();
   readonly battle: Battle;
+  readonly id = crypto.randomUUID();
+  mode: BattleFrame['mode'] = 'tactical';
+  lobby = true;
+  guest: string | undefined;
+  guestAcknowledged = false;
+  private guestGone = false;
+  private readyResult = false;
+  private nextToken = 0;
+  private remotePrompt: BattleFrame['prompt'];
+  private remoteChoice: Choice | undefined;
+  private sequence = 0;
+  private displayed = new Map<string, BattleFrame['slots'][number]>();
+  private recentEvents: BattleFrame['events'] = [];
+  private captionText = '';
+  private guestDodge = 0;
+  private windup = false;
+  private aims = new Map<string, THREE.Vector3>();
+
   private waits: { left: number; resolve: () => void }[] = [];
-  private shot: Shot = { kind: 'overview' };
-  private camPos = new THREE.Vector3();
-  private camLook = new THREE.Vector3();
-  /** Jump straight to the next shot's framing instead of easing into it. */
-  private cut = false;
-  private wantPos = new THREE.Vector3();
-  private wantLook = new THREE.Vector3();
   private hurry = false;
   private fainted = new Set<string>();
   /** Wild creatures standing in the world, by uid, until they step into the ring. */
   private wildActors = new Map<string, WildActor>();
   private keyDown = (e: KeyboardEvent) => {
-    if (e.code === 'Space' || e.code === 'KeyE' || e.code === 'Enter') this.hurry = true;
+    if (e.code === 'Enter') this.hurry = true;
   };
   private keyUp = (e: KeyboardEvent) => {
-    if (e.code === 'Space' || e.code === 'KeyE' || e.code === 'Enter') this.hurry = false;
+    if (e.code === 'Enter') this.hurry = false;
   };
   private pointer = () => (this.hurry = true);
   private pointerUp = () => (this.hurry = false);
@@ -116,16 +129,13 @@ export class BattleDirector {
     deps.hudRoot.append(this.ui.el);
     this.battle = new Battle({
       seed: randomSeed(),
+      hitTest: (from, target, move) => this.mode !== 'action' || from.side === target.side || move.target === 'self' || spatialHit(this.aims.get(key(target)) ?? this.stage.spot(target), this.stage.spot(target), this.stage.dodging(target)),
       kind: start.kind,
       sides: [
         { teams: [{ owner: PLAYER_ID, name: start.playerName, creatures: start.party, levelCap: start.levelCap, xpMult: start.xpMult }], slots: [PLAYER_ID, PLAYER_ID] },
         { teams: [{ owner: FOE_ID, name: start.foeName, creatures: start.foes, ai: start.foeAi }], slots: [FOE_ID, FOE_ID] },
       ],
     });
-    this.camPos.copy(deps.camera.position);
-    const fwd = new THREE.Vector3();
-    deps.camera.getWorldDirection(fwd);
-    this.camLook.copy(deps.camera.position).addScaledVector(fwd, 10);
     if (start.kind === 'trainer') deps.placeFoeTrainer?.(this.stage.foeTrainerSpot, start.facing + Math.PI);
     addEventListener('keydown', this.keyDown);
     addEventListener('keyup', this.keyUp);
@@ -137,19 +147,37 @@ export class BattleDirector {
 
   async run(): Promise<BattleOutcome> {
     this.ui.show();
-    this.shot = { kind: 'overview' };
+    this.mode = await this.ui.lobby(!!this.deps.connected);
+    this.lobby = false; this.ui.setMode(this.mode);
+    if (this.mode === 'action') this.stage.setActionMode();
     if (this.start.intro) await this.say(this.start.intro, 1.4);
     await this.play(this.battle.start());
     while (this.battle.phase !== 'ended') {
       const human = this.battle.requests().filter((r) => !this.battle.isAi(r.owner));
+      if (this.mode === 'action' && this.battle.phase === 'move') {
+        await Promise.all(human.map(async r => {
+          let c: Choice | 'back';
+          if (r.owner === 'partner') c = await this.askPartner('move', this.movePrompt(r.pos, false), undefined, ACTION_RULES.commandSeconds);
+          else if (r.pos.slot === 1) c = chooseAction(this.battle, r.pos, 'move');
+          else c = await this.timedMove(this.movePrompt(r.pos, false));
+          this.battle.choose(r.pos, c === 'back' ? {kind: 'pass'} : c);
+        }));
+        this.windup = true;
+        this.aims.clear();
+        for (const p of this.battle.activePositions()) this.aims.set(key(p), this.stage.spot(p).clone());
+        this.captionText = 'Attacks incoming — move out of the marked positions or dodge!';
+        this.ui.caption(this.captionText);
+        for (const p of this.battle.activePositions()) this.stage.telegraph(p, ACTION_RULES.windupSeconds);
+        await this.wait(ACTION_RULES.windupSeconds);
+        this.windup = false;
+        await this.play(this.battle.resolve(chooseAction));
+        continue;
+      }
       if (this.battle.phase === 'move') {
         for (let i = 0; i < human.length; ) {
           const r = human[i];
-          // Cut, don't pan, from the wide shot: a pan would sweep through the trainer's head.
-          if (this.shot.kind === 'overview') this.cut = true;
-          this.shot = { kind: 'command', pos: r.pos };
           this.ui.caption(null);
-          const c = await this.ui.promptMove(this.movePrompt(r.pos, i > 0));
+          const c = r.owner === 'partner' ? await this.askPartner('move', this.movePrompt(r.pos, false)) : await this.ui.promptMove(this.movePrompt(r.pos, i > 0));
           if (c === 'back') {
             i = Math.max(0, i - 1);
             continue;
@@ -161,18 +189,17 @@ export class BattleDirector {
         }
       } else if (this.battle.phase === 'replace') {
         for (const r of human) {
-          this.shot = { kind: 'overview' };
           const team = this.battle.team(r.owner);
           const bench = this.battle.bench(r.owner).map((m) => ({ index: team.indexOf(m), label: `${m.name}  Lv. ${m.creature.level}`, hp: m.hp, maxHp: m.maxHp, portrait: this.deps.portraits.get(m.species.id) }));
-          const pick = await this.ui.promptReplace('Who will you send in next?', bench);
-          this.battle.choose(r.pos, { kind: 'switch', team: pick });
+          const choice = r.owner === 'partner' ? await this.askPartner('replace', undefined, bench) : {kind: 'switch' as const, team: await this.ui.promptReplace('Who will you send in next?', bench)};
+          this.battle.choose(r.pos, choice);
         }
       }
       this.ui.caption(null);
       await this.play(this.battle.resolve(chooseAction));
     }
     this.battle.commit();
-    this.shot = { kind: 'overview' };
+    this.readyResult = true;
     await this.wait(0.6);
     return {
       winner: this.battle.winner,
@@ -182,10 +209,64 @@ export class BattleDirector {
     };
   }
 
+  acceptPartner(id: string, team: TeamSetup): boolean {
+    if (!this.lobby || this.guest) return false;
+    const ok = this.battle.invitePartner({...team, owner: 'partner'});
+    if (ok) { this.guest = id; this.ui.caption(`${team.name} joined. Each player commands their own Pokémon.`); }
+    return ok;
+  }
+
+  partnerControl(id: string, c: BattleControl): void {
+    if (id !== this.guest || c.id !== this.id) return;
+    if (c.leave) this.partnerLeft(id);
+    if (c.ack) this.guestAcknowledged = true;
+    if (c.movement && !this.guestGone && this.mode === 'action') { const token = c.movement.dodgeToken ?? 0; this.stage.pilot({side: 0, slot: 1}, {...c.movement,dodge:token > this.guestDodge}); this.guestDodge = Math.max(this.guestDodge,token); }
+    if (this.remotePrompt && c.token === this.remotePrompt.token && c.choice && !this.remoteChoice) {
+      const p = this.remotePrompt;
+      const choice = c.choice;
+      const valid = choice.kind === 'pass' || (choice.kind === 'run' && p.move?.canRun) ||
+        (choice.kind === 'switch' && (p.bench ?? p.move?.bench)?.some(b => b.index === choice.team)) ||
+        (choice.kind === 'move' && p.move && p.move.moves[choice.move]?.pp! > 0 && (!p.move.moves[choice.move].targets.length || p.move.moves[choice.move].targets.some(t => t.pos.side === choice.target?.side && t.pos.slot === choice.target?.slot)));
+      if (valid) this.remoteChoice = choice;
+    }
+  }
+
+  partnerLeft(id: string): void { if (id === this.guest) { this.guestGone = true; this.stage.pilot({side:0,slot:1},{x:0,z:0,sprint:false,dodge:false}); } }
+
+  snapshot(): BattleFrame {
+    return { id: this.id, center: this.stage.center.toArray() as [number,number,number], yaw: this.start.facing,
+      progressionFlag:this.start.progressionFlag, kind:this.start.kind, mode: this.mode, lobby: this.lobby, joinable: this.lobby && !this.guest, guest: this.guest, turn: this.battle.turn,
+      winner:this.battle.winner, escaped:this.battle.escaped, windup: this.windup, ended: this.readyResult, caption: this.captionText,
+      slots: [...this.displayed.values()].map(s => ({...s,position:this.stage.snapshotPosition(s.pos)})),
+      events: this.recentEvents, prompt: this.remotePrompt ? {...this.remotePrompt, move:this.remotePrompt.move ? {...this.remotePrompt.move,portrait:undefined,bench:this.remotePrompt.move.bench.map(b => ({...b,portrait:undefined}))} : undefined, bench:this.remotePrompt.bench?.map(b => ({...b,portrait:undefined}))} : undefined,
+      result: this.guest ? {party: this.battle.team('partner').map(m => ({...m.creature,hp:m.hp,status:m.fainted ? undefined : m.status,item:m.item,moves:m.moves.map(s => ({id:s.id,pp:s.pp}))})), pendingMoves: [...this.battle.pendingMoves].filter(([uid]) => this.battle.team('partner').some(m => m.uid === uid))} : undefined,
+    };
+  }
+
+  private async timedMove(prompt: MovePrompt): Promise<Choice | 'back'> {
+    let done = false;
+    const choice = this.ui.promptMove(prompt).then(c => {done = true; return c;});
+    void this.wait(ACTION_RULES.commandSeconds).then(() => {if (!done) this.ui.cancelPrompt();});
+    return choice;
+  }
+
+  private async askPartner(kind: 'move' | 'replace', move?: MovePrompt, bench?: MovePrompt['bench'], timeout = 30): Promise<Choice> {
+    this.remoteChoice = undefined;
+    this.remotePrompt = {token: ++this.nextToken, kind, move, bench};
+    let left = timeout;
+    while (!this.remoteChoice && !this.guestGone && left > 0) { await this.wait(0.05); left -= 0.05; }
+    const c = this.remoteChoice;
+    this.remotePrompt = undefined; this.remoteChoice = undefined;
+    if (c) return c;
+    const pos: Pos = {side: 0, slot: 1};
+    return kind === 'replace' || this.guestGone ? chooseAction(this.battle, pos, kind) : {kind: 'pass'};
+  }
+
   private movePrompt(pos: Pos, canBack: boolean): MovePrompt {
     const b = this.battle;
     const mon = b.at(pos)!;
-    const team = b.team(PLAYER_ID);
+    const owner = b.slotOwner(pos);
+    const team = b.team(owner);
     const foes = b.foesOf(pos);
     return {
       name: mon.name,
@@ -200,7 +281,7 @@ export class BattleDirector {
           targets: b.targetOptions(pos, m).map((t) => ({ pos: t, label: this.targetLabel(t, pos) })),
         };
       }),
-      bench: b.bench(PLAYER_ID).map((m) => ({ index: team.indexOf(m), label: `${m.name}  Lv. ${m.creature.level}`, hp: m.hp, maxHp: m.maxHp, portrait: this.deps.portraits.get(m.species.id) })),
+      bench: b.bench(owner).map((m) => ({ index: team.indexOf(m), label: `${m.name}  Lv. ${m.creature.level}`, hp: m.hp, maxHp: m.maxHp, portrait: this.deps.portraits.get(m.species.id) })),
       canRun: b.kind === 'wild',
       canBack,
     };
@@ -219,10 +300,14 @@ export class BattleDirector {
 
   private async play(events: BattleEvent[]): Promise<void> {
     for (const e of events) {
+      this.recentEvents.push({seq: ++this.sequence, event: e});
+      this.recentEvents = this.recentEvents.slice(-24);
+      if (e.text) this.captionText = e.text;
       switch (e.t) {
         case 'turn':
           break;
         case 'switch-in': {
+          this.displayed.set(key(e.pos),{...e,position:this.stage.snapshotPosition(e.pos)});
           const k = key(e.pos);
           const mine = e.pos.side === 0;
           let dur: number;
@@ -233,18 +318,18 @@ export class BattleDirector {
             // Wind up first so the ball leaves the trainer's hand.
             this.deps.onThrow?.(e.pos.side);
             await this.wait(THROW_RELEASE);
-            dur = this.stage.sendOut(e.pos, e.species, mine ? this.stage.trainerSpot : this.stage.foeTrainerSpot);
+            dur = this.stage.sendOut(e.pos, e.species, mine ? (this.deps.trainerPosition?.() ?? this.stage.trainerSpot) : this.stage.foeTrainerSpot);
           }
           this.ui.setPlate(k, {
             name: e.name, level: e.level, hp: e.hp, maxHp: e.maxHp, status: e.status, mine,
             tag: mine ? '' : this.start.kind === 'wild' ? 'Wild' : this.start.foeName,
             portrait: mine ? this.deps.portraits.get(e.species) : undefined,
           });
-          this.shot = { kind: 'overview' };
           await this.say(e.text, Math.max(dur, 0.9));
           break;
         }
         case 'switch-out': {
+          this.displayed.delete(key(e.pos));
           this.ui.removePlate(key(e.pos));
           const d = this.stage.recall(e.pos);
           await this.say(e.text, Math.max(0.6, d));
@@ -252,8 +337,6 @@ export class BattleDirector {
         }
         case 'move': {
           await this.until(() => !this.stage.busy);
-          const target = e.targets.find((t) => t.side !== e.pos.side) ?? e.targets[0] ?? null;
-          this.shot = { kind: 'action', from: e.pos, to: target, flip: e.pos.side === 1 };
           this.ui.caption(e.text ?? null);
           await this.wait(0.35);
           const m = moveData(e.move);
@@ -262,6 +345,7 @@ export class BattleDirector {
           break;
         }
         case 'damage': {
+          const shown = this.displayed.get(key(e.pos)); if(shown) shown.hp = e.hp;
           const k = key(e.pos);
           this.ui.setHp(k, e.hp, e.maxHp);
           if (e.cause === 'move') this.stage.hit(e.pos, !!e.crit);
@@ -272,6 +356,7 @@ export class BattleDirector {
           break;
         }
         case 'heal': {
+          const shown = this.displayed.get(key(e.pos)); if(shown) shown.hp = e.hp;
           this.ui.setHp(key(e.pos), e.hp, e.maxHp);
           this.stage.heal(e.pos);
           const head = this.deps.project(this.stage.headOf(e.pos));
@@ -286,6 +371,7 @@ export class BattleDirector {
           break;
         }
         case 'status':
+          {const shown = this.displayed.get(key(e.pos)); if(shown) shown.status = e.status ?? undefined;}
           this.stage.status(e.pos, e.status);
           this.ui.setStatus(key(e.pos), e.status);
           await this.say(e.text, 0.9);
@@ -297,6 +383,7 @@ export class BattleDirector {
         case 'faint': {
           this.fainted.add(e.uid);
           await this.until(() => !this.stage.busy);
+          this.displayed.delete(key(e.pos));
           const d = this.stage.faint(e.pos);
           this.ui.removePlate(key(e.pos));
           await this.say(e.text, Math.max(1, d));
@@ -316,7 +403,6 @@ export class BattleDirector {
           break;
         }
         case 'end':
-          this.shot = { kind: 'overview' };
           await this.say(e.text, 1.4);
           break;
         default:
@@ -365,59 +451,13 @@ export class BattleDirector {
       if (w.left <= 0) w.resolve();
       else this.waits.push(w);
     }
-    this.updateCamera(dt);
+    // The normal orbit camera remains under player control in both modes.
     for (const p of this.battle.activePositions()) {
       const k = key(p);
       if (!this.stage.occupied(p)) continue;
       const s = this.deps.project(this.stage.headOf(p));
       this.ui.placePlate(k, s.x, s.y, s.visible);
     }
-  }
-
-  private updateCamera(dt: number): void {
-    const st = this.stage;
-    const up = new THREE.Vector3(0, 1, 0);
-    switch (this.shot.kind) {
-      case 'overview':
-        // High behind the trainer and off their right shoulder, so both of your creatures clear them.
-        this.wantPos.copy(st.trainerSpot).addScaledVector(st.axis, -4).addScaledVector(st.right, 1.8).addScaledVector(up, 3.2);
-        this.wantLook.copy(st.center).addScaledVector(st.axis, 0.9).addScaledVector(up, 0.3);
-        break;
-      case 'command': {
-        // Over the right shoulder of the creature being commanded, looking at the foes. The
-        // creature sits left of centre (the move menu is on the right) and its partner is off-frame.
-        const s = st.spot(this.shot.pos);
-        const h = st.model(this.shot.pos)?.height ?? 0.6;
-        const lookSide = this.shot.pos.slot === 0 ? -0.8 : 1.2;
-        this.wantPos.copy(s).addScaledVector(st.axis, -2.1 - h * 1.2).addScaledVector(st.right, 0.8).addScaledVector(up, 1.0 + h * 0.75);
-        this.wantLook.copy(st.center).addScaledVector(st.axis, ARENA.line).addScaledVector(st.right, lookSide).addScaledVector(up, 0.1);
-        break;
-      }
-      case 'action': {
-        const a = st.focusOf(this.shot.from);
-        const b = this.shot.to ? st.focusOf(this.shot.to) : a.clone().addScaledVector(st.axis, this.shot.from.side === 0 ? 2.5 : -2.5);
-        const mid = a.clone().add(b).multiplyScalar(0.5);
-        const span = Math.max(2.4, a.distanceTo(b));
-        const side = this.shot.flip ? -1 : 1;
-        this.wantPos.copy(mid).addScaledVector(st.right, side * (1.9 + span * 0.62)).addScaledVector(st.axis, -1.1).addScaledVector(up, 1.0 + span * 0.16);
-        this.wantLook.copy(mid).addScaledVector(up, 0.1);
-        break;
-      }
-    }
-    const floor = this.deps.world.heightAt(this.wantPos.x, this.wantPos.z) + 1.2;
-    if (this.wantPos.y < floor) this.wantPos.y = floor;
-    // Each shot has its own lens (SHOT_FOV); a cut jumps straight there.
-    const cam = this.deps.camera;
-    const k = this.cut ? 1 : 1 - Math.exp(-3.2 * dt);
-    cam.fov += (SHOT_FOV[this.shot.kind] - cam.fov) * (this.cut ? 1 : 1 - Math.exp(-3 * dt));
-    cam.updateProjectionMatrix();
-    this.camPos.lerp(this.wantPos, k);
-    this.camLook.lerp(this.wantLook, this.cut ? 1 : 1 - Math.exp(-4.5 * dt));
-    this.cut = false;
-    this.deps.camera.position.copy(this.camPos);
-    this.deps.camera.lookAt(this.camLook);
-    // Plates are placed from this frame's camera, not the last rendered one.
-    this.deps.camera.updateMatrixWorld();
   }
 
   /** Remove the ring and UI. Wild creatures stay in the world (the wild manager owns them). */

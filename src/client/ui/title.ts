@@ -25,6 +25,7 @@ export function showTitle(parent: HTMLElement, hasSave: boolean, savedRoom: stri
         h('label.field', {}, 'World code (share it with your partner)', room),
         hasSave ? h('button.btn', { onclick: () => finish(true) }, 'Continue') : null,
         h('button.btn' + (hasSave ? '.secondary' : ''), { onclick: () => finish(false) }, hasSave ? 'New trainer' : 'Start'),
+        h('a', { href: location.protocol === 'file:' ? 'https://shamygo.github.io/Sijord/pokemon.html' : './pokemon.html', style: 'display:block;margin-top:18px' }, 'Explore the Pokémon model library'),
         h('p.hint', {}, 'Both players type the same world code to play together. Your partner appears once they join.'),
       ),
     );

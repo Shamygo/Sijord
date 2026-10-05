@@ -1,6 +1,7 @@
 import type { Choice, Pos } from '../../shared/battle/engine';
 import type { MajorStatus, MoveCategory, TypeName } from '../../shared/battle/types';
 import { h } from '../ui/dom';
+import type { BattleFrame } from '../../shared/battle/session';
 import { TYPE_COLORS } from './fx';
 
 export interface PlateInfo {
@@ -56,11 +57,38 @@ export class BattleUi {
   private numbers = h('div.battle-numbers');
   /** The last few lines of the battle, top right, so nothing is missed when it moves fast. */
   private logEl = h('div.battle-log');
+  private cancelChoice: (() => void) | null = null;
+  private controlsOpen = true;
+  private help = h('div.battle-help', {}, 'WASD move · Shift run · Space jump · Tab commands / mouse look');
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
 
   constructor() {
-    this.el.append(this.numbers, this.logEl, this.dock, this.captionEl, this.panel);
+    this.el.append(this.help, this.numbers, this.logEl, this.dock, this.captionEl, this.panel);
   }
+
+  cancelPrompt(): void { this.cancelChoice?.(); this.cancelChoice = null; this.closePanel(); }
+
+  setMode(mode: BattleFrame['mode']): void {
+    this.help.textContent = mode === 'action' ? 'WASD Pokémon movement · Shift run · Space dodge · 1–4 moves · Tab commands / mouse look' : 'WASD trainer movement · Shift run · Space jump · 1–4 moves · Tab commands / mouse look';
+  }
+
+  lobby(connected: boolean): Promise<BattleFrame['mode']> {
+    this.caption(connected ? 'Your friend can press E nearby to join. Choose a mode when you are both ready.' : 'Choose a battle mode.');
+    return new Promise(resolve => {
+      this.panel.replaceChildren(h('div.panel-head', {}, 'Try a battle mode'),
+        h('button.act', {onclick: () => {this.closePanel(); resolve('tactical');}}, 'Free-roam · turn-based'),
+        h('button.act', {onclick: () => {this.closePanel(); resolve('action');}}, 'Action · move and dodge'));
+      this.panel.classList.add('show');
+    });
+  }
+
+  toggleControls(): boolean {
+    this.controlsOpen = !this.controlsOpen;
+    this.panel.style.visibility = this.controlsOpen ? '' : 'hidden';
+    return this.controlsOpen;
+  }
+
+  get commandsOpen(): boolean { return this.controlsOpen; }
 
   show(): void {
     this.el.classList.add('show');
@@ -171,8 +199,9 @@ export class BattleUi {
   private onKeys(fn: (e: KeyboardEvent) => void): void {
     if (this.keyHandler) removeEventListener('keydown', this.keyHandler, true);
     this.keyHandler = (e) => {
+      if (!this.controlsOpen) return;
       // Battle keys win over the game's own bindings while a menu is open.
-      if (['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Escape', 'Backspace', 'KeyR', 'KeyS', 'Tab', 'KeyQ', 'KeyE', 'KeyB', 'KeyM', 'KeyP', 'KeyJ'].includes(e.code)) {
+      if (['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Escape', 'Backspace', 'KeyR', 'KeyX', 'KeyQ', 'KeyE', 'KeyB', 'KeyM', 'KeyP', 'KeyJ'].includes(e.code)) {
         e.preventDefault();
         e.stopPropagation();
       }
@@ -185,9 +214,11 @@ export class BattleUi {
   promptMove(p: MovePrompt): Promise<Choice | 'back'> {
     return new Promise((resolve) => {
       const done = (c: Choice | 'back') => {
+        this.cancelChoice = null;
         this.closePanel();
         resolve(c);
       };
+      this.cancelChoice = () => done({kind: 'pass'});
       const main = () => {
         const moveButtons = p.moves.map((m, i) => {
           const disabled = m.pp <= 0;
@@ -212,7 +243,7 @@ export class BattleUi {
           h(
             'div.panel-actions',
             {},
-            h('button.act', { onclick: () => switchMenu(), disabled: !p.bench.length }, h('span.key', {}, 'S'), ' Switch'),
+            h('button.act', { onclick: () => switchMenu(), disabled: !p.bench.length }, h('span.key', {}, 'X'), ' Switch'),
             p.canRun ? h('button.act', { onclick: () => done({ kind: 'run' }) }, h('span.key', {}, 'R'), ' Run') : null,
             p.canBack ? h('button.act.back', { onclick: () => done('back') }, h('span.key', {}, 'Esc'), ' Back') : null,
           ),
@@ -221,7 +252,7 @@ export class BattleUi {
         this.onKeys((e) => {
           const n = ['Digit1', 'Digit2', 'Digit3', 'Digit4'].indexOf(e.code);
           if (n >= 0 && n < p.moves.length && p.moves[n].pp > 0) pick(n);
-          else if (e.code === 'KeyS' && p.bench.length) switchMenu();
+          else if (e.code === 'KeyX' && p.bench.length) switchMenu();
           else if (e.code === 'KeyR' && p.canRun) done({ kind: 'run' });
           else if ((e.code === 'Escape' || e.code === 'Backspace') && p.canBack) done('back');
         });

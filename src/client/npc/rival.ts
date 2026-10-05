@@ -32,6 +32,7 @@ export class Rival {
 
   constructor(private world: World, private home: THREE.Vector3, private homeYaw: number) {
     this.avatar = createAvatar({
+      trainerModel: 'custom',
       skinTone: '#f1d2b0',
       hairColor: '#f0cf72',
       hairStyle: 3,

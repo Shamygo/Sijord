@@ -7,6 +7,8 @@ export interface ItemInfo {
   description: string;
   /** Short glyph shown in the bag grid until item art exists. */
   icon: string;
+  sprite?: string;
+  heal?: number;
 }
 
 export const ITEM_CATEGORIES: { id: ItemCategory; label: string }[] = [
@@ -19,19 +21,19 @@ export const ITEM_CATEGORIES: { id: ItemCategory; label: string }[] = [
 
 export const ITEMS: Record<string, ItemInfo> = {
   'bramble-berry': {
-    id: 'bramble-berry', name: 'Bramble Berry', category: 'items', icon: '🫐',
-    description: 'A tart berry from the hedges around Bramblewick. Restores a little hunger.',
+    id: 'bramble-berry', name: 'Oran Berry', category: 'items', icon: '🫐', sprite: 'oran-berry', heal:10,
+    description: 'A berry that restores 10 HP to one Pokémon.',
   },
   'water-flask': {
-    id: 'water-flask', name: 'Water Flask', category: 'items', icon: '💧',
-    description: 'A refillable flask. Drink to restore thirst; refill at any river or well.',
+    id: 'water-flask', name: 'Fresh Water', category: 'items', icon: '💧', sprite:'fresh-water', heal:30,
+    description: 'Refreshing drinking water. Restores 30 HP to one Pokémon.',
   },
   'bandage': {
-    id: 'bandage', name: 'Bandage', category: 'items', icon: '🩹',
-    description: 'Patches you up after a wild Pokemon gets rough. Restores some of your HP.',
+    id: 'bandage', name: 'Potion', category: 'items', icon: '🩹', sprite:'potion', heal:20,
+    description: 'A spray medicine that restores 20 HP to one Pokémon.',
   },
   'poke-ball': {
-    id: 'poke-ball', name: 'Poke Ball', category: 'balls', icon: '◓',
+    id: 'poke-ball', name: 'Poke Ball', category: 'balls', icon: '◓', sprite:'poke-ball',
     description: 'A standard ball. Works best on Pokemon weakened in battle and close to your level.',
   },
   'wood': {
@@ -47,11 +49,11 @@ export const ITEMS: Record<string, ItemInfo> = {
     description: 'Pulled from tall grass. Used for rope, bandages and basic clothing.',
   },
   'trainer-journal': {
-    id: 'trainer-journal', name: 'Trainer Journal', category: 'key', icon: '📓',
+    id: 'trainer-journal', name: 'Trainer Journal', category: 'key', icon: '📓', sprite:'fashion-case',
     description: 'Your notes on the journey so far. Quests are tracked here.',
   },
   'region-map': {
-    id: 'region-map', name: 'Sijord Map', category: 'key', icon: '🗺',
+    id: 'region-map', name: 'Sijord Map', category: 'key', icon: '🗺', sprite:'town-map',
     description: 'A hand-drawn map of the Sijord region from Professor Hazel. Fills in as you explore.',
   },
 };

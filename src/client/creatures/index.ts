@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
+import { loadedAsset, pokemonUrl } from '../assets/loader';
+import { importedCreature } from './imported';
 import { hashString, type BaseInit, type Clip } from './core';
 import { quadClips } from './clips';
 import { Kit, cloneTemplate, remap } from './kit';
@@ -123,6 +126,13 @@ function release(t: Template): void {
 
 export function createCreatureModel(speciesId: string): CreatureModel {
   const id = speciesId.toLowerCase();
+  const visual = POKEMON_VISUALS[id];
+  const asset = visual && loadedAsset(pokemonUrl(visual.dex));
+  if (asset) {
+    const model = importedCreature(asset, (SPECIES[id] ?? fallbackSpecies()).height);
+    model.root.name = `creature:${id}`;
+    return model;
+  }
   const t = acquire(id);
   const { root, meshes, lookup } = cloneTemplate(t.root);
   root.name = `creature:${id}`;

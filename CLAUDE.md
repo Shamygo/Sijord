@@ -16,7 +16,7 @@ npm run dev           # http://localhost:5173
 npm run typecheck
 npm test
 npm run build         # dist/, deployed to GitHub Pages
-npm run build:single  # dist-single/sijord.html, one-file offline build
+npm run build:single  # dist-single/sijord.html, one-file code build (imported art requires internet)
 ```
 
 Run `npm run typecheck && npm test && npm run build` before pushing. CI runs the tests before every deploy.
@@ -26,6 +26,6 @@ Run `npm run typecheck && npm test && npm run build` before pushing. CI runs the
 - Every push to `main` redeploys the live site that Simon and his friend play. Simon is fine with Claude merging PRs to `main`. Keep `main` playable.
 - The game must be **hard**. Don't hand the player power; strong abilities come from skill trees and effort.
 - Visual and animation quality is judged against the reference image (`docs/reference/art-reference.png`) and Legends Arceus. Every graphics change should be checked by screenshotting the game and comparing it side by side with the reference. Say honestly what still doesn't match.
-- All art is original and procedural. Never use official Pokemon assets.
+- Environment art remains procedural. The user explicitly requested Pokémon model assets and Red from Pokémon Masters on 2026-10-05, including public hosting. See docs/MODEL_ASSETS.md for sources, animation gaps, save compatibility and model loading.
 - Keep canon names consistent (see HANDOFF.md). World axes: north = +Z, east = -X.
 - When a milestone lands, update the "Current state" and "Next up" sections of docs/HANDOFF.md and the milestone status in docs/ROADMAP.md.

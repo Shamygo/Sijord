@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { withTrainerAsset } from './imported-trainer';
 import type { Appearance } from '../../shared/types';
 import {
   clamp,
@@ -1468,5 +1469,6 @@ const _yAxis = new THREE.Vector3(0, 1, 0);
 const _zAxis = new THREE.Vector3(0, 0, 1);
 
 export function createAvatar(appearance: Appearance): Avatar {
-  return new AvatarImpl(appearance);
+  const procedural = new AvatarImpl(appearance);
+  return typeof document === 'undefined' ? procedural : withTrainerAsset(procedural, appearance);
 }

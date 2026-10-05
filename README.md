@@ -6,14 +6,14 @@ A two-player, open world monster-catching adventure in the browser, inspired by 
 
 Play in the browser at https://shamygo.github.io/Sijord/ (redeployed on every push to `main`).
 
-To play offline, download `sijord.html` from the **Latest playable build** release and double-click it, or build it yourself:
+For a downloadable copy, download `sijord.html` from the **Latest playable build** release and double-click it, or build it yourself:
 
 ```bash
 npm install
 npm run build:single   # writes dist-single/sijord.html
 ```
 
-Open `sijord.html` in Chrome or Edge on Windows or Mac. To play together, both players open the game and type the **same world code** on the title screen. Co-op is peer-to-peer: the two browsers find each other through public relays and then connect directly, so nothing needs hosting.
+The downloadable HTML uses online model assets. With no internet connection it falls back to the original procedural characters. Open `sijord.html` in Chrome or Edge on Windows or Mac. To play together, both players open the game and type the **same world code** on the title screen. Co-op is peer-to-peer: the two browsers find each other through public relays and then connect directly, so nothing needs hosting.
 
 For development, `npm run dev` serves the game at http://localhost:5173.
 
@@ -68,4 +68,12 @@ npm test
 npm run build
 ```
 
-All art is original and generated in code; the project uses no official Pokemon assets.
+The landscape is procedural. Pokémon and Red use imported models; see [model assets](docs/MODEL_ASSETS.md) for source credits and animation coverage. The [Pokémon library](https://shamygo.github.io/Sijord/pokemon.html) contains all 1,322 available models/forms and their included animation clips. Gameplay currently uses 21 of those Pokémon; adding more encounters is separate from importing models.
+
+### Imported Pokémon, battle modes and interface
+
+The public build includes a searchable collection of 1,322 Pokémon models/forms (404 with included animation clips), the Pokémon Masters Red trainer, and 2,035 item icons. The existing world has 21 gameplay species, now represented by animated Pokémon models. Source coverage and credits are in [MODEL_ASSETS.md](docs/MODEL_ASSETS.md).
+
+Battles offer a free-roam trainer mode with the original turn-based commands, and an experimental action mode with direct Pokémon movement and spatial dodging. Friends join an encounter lobby with E before the host chooses its mode, then command one Pokémon each. WASD moves, Shift runs, Space jumps/dodges, 1–4 selects moves, X switches, and Tab toggles commands/mouse look. Both players use the same world code.
+
+The bag, party, map and battle panels follow the supplied dark/cyan interface references. Medicines can heal a selected Pokémon from the bag; the Pokédex searches the full model collection. Catching, fast travel and additional world encounters remain separate gameplay work.

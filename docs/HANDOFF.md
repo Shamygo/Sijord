@@ -36,11 +36,11 @@ Everything a new contributor (human or Claude) needs to pick up this project fro
 - Classes (code ids): `ranger`, `tamer`, `artisan`, `scholar`, `medic`. Each has one small perk and one real cost (DESIGN §7.2, `src/shared/classes.ts`).
 - 12 large cities, 10 of them with gyms. **Crownspire** (Elite Four, 10 badges) and **Tornhavn** (Battle Tower, 5 badges) are the only hard-locked places.
 - World axes: **north = +Z, east = -X**.
-- All art is original and generated in code. Never use official Pokemon models, sprites or audio.
+- Environment art is procedural. As of 2026-10-05, the user explicitly requested imported Pokémon character models and Red from Pokémon Masters, publicly hosted. See [MODEL_ASSETS.md](MODEL_ASSETS.md).
 
 ## Stack and layout
 
-TypeScript + Three.js, built with Vite, tested with Vitest. No game engine and no asset files: terrain, models, textures and animation are all procedural.
+TypeScript + Three.js, built with Vite, tested with Vitest. The environment is procedural; imported character/item assets are self-hosted with procedural fallbacks.
 
 ```
 src/client/main.ts    boot: title -> trainer creator -> loading screen -> Game
@@ -75,6 +75,10 @@ npm run build:single   # dist-single/sijord.html, the whole game in one double-c
 - **Offline build:** `.github/workflows/release.yml` rebuilds `sijord.html` on every push to `main` and attaches it to the `latest` release ("Latest playable build").
 - **Co-op:** both players type the same world code on the title screen. Default transport is peer-to-peer WebRTC via Trystero, using free public Nostr relays only for matchmaking, so nothing is hosted. Fallbacks: `npm run relay` plus `?relay=ws://<ip>:8090`, or `npm run server` plus `?server=ws://<ip>:8787` (or `?server=local`). Co-op over the public relays has not yet been confirmed on Simon's and his friend's real machines.
 - **Verifying visually:** Chromium and Playwright are typically available in Claude's cloud container. Run `npm run dev` or `npm run preview` and screenshot the game. Software rendering there is very slow, so judge frame rate on real hardware, not in the container. [DEV_NOTES.md](DEV_NOTES.md#how-to-play-test-in-a-claude-cloud-container) has the exact Playwright setup.
+
+## Imported character update (2026-10-05)
+
+The 21 existing gameplay species now display animated Kanto Pokémon models and matching names. Red from Pokémon Masters is the default trainer, driven by Sijord locomotion and throw poses; custom trainers remain selectable. Existing save IDs and combat progression are preserved. A searchable [model library](https://shamygo.github.io/Sijord/pokemon.html) exposes 1,322 available models/forms, 404 with embedded clips. The original 151 have 869 clips. See [MODEL_ASSETS.md](MODEL_ASSETS.md) for exact coverage and limitations. Model import does not expand encounters to the full catalogue. Next: continue M3 catching, then add encounter/species data incrementally.
 
 ## Current state (after PR #6)
 
@@ -144,3 +148,11 @@ All of this happened on 2026-10-04 in a private Claude project ("Sijord Pokemon 
 - Right and distance: a deep blue river with sandy banks and a wooden bridge, cliffs and stone arches across the water, a red-roofed castle town with a spire on a plateau, and big snowy mountains behind, softened by blue atmospheric haze. Clear deep-blue sky with a few thin clouds. Warm late-morning sun.
 - HUD: a compass strip at top centre, time and weather at top right, a round minimap at top right, a quest tracker below it ("Head to the Grand Ridge", "Meet Professor Rowan"), three party portraits with level and HP bars at top left, the ridden or partner creature's card bottom left with an "E Ride" prompt, and a hotbar bottom right (ball count on Q, partner on F, bag on Tab).
 - The look: clean stylised shapes, soft shading, high saturation, crisp silhouettes and lots of small detail on the ground. The names in the image are placeholders, not canon.
+
+## Public Pokémon update (2026-10-05)
+
+The user requested imported Pokémon models, a game trainer, public access, both free-roam turn-based and action/dodge battle modes with co-op, and the six supplied UI inspirations. See [MODEL_ASSETS.md](MODEL_ASSETS.md) for asset sources and exact coverage. All 1,322 selected models (404 animated, 8,518 clips) and 2,035 item sprites are self-hosted. Existing encounters still use the 21 save-compatible species slots. Red is the default; its rig uses adapted Sijord movement rather than original Masters clips.
+
+At a battle lobby the host selects either mode. A nearby friend presses E to join first. The host resolves turns; the guest controls its own slot and receives committed party results. Tab switches commands/mouse look, X switches creatures, Space jumps in trainer mode and dashes in action mode. The dark/cyan menu includes medicine use, trainer/party details, map destination markers and a searchable model Pokédex. Manual Save progress supplements existing progress saves. Catching and fast travel remain unimplemented.
+
+Validation: 140 unit tests, typecheck, regular and single-file builds; all published asset hashes and clip lists verified; actual two-context WebRTC tests with a local signaling relay covered shared commands, turn completion, trainer movement, both players’ action movement/dodge inputs, guest result persistence, running and AI continuation after a guest leaves. Public-relay/NAT success on two different home networks is not established by those local tests.
