@@ -80,3 +80,10 @@ Things about the code and testing that aren't obvious from reading it. Most of t
 - Water is less turquoise than the reference, and one boundary foothill seen from town is a pointy cone. A cliff mesa can read as a ruined fortress from a distance.
 - HUD toast timers count frame dt, which is capped at 0.1 s, so with very slow frames toasts linger. Harmless on real hardware.
 - Dialogue choice buttons need a mouse click; there's no keyboard or gamepad selection for choices yet.
+
+
+## Movement QA after PR #10
+
+`window.sijord` exists only in Vite development; production intentionally retains only `render_game_to_text` and `advanceTime`. Do not wait for the private game object in a public-site probe. Use ordinary controls and the text hook in production; the committed movement browser regression needs the Vite dev server. A fresh player starts in front of a house: walking into its collider correctly stops motion/animation, so move sideways into clear space when checking sustained gait. Native pointer-lock tests require a focused visible browser window; headless capture was not reliable on this Mac.
+
+Rei gait speed is measured per final-sized instance, not guessed from source-library dimensions. Walk/jog phase is preserved, feet get a bounded visual support correction, and the run flight phase remains. Physics position/collisions own movement. See POLISH_HANDOFF for user intent, air/landing tuning, smooth local/remote Pokémon movement and test evidence.

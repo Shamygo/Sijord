@@ -1,0 +1,16 @@
+{
+  "errors": [],
+  "battle": {
+    "start": 0,
+    "first": 0.32689910476587636,
+    "settled": 1.569662039351125,
+    "reverse": 1.569898096402947,
+    "remoteBefore": 3.5999886753743326,
+    "remoteFirst": 3.78141592089713,
+    "target": 4.299988675374332
+  },
+  "walkRate": 0.7547932900317994,
+  "walkSpeed": 4.5,
+  "medianSupportFootWorldSpeed": 0,
+  "supportSamples": 89
+}

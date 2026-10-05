@@ -2,7 +2,15 @@
 
 Read this before continuing graphics, UI, trainer, traversal or multiplayer work. The user specifically requested notes that returning Claude will see and understand, so the top-level `CLAUDE.md` links here prominently. The older VISION/DESIGN/ROADMAP remain useful, but later direct user feedback recorded here takes precedence where it changes earlier assumptions.
 
-## Published and verified state
+## Latest published movement update (PR #10)
+
+- [PR #10](https://github.com/Shamygo/Sijord/pull/10) merged as `873bb0a9ed393cfa3cf092e688329e54009a25f6`.
+- [Pages deployment](https://github.com/Shamygo/Sijord/actions/runs/37376975342) and [downloadable build](https://github.com/Shamygo/Sijord/actions/runs/37376975489) succeeded. Play at https://shamygo.github.io/Sijord/?v=movement10.
+- The live `assets/game-BJOz-V2a.js` build was checked through ordinary keyboard/mouse controls: Rei reached 4.5 m/s using the calibrated run/jog clip, stopped after input release, jumped and returned to ground, and Party released the captured cursor. Completed live probe had no browser errors. Tests use an isolated fresh save, not the user's browser save.
+- Downloaded release matches the final local single-file build byte-for-byte: 4,151,708 bytes, SHA-256 `b8f4d783fad350ddf00b66e7b9b5b37e95d36506c8b086ae34804ce7a3c7d19b`.
+- [Actual movement screenshot](screenshots/2026-10-05-movement/live-jog.png) and [local gait/stage measurements](screenshots/2026-10-05-movement/verification.json) are retained. Full implementation/reproduction/limits are in the movement follow-up below. This final notes-only commit changes no runtime code or assets.
+
+## Previous published polish state (PR #9)
 
 Gameplay changes merged in [PR #9](https://github.com/Shamygo/Sijord/pull/9), gameplay merge commit `ba2250645f5814ed252a0bdc0e7bd52dd2d34d33`.
 
