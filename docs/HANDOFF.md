@@ -1,6 +1,6 @@
 # Sijord: handoff
 
-Everything a new contributor (human or Claude) needs to pick up this project from the repository alone. Written 2026-10-04 after PR #3, updated 2026-10-05 for the Pokémon/free-roam release and world/UI polish. Update the "Current state" and "Next up" sections whenever a milestone lands.
+Everything a new contributor (human or Claude) needs to pick up this project from the repository alone. Written 2026-10-04 after PR #3, updated 2026-10-05 after PR #9 and live world/UI polish verification. Update the "Current state" and "Next up" sections whenever a milestone lands.
 
 **Latest direct feedback:** Read [POLISH_HANDOFF.md](POLISH_HANDOFF.md) first. It explains the new requests, implemented changes, asset/animation provenance and remaining gaps. The latest reference images and before/after screenshots are stored in this repo.
 

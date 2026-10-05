@@ -2,6 +2,17 @@
 
 Read this before continuing graphics, UI, trainer, traversal or multiplayer work. The user specifically requested notes that returning Claude will see and understand, so the top-level `CLAUDE.md` links here prominently. The older VISION/DESIGN/ROADMAP remain useful, but later direct user feedback recorded here takes precedence where it changes earlier assumptions.
 
+## Published and verified state
+
+Gameplay changes merged in [PR #9](https://github.com/Shamygo/Sijord/pull/9), gameplay merge commit `ba2250645f5814ed252a0bdc0e7bd52dd2d34d33`.
+
+- [Public game](https://shamygo.github.io/Sijord/?v=polish9) and [explorer](https://shamygo.github.io/Sijord/pokemon.html?v=polish9) are live. Pages [run 37294989420](https://github.com/Shamygo/Sijord/actions/runs/37294989420) and downloadable-build [run 37294989426](https://github.com/Shamygo/Sijord/actions/runs/37294989426) both succeeded.
+- Live browser checks confirmed the published `assets/game-JaPnUxlV.js` build, Rei with its idle clip, old-default visual migration with the party preserved, actual mouse capture/release over Party/Save/Bag/close, and empty-party Hazel guidance. Pikachu's included attack clip and all 971 portrait-manifest entries were available. No browser errors in the completed live run.
+- Published Rei SHA-256: `d4405b1af003678bbd2f09cfb803de872fa18fd8113695bc1e8061e4c70de3ba`.
+- The [latest downloadable release](https://github.com/Shamygo/Sijord/releases/tag/latest) HTML was downloaded and matched the final local build byte-for-byte (4,148,220 bytes; SHA-256 `692c40a98c163e724ab45ede228b025ac19e8fe35dd6eeeea82b4edfeb15223c`). Imported art still requires internet.
+
+These checks used isolated test saves, not the user's personal browser save. Preserve all compatibility rules below. This final documentation update changes no gameplay code or published asset content.
+
 ## What the user wants and why
 
 The user and a friend want to play this game together. They asked to keep the game publicly accessible for easy access, while describing the use as their own personal fun. They explicitly requested Pokémon models/items and a trainer from the games, then specifically preferred the Legends: Arceus trainer and animations. They want both a free-roam trainer/turn-based battle mode and a direct Pokémon movement/dodging mode as separate options so they can test which is better.
