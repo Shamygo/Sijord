@@ -586,6 +586,7 @@ export class Game {
         hudRoot: this.hud.el,
         portraits: this.portraits,
         project: (v) => this.project(v),
+        onThrow: (side) => (side === 0 ? this.avatar.gesture('throw') : start.kind === 'trainer' && this.rival.gesture('throw')),
       },
       { ...start, playerName: this.save.profile.name, party: this.party, levelCap: this.levelCap, xpMult: 1 },
     );

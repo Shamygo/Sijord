@@ -6,12 +6,14 @@ import { randomSeed } from '../../shared/battle/rng';
 import type { Creature } from '../../shared/battle/types';
 import { moveData } from '../../shared/data/moves';
 import type { CreatureModel } from '../creatures';
+import { THROW_RELEASE } from '../player/avatar-clips';
 import type { Portraits } from '../ui/portraits';
 import type { World } from '../world/types';
 import { ARENA, BattleStage, key } from './stage';
 import { BattleUi, type MovePrompt } from './ui';
 
 export const PLAYER_ID = 'player';
+const BATTLE_FOV = 48;
 const FOE_ID = 'foe';
 
 export interface WildActor {
@@ -58,6 +60,8 @@ export interface DirectorDeps {
   project(p: THREE.Vector3): { x: number; y: number; visible: boolean };
   /** Move the foe trainer NPC into place (trainer battles). */
   placeFoeTrainer?(pos: THREE.Vector3, yaw: number): void;
+  /** A trainer on `side` throws a ball (plays their throw gesture). */
+  onThrow?(side: 0 | 1): void;
 }
 
 /**
@@ -220,7 +224,12 @@ export class BattleDirector {
           const wild = mine ? undefined : this.wildActors.get(e.uid);
           this.wildActors.delete(e.uid);
           if (wild) dur = this.stage.adopt(e.pos, wild.root, wild.model);
-          else dur = this.stage.sendOut(e.pos, e.species, mine ? this.stage.trainerSpot : this.stage.foeTrainerSpot);
+          else {
+            // Wind up first so the ball leaves the trainer's hand.
+            this.deps.onThrow?.(e.pos.side);
+            await this.wait(THROW_RELEASE);
+            dur = this.stage.sendOut(e.pos, e.species, mine ? this.stage.trainerSpot : this.stage.foeTrainerSpot);
+          }
           this.ui.setPlate(k, {
             name: e.name, level: e.level, hp: e.hp, maxHp: e.maxHp, status: e.status, mine,
             tag: mine ? '' : this.start.kind === 'wild' ? 'Wild' : this.start.foeName,
@@ -365,8 +374,8 @@ export class BattleDirector {
     const up = new THREE.Vector3(0, 1, 0);
     switch (this.shot.kind) {
       case 'overview':
-        this.wantPos.copy(st.trainerSpot).addScaledVector(st.axis, -3.4).addScaledVector(st.right, 1.8).addScaledVector(up, 3.1);
-        this.wantLook.copy(st.center).addScaledVector(st.axis, 1.0).addScaledVector(up, 0.4);
+        this.wantPos.copy(st.trainerSpot).addScaledVector(st.axis, -2.4).addScaledVector(st.right, 1.5).addScaledVector(up, 2.4);
+        this.wantLook.copy(st.center).addScaledVector(st.axis, 0.9).addScaledVector(up, 0.3);
         break;
       case 'command': {
         // Over the shoulder of the creature being commanded, looking at the foes.
@@ -390,6 +399,10 @@ export class BattleDirector {
     }
     const floor = this.deps.world.heightAt(this.wantPos.x, this.wantPos.z) + 1.2;
     if (this.wantPos.y < floor) this.wantPos.y = floor;
+    // A slightly longer lens than exploring, so small creatures fill the frame.
+    const cam = this.deps.camera;
+    cam.fov += (BATTLE_FOV - cam.fov) * (1 - Math.exp(-3 * dt));
+    cam.updateProjectionMatrix();
     const k = 1 - Math.exp(-3.2 * dt);
     this.camPos.lerp(this.wantPos, k);
     this.camLook.lerp(this.wantLook, 1 - Math.exp(-4.5 * dt));

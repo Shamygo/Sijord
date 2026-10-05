@@ -38,6 +38,8 @@ export interface Avatar {
   setAppearance(a: Appearance): void;
   /** Drive the walk/run/idle/jump pose. `speed` is horizontal m/s. */
   animate(dt: number, snapshot: AnimateInput): void;
+  /** Play a one-shot upper-body gesture while standing, e.g. throwing a ball. */
+  gesture(name: 'throw'): void;
   /** Terrain height function used to plant the feet on slopes (null: estimate from motion). */
   setGround(fn: GroundFn | null): void;
   dispose(): void;

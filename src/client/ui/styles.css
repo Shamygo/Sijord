@@ -242,7 +242,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* Hide the explore HUD while a battle runs */
 .hud.in-battle .compass, .hud.in-battle .clock, .hud.in-battle .minimap, .hud.in-battle .quests, .hud.in-battle .party,
-.hud.in-battle .vitals, .hud.in-battle .hotbar, .hud.in-battle .help, .hud.in-battle .prompt, .hud.in-battle .net { display: none; }
+.hud.in-battle .vitals, .hud.in-battle .hotbar, .hud.in-battle .help, .hud.in-battle .prompt, .hud.in-battle .net, .hud.in-battle .toast { display: none; }
 .fade { position: absolute; inset: 0; background: #05080c; opacity: 0; transition: opacity .4s; pointer-events: none; }
 .fade.show { opacity: 1; }
 

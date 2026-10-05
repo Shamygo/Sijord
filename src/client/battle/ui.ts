@@ -80,6 +80,8 @@ export class BattleUi {
       const status = h('span.status-chip');
       const img = h('img.plate-portrait', { alt: '' });
       const el = h('div.plate', {}, img, h('div.plate-body', {}, h('div.plate-top', {}, h('span.plate-name'), status, h('span.plate-level')), h('div.plate-tag'), h('div.hpbar', {}, ghost, fill), hpText));
+      // Hidden until the first placement, so it never flashes in the corner.
+      el.style.display = 'none';
       p = { el, fill, ghost, hpText, status, img, ratio: info.maxHp ? info.hp / info.maxHp : 0 };
       this.plates.set(k, p);
     }

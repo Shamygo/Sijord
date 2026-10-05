@@ -60,6 +60,10 @@ export class Rival {
     return this.mover.yaw;
   }
 
+  gesture(name: 'throw'): void {
+    this.avatar.gesture(name);
+  }
+
   setVisible(v: boolean): void {
     this.root.visible = v;
   }
