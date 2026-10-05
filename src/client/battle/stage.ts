@@ -29,12 +29,12 @@ interface Tween {
 /** Arena layout in metres: creatures stand close enough that a small creature still reads on screen. */
 export const ARENA = {
   /** Distance from the centre to each side's line of creatures. */
-  line: 2.9,
+  line: 2.35,
   /** Half the gap between the two creatures on a side. */
-  lateral: 1.55,
+  lateral: 1.6,
   /** Distance from the centre to each trainer. */
-  trainer: 5.6,
-  radius: 6.6,
+  trainer: 4.9,
+  radius: 6.0,
 };
 
 const ease = (k: number) => k * k * (3 - 2 * k);

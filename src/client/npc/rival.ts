@@ -137,13 +137,13 @@ export class Rival {
   }
 
   /**
-   * Her team for the first battle: the starter with the type edge, plus a Finchlet she caught
-   * last week. She focuses the player's starter, so the fight is hard but winnable by ganging
-   * up on her starter first (or training on the meadow and coming back).
+   * Her team for the first battle: the starter with the type edge (holding an Oran Berry), plus a
+   * Finchlet she caught last week. She focuses the player's starter, so the fight is hard but
+   * winnable by ganging up on her starter first (or training on the meadow and coming back).
    */
   team(playerStarter: string, seed: number): Creature[] {
     const rng = new Rng(seed);
-    const starter = createCreature(COUNTER[playerStarter] ?? 'cindlet', 5, rng);
+    const starter = createCreature(COUNTER[playerStarter] ?? 'cindlet', 5, rng, { item: 'oran-berry' });
     const bird = createCreature('finchlet', 4, rng);
     starter.ot = NAME;
     bird.ot = NAME;

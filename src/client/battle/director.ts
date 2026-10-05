@@ -13,7 +13,8 @@ import { ARENA, BattleStage, key } from './stage';
 import { BattleUi, type MovePrompt } from './ui';
 
 export const PLAYER_ID = 'player';
-const BATTLE_FOV = 48;
+/** Lens per shot: a longer lens over the shoulder, so the foes fill more of the frame. */
+const SHOT_FOV = { overview: 50, command: 42, action: 46 } as const;
 const FOE_ID = 'foe';
 
 export interface WildActor {
@@ -90,6 +91,8 @@ export class BattleDirector {
   private shot: Shot = { kind: 'overview' };
   private camPos = new THREE.Vector3();
   private camLook = new THREE.Vector3();
+  /** Jump straight to the next shot's framing instead of easing into it. */
+  private cut = false;
   private wantPos = new THREE.Vector3();
   private wantLook = new THREE.Vector3();
   private hurry = false;
@@ -142,6 +145,8 @@ export class BattleDirector {
       if (this.battle.phase === 'move') {
         for (let i = 0; i < human.length; ) {
           const r = human[i];
+          // Cut, don't pan, from the wide shot: a pan would sweep through the trainer's head.
+          if (this.shot.kind === 'overview') this.cut = true;
           this.shot = { kind: 'command', pos: r.pos };
           this.ui.caption(null);
           const c = await this.ui.promptMove(this.movePrompt(r.pos, i > 0));
@@ -374,16 +379,18 @@ export class BattleDirector {
     const up = new THREE.Vector3(0, 1, 0);
     switch (this.shot.kind) {
       case 'overview':
-        this.wantPos.copy(st.trainerSpot).addScaledVector(st.axis, -2.4).addScaledVector(st.right, 1.5).addScaledVector(up, 2.4);
+        // High behind the trainer and off their right shoulder, so both of your creatures clear them.
+        this.wantPos.copy(st.trainerSpot).addScaledVector(st.axis, -4).addScaledVector(st.right, 1.8).addScaledVector(up, 3.2);
         this.wantLook.copy(st.center).addScaledVector(st.axis, 0.9).addScaledVector(up, 0.3);
         break;
       case 'command': {
-        // Over the shoulder of the creature being commanded, looking at the foes.
+        // Over the right shoulder of the creature being commanded, looking at the foes. The
+        // creature sits left of centre (the move menu is on the right) and its partner is off-frame.
         const s = st.spot(this.shot.pos);
         const h = st.model(this.shot.pos)?.height ?? 0.6;
-        const side = this.shot.pos.slot === 0 ? -1 : 1;
-        this.wantPos.copy(s).addScaledVector(st.axis, -2.6 - h * 0.8).addScaledVector(st.right, side * 1.0).addScaledVector(up, 1.25 + h * 0.6);
-        this.wantLook.copy(st.center).addScaledVector(st.axis, 2.4).addScaledVector(up, 0.35);
+        const lookSide = this.shot.pos.slot === 0 ? -0.8 : 1.2;
+        this.wantPos.copy(s).addScaledVector(st.axis, -2.1 - h * 1.2).addScaledVector(st.right, 0.8).addScaledVector(up, 1.0 + h * 0.75);
+        this.wantLook.copy(st.center).addScaledVector(st.axis, ARENA.line).addScaledVector(st.right, lookSide).addScaledVector(up, 0.1);
         break;
       }
       case 'action': {
@@ -399,13 +406,14 @@ export class BattleDirector {
     }
     const floor = this.deps.world.heightAt(this.wantPos.x, this.wantPos.z) + 1.2;
     if (this.wantPos.y < floor) this.wantPos.y = floor;
-    // A slightly longer lens than exploring, so small creatures fill the frame.
+    // Each shot has its own lens (SHOT_FOV); a cut jumps straight there.
     const cam = this.deps.camera;
-    cam.fov += (BATTLE_FOV - cam.fov) * (1 - Math.exp(-3 * dt));
+    const k = this.cut ? 1 : 1 - Math.exp(-3.2 * dt);
+    cam.fov += (SHOT_FOV[this.shot.kind] - cam.fov) * (this.cut ? 1 : 1 - Math.exp(-3 * dt));
     cam.updateProjectionMatrix();
-    const k = 1 - Math.exp(-3.2 * dt);
     this.camPos.lerp(this.wantPos, k);
-    this.camLook.lerp(this.wantLook, 1 - Math.exp(-4.5 * dt));
+    this.camLook.lerp(this.wantLook, this.cut ? 1 : 1 - Math.exp(-4.5 * dt));
+    this.cut = false;
     this.deps.camera.position.copy(this.camPos);
     this.deps.camera.lookAt(this.camLook);
     // Plates are placed from this frame's camera, not the last rendered one.

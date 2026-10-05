@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sijord creature gallery</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #9ec4e8;
+        font-family: system-ui, sans-serif;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #hud {
+        position: fixed;
+        left: 10px;
+        top: 8px;
+        color: #fff;
+        font-size: 12px;
+        text-shadow: 0 1px 2px #0008;
+        pointer-events: none;
+        white-space: pre;
+      }
+      .tag {
+        position: fixed;
+        transform: translate(-50%, -100%);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        text-shadow: 0 1px 2px #000a;
+        pointer-events: none;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud"></div>
+    <script type="module" src="/src/client/creatures/gallery.ts"></script>
+  </body>
+</html>
