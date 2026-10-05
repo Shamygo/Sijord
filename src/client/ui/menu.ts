@@ -1,4 +1,13 @@
+import { creatureStats, displayName, isUsable, maxHp } from '../../shared/battle/creature';
+import { NATURES } from '../../shared/battle/natures';
+import { xpForLevel } from '../../shared/battle/stats';
+import type { Creature, StatName } from '../../shared/battle/types';
+import { ABILITIES } from '../../shared/data/abilities';
+import { moveData } from '../../shared/data/moves';
+import { species } from '../../shared/data/species';
 import { ITEMS, ITEM_CATEGORIES, type ItemCategory } from '../../shared/items';
+import { TYPE_COLORS } from '../battle/fx';
+import { STATUS_LABEL } from '../battle/ui';
 import { ACTION_LABELS, DEFAULT_SETTINGS, keyLabel, rebind, type Action, type Settings } from '../core/settings';
 import type { World } from '../world/types';
 import { h } from './dom';
@@ -14,6 +23,11 @@ export interface MenuDeps {
   partner(): { x: number; z: number; name: string } | null;
   quests(): Quest[];
   bag(): Record<string, number>;
+  party(): Creature[];
+  portrait(species: string): string;
+  /** The party order changed in the menu. */
+  onPartyChanged(): void;
+  levelCap(): number;
   settings: Settings;
   onSettings(s: Settings): void;
   onResume(): void;
@@ -37,6 +51,7 @@ export class GameMenu {
   private open_ = false;
   private bagCategory: ItemCategory = 'items';
   private selectedItem: string | null = null;
+  private selectedMon = 0;
   private listening: Action | null = null;
   private map: MapView | null = null;
 
@@ -80,6 +95,11 @@ export class GameMenu {
   toggle(tab: MenuTab): void {
     if (this.open_ && this.tab === tab) this.close();
     else this.open(tab);
+  }
+
+  /** Redraw after the data behind the open tab changed. */
+  refresh(): void {
+    if (this.open_ && this.tab === 'party') this.render();
   }
 
   /** Called each frame while open so the map shows live positions. */
@@ -191,13 +211,107 @@ export class GameMenu {
   }
 
   private renderParty(): HTMLElement {
+    const party = this.deps.party();
+    if (!party.length) {
+      return h(
+        'div.party-grid',
+        {},
+        ...Array.from({ length: 6 }, (_, i) =>
+          h('div.party-slot', {}, h('div.party-ball', {}, '◓'), h('div', {}, i < 2 ? `Slot ${i + 1} · battles first` : `Slot ${i + 1}`), h('small', {}, 'Empty')),
+        ),
+        h('p.hint-dark', {}, 'Every battle is a double battle: the first two Pokemon in your party go out together. Professor Hazel will give you your first partner.'),
+      );
+    }
+    this.selectedMon = Math.min(this.selectedMon, party.length - 1);
+    const leads = party.filter(isUsable).slice(0, 2);
+    const cards = party.map((c, i) => {
+      const r = c.hp / maxHp(c);
+      return h(
+        'button.mon-card' + (i === this.selectedMon ? '.on' : '') + (c.hp <= 0 ? '.fainted' : ''),
+        { onclick: () => { this.selectedMon = i; this.render(); } },
+        h('img.mon-portrait', { src: this.deps.portrait(c.species), alt: '' }),
+        h(
+          'div.mon-main',
+          {},
+          h('div.mon-name', {}, displayName(c), h('span.mon-lv', {}, `Lv. ${c.level}`)),
+          h('div.party-hp', {}, h('i', { style: `width:${Math.round(r * 100)}%`, class: r > 0.5 ? '' : r > 0.2 ? 'mid' : 'low' })),
+          h('div.mon-sub', {}, `${c.hp}/${maxHp(c)} HP`, c.status ? h('span.status-chip.s-' + c.status, {}, STATUS_LABEL[c.status]) : c.hp <= 0 ? h('span.status-chip.s-fnt', {}, 'FNT') : null, leads.includes(c) ? h('span.lead-tag', {}, 'Leads') : null),
+        ),
+      );
+    });
     return h(
-      'div.party-grid',
+      'div.party-screen',
       {},
-      ...Array.from({ length: 6 }, (_, i) =>
-        h('div.party-slot', {}, h('div.party-ball', {}, '◓'), h('div', {}, i < 2 ? `Slot ${i + 1} · battles first` : `Slot ${i + 1}`), h('small', {}, 'Empty')),
+      h('div.mon-list', {}, ...cards, h('p.hint-dark', {}, 'The first two healthy Pokemon in your party lead every battle. Reorder to pick your leads.')),
+      this.renderMon(party, this.selectedMon),
+    );
+  }
+
+  private renderMon(party: Creature[], i: number): HTMLElement {
+    const c = party[i];
+    const sp = species(c.species);
+    const stats = creatureStats(c);
+    const nature = NATURES[c.nature];
+    const cap = this.deps.levelCap();
+    const from = xpForLevel(sp.growth, c.level);
+    const to = xpForLevel(sp.growth, c.level + 1);
+    const xpRatio = c.level >= 100 ? 1 : Math.max(0, Math.min(1, (c.xp - from) / Math.max(1, to - from)));
+    const ability = ABILITIES[c.ability];
+    const statRow = (k: StatName, label: string) => {
+      const mark = nature?.plus === k ? h('span.up', {}, '▲') : nature?.minus === k ? h('span.down', {}, '▼') : null;
+      const v = k === 'hp' ? maxHp(c) : stats[k];
+      return h('div.stat-row', {}, h('span', {}, label, mark), h('div.stat-bar', {}, h('i', { style: `width:${Math.min(100, (v / (c.level * 3 + 40)) * 100)}%` })), h('b', {}, String(v)));
+    };
+    const move = (slot: Creature['moves'][number]) => {
+      const m = moveData(slot.id);
+      return h(
+        'div.mon-move',
+        { style: `--type:${TYPE_COLORS[m.type]}`, title: m.description },
+        h('div.mon-move-top', {}, h('b', {}, m.name), h('span.type-chip', { style: `background:${TYPE_COLORS[m.type]}` }, m.type)),
+        h('div.mon-move-meta', {}, `${m.category} · power ${m.power || '—'} · acc ${m.accuracy === true ? '—' : m.accuracy} · PP ${slot.pp}/${m.pp}`),
+      );
+    };
+    const swap = (a: number, b: number) => {
+      [party[a], party[b]] = [party[b], party[a]];
+      this.selectedMon = b;
+      this.deps.onPartyChanged();
+      this.render();
+    };
+    return h(
+      'div.mon-detail',
+      {},
+      h(
+        'div.mon-head',
+        {},
+        h('img.mon-big', { src: this.deps.portrait(c.species), alt: '' }),
+        h(
+          'div',
+          {},
+          h('h3.mon-title', {}, displayName(c), h('small', {}, ` ${sp.dex} · ${sp.name}`)),
+          h('div.mon-types', {}, ...sp.types.map((t) => h('span.type-chip', { style: `background:${TYPE_COLORS[t]}` }, t))),
+          h('div.mon-xp', {}, h('span', {}, `Lv. ${c.level}`), h('div.xp-bar', {}, h('i', { style: `width:${Math.round(xpRatio * 100)}%` })), h('small', {}, c.level >= cap ? `At the level cap (${cap})` : `${Math.max(0, to - c.xp)} XP to Lv. ${c.level + 1}`)),
+          h('p.mon-desc', {}, sp.description),
+        ),
       ),
-      h('p.hint-dark', {}, 'Every battle is a double battle: the first two Pokemon in your party go out together. Professor Hazel will give you your first partner.'),
+      h(
+        'div.mon-cols',
+        {},
+        h(
+          'div',
+          {},
+          h('h3', {}, 'Stats'),
+          statRow('hp', 'HP'), statRow('atk', 'Attack'), statRow('def', 'Defense'), statRow('spa', 'Sp. Atk'), statRow('spd', 'Sp. Def'), statRow('spe', 'Speed'),
+          h('p.hint-dark', {}, `${nature?.name ?? c.nature} nature`, ability ? ` · ${ability.name}: ${ability.description}` : ''),
+          c.item ? h('p.hint-dark', {}, `Holding: ${ITEMS[c.item]?.name ?? c.item.replace(/-/g, ' ')}`) : null,
+        ),
+        h('div', {}, h('h3', {}, 'Moves'), ...c.moves.map(move)),
+      ),
+      h(
+        'div.set-buttons',
+        {},
+        h('button.btn.secondary', { disabled: i === 0, onclick: () => swap(i, i - 1) }, '▲ Move up'),
+        h('button.btn.secondary', { disabled: i === party.length - 1, onclick: () => swap(i, i + 1) }, '▼ Move down'),
+      ),
     );
   }
 

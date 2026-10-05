@@ -29,6 +29,8 @@ import {
   BODY_CHANNELS,
   CH,
   FIDGETS,
+  GESTURES,
+  type GestureName,
   GAITS,
   IDLE,
   JUMP_CROUCH,
@@ -405,6 +407,15 @@ class AvatarImpl implements Avatar {
     this.root.add(this.rig.body);
     this.makeDangles();
     this.applyPose(this.pose, 0);
+  }
+
+  gesture(name: GestureName): void {
+    const c = GESTURES[name];
+    this.fidget = c;
+    this.fidgetT = 0;
+    this.fidgetW = 0;
+    this.packKicked = false;
+    this.nextFidget = this.idleT + c.duration + AVATAR_ANIM.fidgetMin;
   }
 
   setGround(fn: GroundFn | null): void {

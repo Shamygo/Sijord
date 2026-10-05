@@ -1,17 +1,29 @@
 import * as THREE from 'three';
+import { createCreature, displayName, evolve, healCreature, isUsable, maxHp, teachMove } from '../../shared/battle/creature';
+import { randomSeed, Rng } from '../../shared/battle/rng';
+import { levelCap } from '../../shared/battle/stats';
+import type { Creature } from '../../shared/battle/types';
+import { moveData } from '../../shared/data/moves';
+import { SPECIES, species, STARTERS } from '../../shared/data/species';
+import { BattleDirector, arenaSpots, type BattleOutcome, type BattleStart } from '../battle/director';
 import { classInfo } from '../../shared/classes';
 import { STARTING_BAG } from '../../shared/items';
 import type { PlayerProfile } from '../../shared/types';
 import { NetClient, serverOverride, type NetEvents } from '../net/client';
 import { P2PClient } from '../net/p2p';
 import { Professor } from '../npc/professor';
+import { Rival } from '../npc/rival';
+import { Follower } from '../overworld/follower';
+import { WildManager, type WildCreature } from '../overworld/wild';
 import { createAvatar } from '../player/avatar';
 import { PLAYER_TUNING, PlayerController } from '../player/controller';
 import { ThirdPersonCamera } from '../player/camera';
 import { RemotePlayer } from '../player/remote';
 import { Hud, type Quest } from '../ui/hud';
 import { GameMenu, type MenuTab } from '../ui/menu';
+import { Portraits } from '../ui/portraits';
 import { applyAtmosphere, createWorld } from '../world';
+import { TOWN } from '../world/layout';
 import type { World } from '../world/types';
 import { Input } from './input';
 import { RenderPipeline } from './render';
@@ -19,6 +31,21 @@ import { writeSave, type SaveData } from './save';
 import { loadSettings, saveSettings, type Action, type Settings } from './settings';
 
 const TALK_RADIUS = 2.6;
+
+/** A battle in progress, or one whose ring is still fading out. */
+interface ActiveBattle {
+  director: BattleDirector;
+  wild: WildCreature[];
+  /** Seconds left of the fade-out once the battle is over. */
+  closing: number | null;
+}
+
+interface PartnerFollower {
+  follower: Follower;
+  lead: string | null;
+  last: THREE.Vector3;
+  speed: number;
+}
 
 /** Optional camera settings hooks; present once the camera supports them. */
 interface CameraSettingsHooks {
@@ -40,7 +67,19 @@ export class Game {
   private cam: ThirdPersonCamera;
   private avatar;
   private professor: Professor;
+  private rival: Rival;
   private hud: Hud;
+  /** The player's Pokemon, in order; lives in the save. */
+  private party: Creature[];
+  private portraits = new Portraits(128);
+  /** The lead Pokemon walking beside the player. */
+  private follower = new Follower();
+  private followerOut = true;
+  private wild: WildManager;
+  private battle: ActiveBattle | null = null;
+  /** A scripted scene (starter pick, rival challenge) is running: no free movement. */
+  private scripted = false;
+  private partnerFollowers = new Map<string, PartnerFollower>();
   private net: { send(s: ReturnType<PlayerController['snapshot']>, nowMs: number): void };
   private partners = new Map<string, { remote: RemotePlayer; profile: PlayerProfile }>();
   private slot: 0 | 1 = 0;
@@ -78,8 +117,15 @@ export class Game {
 
     const a = this.world.anchors;
     this.professor = new Professor(a.professor, a.professorYaw);
-    this.professor.setMarker(!this.flags.has('met-professor'));
     this.scene.add(this.professor.root);
+    this.party = save.party ??= [];
+    // Sunniva waits beside her aunt once the player has a partner.
+    this.rival = new Rival(this.world, a.professor.clone().add(new THREE.Vector3(2.8, 0, 1.4)), a.professorYaw - 0.5);
+    this.scene.add(this.rival.root);
+    this.updateNpcState();
+    this.scene.add(this.follower.root);
+    this.wild = new WildManager(this.world, randomSeed());
+    this.scene.add(this.wild.root);
     // Added before the first movement update, which is when the collider list gets indexed.
     this.world.colliders.push({ kind: 'circle', x: a.professor.x, z: a.professor.z, r: 0.45 });
 
@@ -99,6 +145,10 @@ export class Game {
       },
       quests: () => this.quests,
       bag: () => this.save.bag ?? {},
+      party: () => this.party,
+      portrait: (sp: string) => this.portraits.get(sp),
+      onPartyChanged: () => this.onPartyChanged(),
+      levelCap: () => this.levelCap,
       settings: this.settings,
       onSettings: (s) => this.applySettings(s),
       onResume: () => this.input.requestLock(),
@@ -110,13 +160,14 @@ export class Game {
     this.hud.el.append(this.menu.el);
     // Esc while playing releases the mouse; treat that as "pause" and open the menu.
     document.addEventListener('pointerlockchange', () => {
-      if (!this.input.locked && !this.talking && !this.menu.isOpen && !this.suppressPause) this.openMenu('settings');
+      if (!this.input.locked && !this.talking && !this.menu.isOpen && !this.suppressPause && !this.battle && !this.scripted) this.openMenu('settings');
       this.suppressPause = false;
     });
     this.applySettings(this.settings);
 
     this.spawn(0);
     this.refreshQuests();
+    this.onPartyChanged(false);
 
     const events: NetEvents = {
       onStatus: (s) => {
@@ -142,13 +193,24 @@ export class Game {
         this.addPartner(id, profile);
         this.hud.showToast(`${profile.name} joined`, 'Your partner is in Sijord');
       },
-      onPeerState: (id, s) => this.partners.get(id)?.remote.push(s, performance.now()),
+      onPeerState: (id, s) => {
+        this.partners.get(id)?.remote.push(s, performance.now());
+        const pf = this.partnerFollowers.get(id);
+        // Only species this build knows; anything else from the wire is ignored.
+        if (pf) pf.lead = s.lead && !s.battle && SPECIES[s.lead] ? s.lead : null;
+      },
       onPeerLeft: (id) => {
         const p = this.partners.get(id);
         if (!p) return;
         this.scene.remove(p.remote.root);
         p.remote.dispose();
         this.partners.delete(id);
+        const pf = this.partnerFollowers.get(id);
+        if (pf) {
+          this.scene.remove(pf.follower.root);
+          pf.follower.dispose();
+          this.partnerFollowers.delete(id);
+        }
         this.hud.showToast(`${p.profile.name} left`);
         this.updatePartnerStatus();
       },
@@ -175,6 +237,33 @@ export class Game {
     this.cam.snapBehind(this.controller.position, yaw);
   }
 
+  /** Dev only: hand the player a team without the intro. */
+  debugGiveParty(list: [string, number][] = [['fernfawn', 5], ['hjordpup', 5]]): void {
+    const rng = new Rng(randomSeed());
+    this.party.length = 0;
+    for (const [sp, lv] of list) this.party.push(createCreature(sp, lv, rng, { ot: this.save.profile.name }));
+    for (const f of ['met-professor', 'got-starter']) this.flags.add(f);
+    this.save.flags = [...this.flags];
+    this.updateNpcState();
+    this.onPartyChanged();
+  }
+
+  /** Dev only: spawn a herd in front of the player and battle it. */
+  debugWildBattle(speciesId = 'nibblet', level = 4): void {
+    const p = this.controller.position;
+    const yaw = this.controller.yaw;
+    const herd = this.wild.spawnHerd(p.x + Math.sin(yaw) * 5, p.z + Math.cos(yaw) * 5, speciesId, level);
+    void this.startWildBattle(herd.members[0], false);
+  }
+
+  /** Dev only: run game time faster (automated tests in slow headless browsers). */
+  debugTimeScale = 1;
+
+  /** Dev only: the current battle, for scripted tests. */
+  get debugBattle(): BattleDirector | null {
+    return this.battle?.director ?? null;
+  }
+
   /** Compiles shaders up front so the first seconds of play aren't a stutter, then starts the loop. */
   async start(): Promise<void> {
     try {
@@ -190,6 +279,9 @@ export class Game {
   /** Menu keys and Esc, delivered straight from the key event. */
   private onInstant(a: Action | 'pause'): void {
     if (!this.started) return;
+    // Battles and scripted scenes own the keyboard.
+    if (this.battle && this.battle.closing === null) return;
+    if (this.scripted) return;
     if (a === 'pause') {
       // The menu closes itself on Esc; while talking, Esc does nothing.
       if (!this.menu.isOpen && !this.talking) this.openMenu('settings');
@@ -205,7 +297,16 @@ export class Game {
       if (this.menu.isOpen && this.menu.current === tab) this.menu.close();
       else this.openMenu(tab);
     } else if (a === 'throw') {
-      this.hud.showToast('No Pokemon yet', 'Professor Hazel will give you your first partner', 2.5);
+      this.hud.showToast('Not yet', 'Catching wild Pokemon arrives in the next update', 2.5);
+    } else if (a === 'partner') {
+      if (!this.party.length) {
+        this.hud.showToast('No Pokemon yet', 'Professor Hazel will give you your first partner', 2.5);
+        return;
+      }
+      this.followerOut = !this.followerOut;
+      this.refreshFollower();
+      const lead = this.party.find(isUsable);
+      if (lead) this.hud.showToast(this.followerOut ? `Come on out, ${displayName(lead)}!` : `${displayName(lead)}, return!`, '', 1.5);
     }
   }
 
@@ -244,6 +345,9 @@ export class Game {
     remote.setGround((x, z) => this.world.heightAt(x, z));
     this.scene.add(remote.root);
     this.partners.set(id, { remote, profile });
+    const follower = new Follower();
+    this.scene.add(follower.root);
+    this.partnerFollowers.set(id, { follower, lead: null, last: new THREE.Vector3(), speed: 0 });
     this.updatePartnerStatus();
   }
 
@@ -256,14 +360,21 @@ export class Game {
     const a = this.world.anchors;
     const gate = a.landmarks.find((l) => l.id === 'gate')?.position ?? a.professor;
     const met = this.flags.has('met-professor');
+    const starter = this.party.length > 0;
+    const beat = this.flags.has('beat-rival');
     const left = this.flags.has('left-town');
     const quests: Quest[] = [
-      { id: 'meet', text: 'Meet Professor Hazel', main: true, done: met, target: { x: a.professor.x, z: a.professor.z } },
+      { id: 'meet', text: met ? 'Pick a partner at Hazel\'s lab' : 'Meet Professor Hazel', main: true, done: starter, target: { x: a.professor.x, z: a.professor.z } },
     ];
-    if (met) quests.push({ id: 'route1', text: 'Head out onto Route 1', main: true, done: left, target: { x: gate.x, z: gate.z } });
-    if (left) quests.push({ id: 'explore', text: 'Explore Sijord, then return to the lab' });
+    if (starter) quests.push({ id: 'rival', text: 'Beat Sunniva', main: true, done: beat, target: { x: this.rival.homeSpot.x, z: this.rival.homeSpot.z } });
+    if (beat) quests.push({ id: 'route1', text: 'Head out onto Route 1', main: true, done: left, target: { x: gate.x, z: gate.z } });
+    if (beat && left) quests.push({ id: 'train', text: `Train your team on the meadow (cap Lv. ${this.levelCap})` });
     this.quests = quests;
     this.hud.setQuests(quests.slice(-3));
+  }
+
+  private get levelCap(): number {
+    return levelCap(this.save.badges ?? 0);
   }
 
   private setFlag(flag: string): void {
@@ -274,42 +385,332 @@ export class Game {
     this.refreshQuests();
   }
 
-  private async talkToProfessor(): Promise<void> {
+  /** Quest markers and who stands where, from the story flags. */
+  private updateNpcState(): void {
+    const starter = this.party.length > 0;
+    this.professor.setMarker(!starter);
+    this.rival.setVisible(starter);
+    this.rival.setMarker(starter && !this.flags.has('beat-rival'));
+  }
+
+  /** Party changed (battle, heal, reorder, evolution): save, HUD, follower. */
+  private onPartyChanged(save = true): void {
+    if (save) writeSave(this.save);
+    this.hud.setParty(
+      this.party.map((c) => ({
+        name: displayName(c), species: c.species, level: c.level, hp: c.hp, maxHp: maxHp(c), status: c.status, portrait: this.portraits.get(c.species),
+      })),
+    );
+    this.refreshFollower();
+    this.refreshQuests();
+    if (this.menu?.isOpen) this.menu.refresh();
+  }
+
+  private refreshFollower(): void {
+    const lead = this.party.find(isUsable);
+    this.follower.setSpecies(lead ? lead.species : null);
+    this.follower.setVisible(this.followerOut && !this.battle);
+  }
+
+  private healParty(): void {
+    for (const c of this.party) healCreature(c);
+    this.onPartyChanged();
+  }
+
+  /** Start talking: freeze the player and free the mouse for dialogue choices. */
+  private beginScene(): void {
     this.talking = true;
+    this.input.clearHeld();
     this.releaseMouse();
     this.hud.setPrompt(null);
+  }
+
+  private endScene(): void {
+    this.talking = false;
+    this.scripted = false;
+  }
+
+  private async talkToProfessor(): Promise<void> {
+    this.beginScene();
     this.professor.lookAt(this.controller.position);
     const partner = [...this.partners.values()][0]?.profile.name ?? null;
     const first = !this.flags.has('met-professor');
-    await this.hud.dialogue.play(first ? this.professor.introLines(this.save.profile.name, partner) : this.professor.repeatLines());
-    this.professor.lookAt(null);
-    this.talking = false;
-    if (first) {
-      this.professor.setMarker(false);
+    if (!this.party.length) {
+      if (first) await this.hud.dialogue.play(this.professor.introLines(this.save.profile.name, partner));
       this.setFlag('met-professor');
+      const [pick] = await this.hud.dialogue.play(this.professor.starterLines());
+      this.giveStarter(STARTERS[pick] ?? STARTERS[0]);
+      await this.hud.dialogue.play(this.professor.starterChosenLines(species(this.party[0].species).name));
+      this.professor.lookAt(null);
+      await this.rivalChallenge();
+      return;
+    }
+    if (this.party.some((c) => c.hp < maxHp(c) || c.status || c.moves.some((m) => m.pp < (moveData(m.id).pp ?? m.pp)))) {
+      await this.hud.dialogue.play(this.professor.healLines());
+      this.healParty();
+    } else await this.hud.dialogue.play(this.professor.repeatLines());
+    this.professor.lookAt(null);
+    this.endScene();
+  }
+
+  private giveStarter(starter: string): void {
+    const rng = new Rng(randomSeed());
+    const ot = this.save.profile.name;
+    this.party.push(createCreature(starter, 5, rng, { ot }), createCreature('hjordpup', 5, rng, { ot }));
+    this.save.starter = starter;
+    this.setFlag('got-starter');
+    this.updateNpcState();
+    this.onPartyChanged();
+    this.hud.showToast(`${species(starter).name} joined your team!`, 'Hjordpup came along too', 3);
+  }
+
+  /** Sunniva runs out of the lab and challenges the player on the spot. */
+  private async rivalChallenge(): Promise<void> {
+    this.scripted = true;
+    const lab = this.world.anchors.landmarks.find((l) => l.id === 'lab')?.position ?? this.professor.position;
+    this.rival.place(lab.clone().add(new THREE.Vector3(1.6, 0, 2.4)), 0);
+    this.rival.setVisible(true);
+    const p = this.controller.position;
+    const toPlayer = new THREE.Vector3(p.x - this.rival.position.x, 0, p.z - this.rival.position.z).normalize();
+    await Promise.race([this.rival.walkTo(p.clone().addScaledVector(toPlayer, -2.4), true), sleep(4000)]);
+    this.rival.lookAt(this.controller.position);
+    this.professor.lookAt(this.rival.position);
+    await this.hud.dialogue.play(this.rival.challengeLines(this.save.profile.name, species(this.party[0].species).name));
+    this.professor.lookAt(null);
+    await this.rivalBattle();
+  }
+
+  private async talkToRival(): Promise<void> {
+    this.beginScene();
+    this.rival.lookAt(this.controller.position);
+    if (this.flags.has('beat-rival')) {
+      await this.hud.dialogue.play(this.rival.idleLines());
+      this.rival.lookAt(null);
+      this.endScene();
+      return;
+    }
+    const [pick] = await this.hud.dialogue.play(this.rival.rematchLines());
+    if (pick !== 0) {
+      this.rival.lookAt(null);
+      this.endScene();
+      return;
+    }
+    if (!this.party.some(isUsable)) {
+      await this.hud.dialogue.play([{ speaker: this.rival.name, text: "Your team can't even stand up. Get them healed by Aunt Hazel first." }]);
+      this.rival.lookAt(null);
+      this.endScene();
+      return;
+    }
+    this.scripted = true;
+    await this.rivalBattle();
+  }
+
+  private async rivalBattle(): Promise<void> {
+    // The ring opens towards the plaza, with Sunniva on its far side.
+    const p = this.controller.position.clone();
+    const facing = Math.atan2(TOWN.x - p.x, TOWN.z - p.z);
+    const spot = arenaSpots(p, facing).foeTrainer;
+    this.rival.lookAt(null);
+    this.rival.setMarker(false);
+    await Promise.race([this.rival.walkTo(spot, true), sleep(3500)]);
+    this.rival.place(spot, facing + Math.PI);
+    this.rival.lookAt(p);
+    this.talking = false;
+    const outcome = await this.runBattle({
+      kind: 'trainer',
+      foes: this.rival.team(this.save.starter ?? this.party[0].species, randomSeed()),
+      foeName: this.rival.name,
+      foeAi: 't1',
+      playerPos: p,
+      facing,
+      intro: `${this.rival.name} wants to battle!`,
+    });
+    this.beginScene();
+    this.scripted = true;
+    const won = outcome.winner === 0;
+    this.rival.lookAt(this.controller.position);
+    await this.hud.dialogue.play(won ? this.rival.winLines() : this.rival.loseLines());
+    if (won) {
+      this.setFlag('beat-rival');
       this.hud.showToast('New quest', 'Head out onto Route 1');
     }
+    if (this.party.some((c) => c.hp < maxHp(c) || c.status)) {
+      this.professor.lookAt(this.controller.position);
+      await this.hud.dialogue.play(this.professor.healLines());
+      this.healParty();
+      this.professor.lookAt(null);
+    }
+    this.updateNpcState();
+    this.rival.lookAt(null);
+    void this.rival.goHome();
+    this.endScene();
+  }
+
+  /** Walk up to a wild Pokemon and press interact, or get charged by one. */
+  private async startWildBattle(m: WildCreature, charged: boolean): Promise<void> {
+    const list = this.wild.opponentsFor(m);
+    this.wild.enterBattle(list);
+    const p = this.controller.position.clone();
+    const facing = Math.atan2(m.mover.pos.x - p.x, m.mover.pos.z - p.z);
+    const names = list.map((w) => displayName(w.creature));
+    const intro = charged
+      ? `A wild ${names[0]} charged at you!${names[1] ? ` Another ${names[1]} joined in!` : ''}`
+      : names.length > 1 ? `You challenged a wild ${names[0]} and ${names[1]}!` : `You challenged a wild ${names[0]}!`;
+    const outcome = await this.runBattle({
+      kind: 'wild',
+      foes: list.map((w) => w.creature),
+      foeName: 'Wild',
+      foeAi: 'wild',
+      wildActors: list.map((w) => ({ uid: w.creature.uid, root: w.root, model: w.model })),
+      playerPos: p,
+      facing,
+      intro,
+    });
+    this.wild.leaveBattle(list, outcome.fainted);
+    if (outcome.winner === 1) await this.blackout();
+  }
+
+  private async runBattle(start: Omit<BattleStart, 'playerName' | 'party' | 'levelCap' | 'xpMult'>): Promise<BattleOutcome> {
+    this.input.clearHeld();
+    this.releaseMouse();
+    this.hud.setPrompt(null);
+    this.hud.setBattleMode(true);
+    if (this.menu.isOpen) this.menu.close();
+    // Turn to face the ring.
+    this.controller.teleport(this.controller.position.clone(), start.facing);
+    const director = new BattleDirector(
+      {
+        world: this.world,
+        scene: this.scene,
+        camera: this.cam.camera,
+        hudRoot: this.hud.el,
+        portraits: this.portraits,
+        project: (v) => this.project(v),
+        onThrow: (side) => (side === 0 ? this.avatar.gesture('throw') : start.kind === 'trainer' && this.rival.gesture('throw')),
+      },
+      { ...start, playerName: this.save.profile.name, party: this.party, levelCap: this.levelCap, xpMult: 1 },
+    );
+    const active: ActiveBattle = { director, wild: [], closing: null };
+    this.battle = active;
+    this.refreshFollower();
+    let outcome: BattleOutcome;
+    try {
+      outcome = await director.run();
+    } finally {
+      director.ui.hide();
+      director.stage.close();
+      active.closing = 0.9;
+      this.hud.setBattleMode(false);
+      this.cam.snapBehind(this.controller.position, start.facing);
+    }
+    this.onPartyChanged();
+    await this.afterBattle(outcome);
+    return outcome;
+  }
+
+  /** Moves to learn and evolutions, asked once the ring is gone. */
+  private async afterBattle(outcome: BattleOutcome): Promise<void> {
+    const pending = [...outcome.pendingMoves].filter(([uid]) => this.party.some((c) => c.uid === uid));
+    const evolving = this.party.filter((c) => {
+      const evo = species(c.species).evolution;
+      return evo && c.level >= evo.level && c.hp > 0;
+    });
+    if (!pending.length && !evolving.length) return;
+    this.beginScene();
+    for (const [uid, moves] of pending) {
+      const c = this.party.find((x) => x.uid === uid);
+      if (c) await this.learnMoves(c, moves);
+    }
+    for (const c of evolving) {
+      const evo = species(c.species).evolution!;
+      const before = displayName(c);
+      const [pick] = await this.hud.dialogue.play([{ speaker: '', text: `What? ${before} is evolving!`, choices: ['Let it evolve', 'Stop it'] }]);
+      if (pick !== 0) {
+        await this.hud.dialogue.play([{ speaker: '', text: `${before} stopped evolving.` }]);
+        continue;
+      }
+      const res = evolve(c, evo.into);
+      await this.hud.dialogue.play([{ speaker: '', text: `Congratulations! ${before} evolved into ${species(evo.into).name}!` }]);
+      for (const id of res.learned) await this.hud.dialogue.play([{ speaker: '', text: `${displayName(c)} learned ${moveData(id).name}!` }]);
+      if (res.pendingMoves.length) await this.learnMoves(c, res.pendingMoves);
+    }
+    this.onPartyChanged();
+    this.endScene();
+  }
+
+  private async learnMoves(c: Creature, moves: string[]): Promise<void> {
+    const name = displayName(c);
+    for (const id of moves) {
+      if (c.moves.some((m) => m.id === id)) continue;
+      const mv = moveData(id);
+      if (c.moves.length < 4) {
+        c.moves.push({ id, pp: mv.pp });
+        await this.hud.dialogue.play([{ speaker: '', text: `${name} learned ${mv.name}!` }]);
+        continue;
+      }
+      const info = `${mv.type}, ${mv.category}${mv.power ? `, power ${mv.power}` : ''}`;
+      const [pick] = await this.hud.dialogue.play([
+        { speaker: '', text: `${name} wants to learn ${mv.name} (${info}). ${mv.description} Forget a move to make room?`, choices: [...c.moves.map((m) => `Forget ${moveData(m.id).name}`), `Don't learn it`] },
+      ]);
+      if (pick < c.moves.length) {
+        const old = moveData(c.moves[pick].id).name;
+        teachMove(c, id, pick);
+        await this.hud.dialogue.play([{ speaker: '', text: `1, 2 and... poof! ${name} forgot ${old} and learned ${mv.name}!` }]);
+      } else await this.hud.dialogue.play([{ speaker: '', text: `${name} did not learn ${mv.name}.` }]);
+    }
+  }
+
+  /** Every Pokemon fainted: back to Hazel's lab, healed, with a word from the professor. */
+  private async blackout(): Promise<void> {
+    this.beginScene();
+    this.scripted = true;
+    await this.hud.dialogue.play([{ speaker: '', text: 'You have no Pokemon left that can fight. You hurried back to Bramblewick to protect them...' }]);
+    await this.hud.fade(true);
+    const a = this.world.anchors;
+    const spot = a.professor.clone().add(new THREE.Vector3(0, 0, 2.4));
+    this.controller.teleport(new THREE.Vector3(spot.x, this.world.heightAt(spot.x, spot.z), spot.z), Math.PI);
+    this.cam.snapBehind(this.controller.position, Math.PI);
+    this.wild.clear();
+    for (const c of this.party) healCreature(c);
+    this.onPartyChanged();
+    await sleep(400);
+    await this.hud.fade(false);
+    this.professor.lookAt(this.controller.position);
+    await this.hud.dialogue.play(this.professor.blackoutLines());
+    this.professor.lookAt(null);
+    this.endScene();
+  }
+
+  /** World point to CSS pixels. */
+  private project(v: THREE.Vector3): { x: number; y: number; visible: boolean } {
+    const p = v.clone().project(this.cam.camera);
+    const w = this.parent.clientWidth || innerWidth;
+    const ht = this.parent.clientHeight || innerHeight;
+    return { x: ((p.x + 1) / 2) * w, y: ((1 - p.y) / 2) * ht, visible: p.z > -1 && p.z < 1 && Math.abs(p.x) < 1.1 && Math.abs(p.y) < 1.1 };
   }
 
   private frame(): void {
     this.timer.update();
-    const dt = Math.min(this.timer.getDelta(), 0.1);
+    const dt = Math.min(this.timer.getDelta(), 0.1) * this.debugTimeScale;
     this.elapsed += dt;
     this.gameMinutes += dt; // one real second is one in-game minute
     const now = performance.now();
     const input = this.input;
 
-    if (input.locked && !this.menu.isOpen) {
+    const battle = this.battle;
+    const inBattle = !!battle && battle.closing === null;
+    const busy = this.talking || this.menu.isOpen || inBattle || this.scripted;
+    if (input.locked && !this.menu.isOpen && !inBattle) {
       this.cam.onMouseDelta(input.mouseDX, input.mouseDY * (this.settings.invertY ? -1 : 1));
       this.cam.onWheel(input.wheel);
     }
 
-    this.hud.setPointerLocked(input.locked || this.talking || this.menu.isOpen);
+    this.hud.setPointerLocked(input.locked || this.talking || this.menu.isOpen || inBattle || this.scripted);
     const move = input.move();
     if (this.talking) {
       if (input.consumeAction('interact') || input.consume('Space') || input.consume('Enter')) this.hud.dialogue.next();
     }
-    if (this.talking || this.menu.isOpen) {
+    if (busy) {
       move.forward = move.right = 0;
       move.jump = move.sprint = false;
     }
@@ -318,14 +719,48 @@ export class Game {
     this.avatar.root.position.copy(this.controller.position);
     this.avatar.root.rotation.y = this.controller.yaw;
     this.avatar.animate(dt, snap);
-    this.cam.update(dt, this.controller.position, this.world, move.sprint && snap.speed > 5);
+    if (battle) {
+      if (battle.closing === null) battle.director.update(dt);
+      else {
+        // The ring fades out while the normal camera takes over again.
+        battle.director.stage.update(dt);
+        battle.closing -= dt;
+        if (battle.closing <= 0) {
+          battle.director.dispose();
+          this.battle = null;
+          this.refreshFollower();
+        }
+      }
+    }
+    if (!inBattle) this.cam.update(dt, this.controller.position, this.world, move.sprint && snap.speed > 5);
 
     // Interaction
-    if (!this.talking && !this.menu.isOpen) {
-      const near = this.controller.position.distanceTo(this.professor.position) < TALK_RADIUS;
-      this.hud.setPrompt(near ? `Talk to ${this.professor.name}` : null);
-      if (near && input.consumeAction('interact')) void this.talkToProfessor();
-    } else if (this.menu.isOpen) {
+    if (!busy) {
+      const pos = this.controller.position;
+      const nearProf = pos.distanceTo(this.professor.position) < TALK_RADIUS;
+      const nearRival = this.rival.visible && pos.distanceTo(this.rival.position) < TALK_RADIUS;
+      const wildMon = !nearProf && !nearRival ? this.wild.nearestEngageable(pos) : null;
+      const canFight = this.party.some(isUsable);
+      if (nearProf) this.hud.setPrompt(`Talk to ${this.professor.name}`);
+      else if (nearRival) this.hud.setPrompt(`Talk to ${this.rival.name}`);
+      else if (wildMon) this.hud.setPrompt(canFight ? `Battle the wild ${displayName(wildMon.creature)} · Lv. ${wildMon.creature.level}` : `Wild ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
+      else this.hud.setPrompt(null);
+      if (input.consumeAction('interact')) {
+        if (nearProf) void this.talkToProfessor();
+        else if (nearRival) void this.talkToRival();
+        else if (wildMon && canFight) void this.startWildBattle(wildMon, false);
+      }
+      // A territorial Pokemon that reaches you starts the fight itself.
+      const charger = this.battle ? null : this.wild.charger(pos);
+      if (charger) {
+        if (canFight) void this.startWildBattle(charger, true);
+        else {
+          charger.state = 'graze';
+          charger.calm = 20;
+          this.hud.showToast(`The wild ${displayName(charger.creature)} lost interest`, 'Your team needs healing at Hazel\'s lab', 2.5);
+        }
+      }
+    } else if (this.menu.isOpen || inBattle) {
       this.hud.setPrompt(null);
     }
 
@@ -340,8 +775,22 @@ export class Game {
     }
 
     this.professor.update(dt);
-    for (const p of this.partners.values()) p.remote.update(dt, now);
-    this.net.send(snap, now);
+    this.rival.update(dt);
+    this.wild.update(dt, this.controller.position, snap.speed, move.sprint && snap.speed > 5, busy);
+    this.follower.update(dt, this.controller.position, this.controller.yaw, snap.speed, this.world);
+    for (const [id, p] of this.partners) {
+      p.remote.update(dt, now);
+      const pf = this.partnerFollowers.get(id);
+      if (!pf) continue;
+      const rp = p.remote.root.position;
+      pf.speed += (rp.distanceTo(pf.last) / Math.max(dt, 1e-3) - pf.speed) * Math.min(1, dt * 8);
+      pf.last.copy(rp);
+      pf.follower.setSpecies(pf.lead);
+      pf.follower.setVisible(!!pf.lead && p.remote.root.visible);
+      pf.follower.update(dt, rp, p.remote.avatar.root.rotation.y, pf.speed, this.world);
+    }
+    const lead = this.follower.active ? this.follower.species ?? undefined : undefined;
+    this.net.send({ ...snap, lead, battle: inBattle || undefined }, now);
 
     // Also keeps the sun's shadow camera centred on the player.
     this.world.update(dt, this.elapsed, this.controller.position);
@@ -370,4 +819,8 @@ export class Game {
     this.cam.camera.aspect = w / ht;
     this.cam.camera.updateProjectionMatrix();
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }

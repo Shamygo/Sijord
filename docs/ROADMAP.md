@@ -15,7 +15,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 | # | Milestone | Playable result | Rough size |
 |---|---|---|---|
 | M1 | Hometown and co-op presence | Walk around Bramblewick with a friend and talk to Professor Hazel | Done |
-| M2 | First creatures and battles | Pick a starter and fight wild double battles near Bramblewick | L |
+| M2 | First creatures and battles | Pick a starter and fight wild double battles near Bramblewick | Done |
 | M3 | Catching, party and the first route | Catch creatures (overworld and in battle) across the starter biome, with aggression | L |
 | M4 | Survival and crafting core | Hunger, thirst and stamina, gathering, T0-T1 crafting, Poke Ball crafting, tools and armour | L |
 | M5 | Open world and settlements | Streamed 6x6 km terrain with 4-5 biomes, villages and towns, NPCs, shops | XL |
@@ -47,7 +47,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 
 ---
 
-## M2: First creatures and battles
+## M2: First creatures and battles *(done; each player battles on their own screen, and wild herds aren't shared between the two players yet)*
 
 **Scope**
 - Shared **battle engine** (`src/shared/battle`): server-authoritative, deterministic with a seeded RNG, double battles only. Covers stats (base, IV, EV, nature), types, about 60 moves, about 20 abilities, status, priority, spread damage and switching.

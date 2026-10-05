@@ -1,13 +1,13 @@
 # Sijord: handoff
 
-Everything a new contributor (human or Claude) needs to pick up this project from the repository alone. Written 2026-10-04, after PR #3. Update the "Current state" and "Next up" sections whenever a milestone lands.
+Everything a new contributor (human or Claude) needs to pick up this project from the repository alone. Written 2026-10-04 after PR #3, updated 2026-10-05 after PR #6 (M2). Update the "Current state" and "Next up" sections whenever a milestone lands.
 
 ## Who and what
 
 - **Owner:** Simon, GitHub [`Shamygo`](https://github.com/Shamygo). He builds this with a friend who collaborates in this repo. They play it together as two-player co-op.
 - **The game:** a Palworld-style ("Power World" in Simon's words), third-person 3D, open world Pokemon game in the browser, later packaged for Windows and Mac. Two-player co-op is the core. Battles are hard on purpose.
 - **Simon's own words** are in [VISION.md](VISION.md): the full spec plus his feedback. Read it first. It outranks every other doc.
-- **Art target:** [reference/art-reference.png](reference/art-reference.png). See [The art reference](#the-art-reference) below.
+- **Art target: use the reference picture.** [reference/art-reference.png](reference/art-reference.png) is the image Simon attached to his spec, and it is the visual target for everything the player sees: terrain, sky, water, foliage, characters, creatures, towns and HUD. Open the image itself (not just the description) before any visual work, screenshot the game from a similar angle, and compare side by side. Simon asked for the game to look "exactly like" it. See [The art reference](#the-art-reference) below for a written breakdown.
 
 ## How Simon likes to work
 
@@ -46,15 +46,18 @@ src/client/main.ts    boot: title -> trainer creator -> loading screen -> Game
 src/client/core       game loop (game.ts), renderer and post (render.ts), input, collision, save, settings + keybinds
 src/client/world      terrain, sky, water, grass, vegetation, cliffs, fauna, POIs, Bramblewick (hometown.ts), layout
 src/client/player     trainer model and rig, animation clips and IK math, movement controller, camera, remote partner
-src/client/npc        Professor Hazel
+src/client/npc        Professor Hazel, Sunniva (rival)
+src/client/battle     in-world battles: stage (ring, effects), director (playback, camera, prompts), battle UI
+src/client/overworld  wild herds, the follower creature, creature movement
+src/client/creatures  procedural creature models and animation
 src/client/ui         title, creator, HUD (compass, minimap, quests), dialogue, menus (map, bag, party, quests, settings)
 src/client/net        co-op: p2p.ts (default, Trystero) and client.ts (optional Node server)
 src/server            optional Node WebSocket server (2 players per room)
-src/shared            types, protocol, classes, items
-tests/                Vitest unit tests (controller, camera, animation math, collision, settings, rooms)
+src/shared            types, protocol, classes, items; battle/ (engine, stats, damage, AI); data/ (species, moves, abilities)
+tests/                Vitest unit tests (battle engine and damage calc, data, controller, camera, animation math, collision, settings, rooms)
 ```
 
-In dev builds the running game is exposed as `window.sijord` for debugging.
+In dev builds the running game is exposed as `window.sijord` for debugging, with `debugGiveParty`, `debugWildBattle`, `debugTeleport` and `debugTimeScale` (speeds game time up, handy in the container's slow software renderer).
 
 ## Run, test, build, deploy
 
@@ -62,7 +65,7 @@ In dev builds the running game is exposed as `window.sijord` for debugging.
 npm install
 npm run dev            # http://localhost:5173
 npm run typecheck
-npm test               # 45 tests at the time of writing
+npm test               # 134 tests at the time of writing
 npm run build          # dist/ (what GitHub Pages serves)
 npm run build:single   # dist-single/sijord.html, the whole game in one double-clickable file
 ```
@@ -72,17 +75,23 @@ npm run build:single   # dist-single/sijord.html, the whole game in one double-c
 - **Co-op:** both players type the same world code on the title screen. Default transport is peer-to-peer WebRTC via Trystero, using free public Nostr relays only for matchmaking, so nothing is hosted. Fallbacks: `npm run relay` plus `?relay=ws://<ip>:8090`, or `npm run server` plus `?server=ws://<ip>:8787` (or `?server=local`). Co-op over the public relays has not yet been confirmed on Simon's and his friend's real machines.
 - **Verifying visually:** Chromium and Playwright are typically available in Claude's cloud container. Run `npm run dev` or `npm run preview` and screenshot the game. Software rendering there is very slow, so judge frame rate on real hardware, not in the container.
 
-## Current state (after PR #3)
+## Current state (after PR #6)
 
 **Merged:**
 - PR #2: 3D foundation, design docs and milestone 1. Trainer creator (looks plus class), weighty third-person movement and orbit camera, Bramblewick with both houses and Hazel's lab, Hazel's intro leading to Route 1, HUD with compass, minimap and quest tracker, two-player presence.
 - PR #3: second pass after Simon's feedback. Graphics reworked toward the reference (lush grass, fluffy trees, layered grey cliffs, blue river with sandy banks, haze, snowy mountains). Trainer rebuilt with walk, jog and sprint cycles, foot IK on slopes, start, stop, turn, skid, jump and land animations, idle fidgets and secondary motion. Classes nerfed to one perk and one cost. Menus: M map, B bag, P party, J quests, Esc pause and settings. Settings cover key rebinding, mouse sensitivity, invert look, FOV and quality (Low, Medium, High). Shader warm-up moved behind the loading screen so menu keys work immediately.
+- PR #4 and #5: this handoff (docs only).
+- PR #6: milestone 2. A deterministic, seeded double-battle engine in `src/shared/battle` (Gen 3+ stats, Gen 5+ damage with 4096 fixed-point rounding, natures, IVs and EVs, crits, type chart, priority, spread moves, Protect, Fake Out, Follow Me, Helping Hand, Tailwind, Leech Seed, status, 33 abilities, berries, running, level caps with banked XP) and a T1 and wild AI, all covered by unit tests with damage-calc reference values. Data in `src/shared/data`: 21 species (the three starter lines plus Hearthmeadow), about 80 moves, 33 abilities. Hazel's starter pick (Fernfawn, Cindlet, Splashpup) plus a gifted Hjordpup so every battle is two on two. Sunniva challenges you straight after with the starter that beats yours and waits by the lab for rematches until beaten. Wild herds roam outside the town fence with temperaments (skittish ones flee a sprinting trainer, territorial ones charge); walk up and press E to fight two of them. Battles play in the world inside a glowing ring with no screen change: ball throws, lunges, projectiles, particles, battle camera shots, floating foe plates, your team docked bottom left, a battle log, move and target menus. XP, EVs, levels to cap 15, move learning and evolution prompts, blackout back to Hazel's lab. Lead creature follows you (F recalls it), party strip top left, full party screen on P. All 21 species have procedural models with walk, run, attack, hit, faint and idle animations in `src/client/creatures` (open `/creatures.html` on the dev server for a turntable gallery). Model heights are display heights, not dex heights: small species are scaled up so a starter stands about hip-high to the trainer like the fox in the reference, while big ones stay near true size.
 - PR #1, an old 2D tile prototype, predates the 3D vision and is superseded. It should be closed if still open.
 
-**Milestone status:** M1 (hometown and co-op presence) is done apart from its 60 fps exit check on real hardware. M2 is next. There are no creatures, battles or catching yet.
+**Milestone status:** M1 is done apart from its 60 fps check on real hardware. M2 (first creatures and battles) is done. M3 (catching, party and the first route) is next. There is no catching yet, so the party is the starter and Hjordpup.
 
 **Known gaps:**
-- Visuals vs the reference: clouds are puffier than the reference's wispy ones, cliffs look blocky up close, and there is no distant castle town on the skyline yet. No partner creature follows the player, and the HUD lacks the party portraits and Q/F/Tab hotbar shown in the reference.
+- Visuals vs the reference: clouds are puffier than the reference's wispy ones, cliffs look blocky up close, and there is no distant castle town on the skyline yet.
+- Co-op and battles: each player battles on their own screen. Wild herds are spawned per player, so your partner doesn't see the creatures you're fighting (they do see your lead creature following you). Shared encounters and co-op battles belong with M6 (gyms).
+- Battle balance is untested by humans. Sunniva's first team is her counter-starter at Lv. 5 holding an Oran Berry plus a Lv. 4 Finchlet, with T1 AI that focuses your starter. A script that always picks the first move and first target won 2 of 3 runs, so a thoughtful player should usually win and a careless one can lose.
+- Creature models vs the reference: softer and simpler than the reference fox (no fur strands, faceted tufts). Weakest reads: bird wings are slab-like and Skjaldhawk looks owl-ish; Sealkin and Selkira look alike and Selkira's cloak reads as a saddle; Forgelynx reads as a dog and Pyrolynx's legs are long; the fawn necks are plain tubes and Elkwarden's head is small; Hjordpup's tan markings barely show; Auroramoth's legs and Skjaldhawk's wingtips touch the ground. Some models are over the 6k triangle target (tests allow 8k small, 16k large).
+- Battles in tall grass hide the lower half of the arena ring; the ring reads well on paths and in town.
 - Performance on Simon's and his friend's computers is unverified. Quality "Low" in settings is the escape hatch.
 - DESIGN §17 (controls) predates PR #3. The code is the truth for current bindings (`DEFAULT_KEYS` in `src/client/core/settings.ts`): WASD move, Shift sprint, Space jump, E interact, M map, B bag, P party, J quests, Q throw ball, F partner, Esc pause. §17 still lists B as build mode and Tab/I as inventory, so reconcile it when build mode lands.
 
@@ -96,13 +105,39 @@ From DESIGN §18. None answered yet. Proceed on the current default and flag it.
 
 ## Next up
 
-**M2: First creatures and battles** (ROADMAP). A deterministic, seeded, double-battle-only engine in `src/shared/battle` with stats, types, about 60 moves, about 20 abilities, status, priority, spread damage and switching. A validated data pipeline for species and moves. The first 20 species with chunky procedural models. Starter pick at Hazel's lab and a rival battle with Sunniva. Wild herds in the meadow with in-world battles and no screen transition. Battle UI, XP and levelling to cap 15. Exit: each player picks a starter, beats Sunniva and fights wild 2v2s that level their team, and the damage calc matches reference values in tests.
+**M3: Catching, party and the first route** (ROADMAP). Overworld throw (aim and arc, Q) and in-battle throw with the catch formula and levelMod (DESIGN §5.2). Failed-catch aggression by temperament: flee, forced battle or a charge at the player, with player HP, dodge roll, knockdown and respawn at bed (§5.3-5.4). Party of 6 plus a PC box in the lab, healing at home and at Hazel's. 40 species. The Hearthmeadow slice to its density target with its first POIs. Dex UI (seen and caught). Exit: catch 10+ species, survive or get knocked down by an angry charge after a bad throw, manage a party, and two players catch side by side without desync.
 
-Keep closing the visual gaps above alongside M2, since Simon judges every build by how it looks.
+Two M2 follow-ups fit naturally into M3: share wild herds between the two players (spawn from a shared seed and sync engagements), and tune battle difficulty from Simon's play-testing.
+
+Keep closing the visual gaps above alongside M3, since Simon judges every build by how it looks.
+
+## Project history
+
+All of this happened on 2026-10-04 in a private Claude project ("Sijord Pokemon Game") that only Simon could join. Everything from its project chat and all three of its threads is summarised here, so nothing else needs to be looked up.
+
+**Project chat (setup)**
+- Simon asked to add his friend to the Claude project. That wasn't possible (private project), so they agreed to collaborate through GitHub instead. Simon created https://github.com/Shamygo/Sijord, added his friend as a collaborator there, and added the repo to the project. The friend works in the repo but never saw the Claude chats.
+
+**Thread 1: "Build the next feature"** (suggested by the app, before Simon described the game)
+- The repo was empty. Claude picked TypeScript + Phaser + Vite and opened **PR #1**, a 2D tile overworld (grid movement, collision, tall grass, 14 tests), and created `main` with a one-line README. It was never merged. Simon then described a 3D game, which made PR #1 obsolete. Close it if it's still open.
+
+**Thread 2: "Open world Pokemon game"** (the main build)
+- Simon posted the full spec (see [VISION.md](VISION.md)) with the reference picture attached.
+- Claude chose TypeScript + Three.js, wrote DESIGN, ROADMAP and DEX_PLAN, and built milestone 1 in **PR #2**, using parallel agents for docs, world, player and co-op.
+- Claude asked two questions at the end of PR #2: should gyms wait for an offline partner or offer an AI partner, and 10 gyms or 8? Simon never answered (see Open questions).
+- "Set it so me and my friend can play": co-op was switched from the Node server to peer-to-peer (Trystero over public Nostr relays), and a single-file `sijord.html` build was added.
+- Hosting back-and-forth: Simon asked for a github.io site, then for one only collaborators could see (impossible without GitHub Enterprise), then settled on public. He made the repo public and set Pages to GitHub Actions; Claude merged PR #2 and confirmed the site loads.
+- Simon played it and asked for big changes (VISION.md §3). **PR #3** delivered them and was merged. Claude's own note on what still didn't match the reference is under Known gaps.
+
+**Thread 3: "Handoff context in the repo"**
+- Simon asked for everything a new project would need to be in the repo, which produced this file, VISION.md, CLAUDE.md and the reference image (PR #4). He then asked that the handoff make the reference picture the explicit visual target and cover every thread, which is this section.
+
+**2026-10-04 and 05: a new Claude project ("Game")**
+- Jordan (GitHub `jiweep`) started a fresh Claude project from this handoff and asked Claude to carry on as if it were its own project, pushing to the repo and the live site. Claude kept `main` as the one canonical branch (it is the only one that deploys) and built M2 in **PR #6**, with the creature models made in parallel by a second agent and checked against the reference with screenshots.
 
 ## The art reference
 
-[reference/art-reference.png](reference/art-reference.png) is the target look. It shows a stylised, painterly, Palworld-like scene:
+[reference/art-reference.png](reference/art-reference.png) is the target look. Always open the image itself for visual work; this description is only a summary. It shows a stylised, painterly, Palworld-like scene:
 - A trainer in a red hoodie with a black backpack (red ball emblem) walks away from the camera up a dirt path through bright, saturated, wind-blown grass with small white flowers. An orange fox-like partner creature with a cream tail walks alongside.
 - Left: tall grey layered cliffs topped with grass and mossy stone ruins with arches. Round, fluffy broadleaf trees and scattered grey boulders.
 - Right and distance: a deep blue river with sandy banks and a wooden bridge, cliffs and stone arches across the water, a red-roofed castle town with a spire on a plateau, and big snowy mountains behind, softened by blue atmospheric haze. Clear deep-blue sky with a few thin clouds. Warm late-morning sun.

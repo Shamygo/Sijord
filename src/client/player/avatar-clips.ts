@@ -877,6 +877,34 @@ export const FIDGET_STRETCH: Clip = {
 
 export const FIDGETS: readonly Clip[] = [FIDGET_LOOK, FIDGET_STRAPS, FIDGET_STRETCH];
 
+/**
+ * Overhand ball throw with the right arm: wind up behind the shoulder, whip forward, follow
+ * through. The ball leaves the hand at about 0.38 s (THROW_RELEASE).
+ */
+export const THROW_RELEASE = 0.38;
+export const GESTURE_THROW: Clip = {
+  name: 'throw',
+  duration: 1.15,
+  fadeIn: 0.12,
+  fadeOut: 0.3,
+  tracks: [
+    [R('swing'), [[0, 0], [0.24, -0.75], [0.3, -0.6], [0.38, 1.7], [0.52, 1.15], [0.8, 0.5], [1.15, 0]]],
+    [R('elbow'), [[0, 0.2], [0.24, 1.55], [0.32, 1.1], [0.38, 0.2], [0.6, 0.35], [1.15, 0.2]]],
+    [R('out'), [[0, 0.12], [0.24, 0.55], [0.38, 0.25], [0.7, 0.18], [1.15, 0.12]]],
+    [R('twist'), [[0, 0.12], [0.24, -0.4], [0.38, 0.3], [1.15, 0.12]]],
+    [L('swing'), [[0, 0.04], [0.24, 0.55], [0.38, -0.1], [0.7, 0.05], [1.15, 0.04]]],
+    [L('elbow'), [[0, 0.24], [0.24, 0.7], [0.5, 0.4], [1.15, 0.24]]],
+  ],
+  additive: [
+    [CH.chestYaw, [[0, 0], [0.24, -0.32], [0.4, 0.22], [0.8, 0.08], [1.15, 0]]],
+    [CH.spinePitch, [[0, 0], [0.24, -0.05], [0.42, 0.12], [0.8, 0.04], [1.15, 0]]],
+    [CH.pelvisZ, [[0, 0], [0.24, -0.03], [0.45, 0.04], [1.15, 0]]],
+  ],
+};
+
+export const GESTURES = { throw: GESTURE_THROW } as const;
+export type GestureName = keyof typeof GESTURES;
+
 // ---------------------------------------------------------------------------------------------
 // Key poses (static; blended by the state machine)
 // ---------------------------------------------------------------------------------------------
