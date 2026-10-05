@@ -48,6 +48,8 @@ export interface Settings {
   quality: GraphicsQuality;
   showFps: boolean;
   showControlsHint: boolean;
+  /** Solo battles start in this mode; 'ask' shows the mode picker every time. */
+  battleMode: 'ask' | 'tactical' | 'action';
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -58,6 +60,7 @@ export const DEFAULT_SETTINGS: Settings = {
   quality: 'medium',
   showFps: false,
   showControlsHint: true,
+  battleMode: 'ask',
 };
 
 const KEY = 'sijord.settings.v1';
