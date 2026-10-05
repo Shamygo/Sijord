@@ -34,6 +34,14 @@ export const ITEMS: Record<string, ItemInfo> = {
     id: 'poke-ball', name: 'Poke Ball', category: 'balls', icon: '◓',
     description: 'A standard ball. Works best on Pokemon weakened in battle and close to your level.',
   },
+  'great-ball': {
+    id: 'great-ball', name: 'Great Ball', category: 'balls', icon: '◓',
+    description: 'A better ball with a stronger seal. Half again as likely to hold as a Poke Ball.',
+  },
+  'ultra-ball': {
+    id: 'ultra-ball', name: 'Ultra Ball', category: 'balls', icon: '◓',
+    description: 'A high-grade ball. Twice as likely to hold as a Poke Ball.',
+  },
   'wood': {
     id: 'wood', name: 'Wood', category: 'materials', icon: '🪵',
     description: 'Gathered from trees. Used for tools, fences and your first workbench.',
@@ -55,6 +63,9 @@ export const ITEMS: Record<string, ItemInfo> = {
     description: 'A hand-drawn map of the Sijord region from Professor Hazel. Fills in as you explore.',
   },
 };
+
+/** Most creatures a trainer carries; the rest go to the PC box. */
+export const PARTY_MAX = 6;
 
 /** What a new trainer leaves home with. Supplies are thin on purpose. */
 export const STARTING_BAG: Record<string, number> = {

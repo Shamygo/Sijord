@@ -16,6 +16,10 @@ export interface SaveData {
   starter?: string;
   /** Gym badges earned; sets the level cap. */
   badges?: number;
+  /** Creatures that didn't fit in the party, stored in the PC at Hazel's lab. */
+  box?: Creature[];
+  /** Species ids seen in battle and caught, for the Dex. */
+  dex?: { seen: string[]; caught: string[] };
 }
 
 export function loadSave(): SaveData | null {

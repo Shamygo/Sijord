@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { chooseAction } from '../../shared/battle/ai';
 import { displayName } from '../../shared/battle/creature';
-import { Battle, type AiKind, type BattleEvent, type Pos } from '../../shared/battle/engine';
+import { Battle, type AiKind, type BattleEvent, type Choice, type Pos } from '../../shared/battle/engine';
 import { randomSeed } from '../../shared/battle/rng';
 import type { Creature } from '../../shared/battle/types';
 import { moveData } from '../../shared/data/moves';
+import { ITEMS } from '../../shared/items';
 import type { CreatureModel } from '../creatures';
 import { THROW_RELEASE } from '../player/avatar-clips';
 import type { Portraits } from '../ui/portraits';
@@ -14,7 +15,7 @@ import { BattleUi, type MovePrompt } from './ui';
 
 export const PLAYER_ID = 'player';
 /** Lens per shot: a longer lens over the shoulder, so the foes fill more of the frame. */
-const SHOT_FOV = { overview: 50, command: 42, action: 46 } as const;
+const SHOT_FOV = { overview: 50, command: 42, action: 46, catch: 40 } as const;
 const FOE_ID = 'foe';
 
 export interface WildActor {
@@ -40,6 +41,10 @@ export interface BattleStart {
   facing: number;
   /** Opening line, e.g. "Sunniva wants to battle!". */
   intro?: string;
+  /** Balls in the bag (id -> count); offered in wild battles. */
+  balls?: Record<string, number>;
+  /** Catch multiplier from the player's class. */
+  catchMult?: number;
 }
 
 export interface BattleOutcome {
@@ -49,6 +54,10 @@ export interface BattleOutcome {
   fainted: Set<string>;
   /** Moves creatures want to learn but have no room for (uid -> moves). */
   pendingMoves: Map<string, string[]>;
+  /** Wild creatures caught, in order. */
+  caught: Creature[];
+  /** Balls thrown (id -> count). */
+  ballsUsed: Record<string, number>;
 }
 
 export interface DirectorDeps {
@@ -76,7 +85,7 @@ export function arenaSpots(playerPos: THREE.Vector3, facing: number): { center: 
   return { center, foeTrainer: center.clone().addScaledVector(axis, ARENA.trainer + 0.2).addScaledVector(right, -0.6) };
 }
 
-type Shot = { kind: 'overview' } | { kind: 'command'; pos: Pos } | { kind: 'action'; from: Pos; to: Pos | null; flip: boolean };
+type Shot = { kind: 'overview' } | { kind: 'command'; pos: Pos } | { kind: 'action'; from: Pos; to: Pos | null; flip: boolean } | { kind: 'catch'; pos: Pos };
 
 /**
  * Runs one battle from start to finish: builds the engine and the in-world stage, plays every
@@ -99,6 +108,8 @@ export class BattleDirector {
   private fainted = new Set<string>();
   /** Wild creatures standing in the world, by uid, until they step into the ring. */
   private wildActors = new Map<string, WildActor>();
+  /** Balls thrown so far (id -> count). */
+  private ballsUsed: Record<string, number> = {};
   private keyDown = (e: KeyboardEvent) => {
     if (e.code === 'Space' || e.code === 'KeyE' || e.code === 'Enter') this.hurry = true;
   };
@@ -118,7 +129,7 @@ export class BattleDirector {
       seed: randomSeed(),
       kind: start.kind,
       sides: [
-        { teams: [{ owner: PLAYER_ID, name: start.playerName, creatures: start.party, levelCap: start.levelCap, xpMult: start.xpMult }], slots: [PLAYER_ID, PLAYER_ID] },
+        { teams: [{ owner: PLAYER_ID, name: start.playerName, creatures: start.party, levelCap: start.levelCap, xpMult: start.xpMult, catchMult: start.catchMult }], slots: [PLAYER_ID, PLAYER_ID] },
         { teams: [{ owner: FOE_ID, name: start.foeName, creatures: start.foes, ai: start.foeAi }], slots: [FOE_ID, FOE_ID] },
       ],
     });
@@ -143,17 +154,19 @@ export class BattleDirector {
     while (this.battle.phase !== 'ended') {
       const human = this.battle.requests().filter((r) => !this.battle.isAi(r.owner));
       if (this.battle.phase === 'move') {
+        const chosen: Choice[] = [];
         for (let i = 0; i < human.length; ) {
           const r = human[i];
           // Cut, don't pan, from the wide shot: a pan would sweep through the trainer's head.
           if (this.shot.kind === 'overview') this.cut = true;
           this.shot = { kind: 'command', pos: r.pos };
           this.ui.caption(null);
-          const c = await this.ui.promptMove(this.movePrompt(r.pos, i > 0));
+          const c = await this.ui.promptMove(this.movePrompt(r.pos, i > 0, chosen.slice(0, i)));
           if (c === 'back') {
             i = Math.max(0, i - 1);
             continue;
           }
+          chosen[i] = c;
           this.battle.choose(r.pos, c);
           // Running ends the decision round for the whole side.
           if (c.kind === 'run') break;
@@ -179,10 +192,23 @@ export class BattleDirector {
       escaped: this.battle.escaped,
       fainted: this.fainted,
       pendingMoves: new Map(this.battle.pendingMoves),
+      caught: [...this.battle.caught],
+      ballsUsed: this.ballsUsed,
     };
   }
 
-  private movePrompt(pos: Pos, canBack: boolean): MovePrompt {
+  /** Balls still in the bag, less those already thrown and those picked earlier this round. */
+  private ballsLeft(pending: Choice[]): { id: string; name: string; count: number }[] {
+    const out: { id: string; name: string; count: number }[] = [];
+    for (const [id, n] of Object.entries(this.start.balls ?? {})) {
+      const reserved = pending.filter((c) => c.kind === 'ball' && c.ball === id).length;
+      const count = n - (this.ballsUsed[id] ?? 0) - reserved;
+      if (count > 0) out.push({ id, name: ITEMS[id]?.name ?? id, count });
+    }
+    return out;
+  }
+
+  private movePrompt(pos: Pos, canBack: boolean, pending: Choice[] = []): MovePrompt {
     const b = this.battle;
     const mon = b.at(pos)!;
     const team = b.team(PLAYER_ID);
@@ -203,6 +229,8 @@ export class BattleDirector {
       bench: b.bench(PLAYER_ID).map((m) => ({ index: team.indexOf(m), label: `${m.name}  Lv. ${m.creature.level}`, hp: m.hp, maxHp: m.maxHp, portrait: this.deps.portraits.get(m.species.id) })),
       canRun: b.kind === 'wild',
       canBack,
+      balls: b.kind === 'wild' ? this.ballsLeft(pending) : [],
+      ballTargets: b.kind === 'wild' ? foes.map((t) => ({ pos: t, label: this.targetLabel(t, pos) })) : [],
     };
   }
 
@@ -315,9 +343,27 @@ export class BattleDirector {
           await this.say(e.text, 1.4);
           break;
         }
+        case 'throw': {
+          await this.until(() => !this.stage.busy);
+          this.shot = { kind: 'catch', pos: e.target };
+          this.ui.caption(e.text ?? null);
+          if (e.pos.side === 0) this.deps.onThrow?.(0);
+          await this.wait(THROW_RELEASE);
+          break;
+        }
+        case 'catch': {
+          this.ballsUsed[e.ball] = (this.ballsUsed[e.ball] ?? 0) + 1;
+          const from = e.pos.side === 0 ? this.stage.trainerSpot : this.stage.foeTrainerSpot;
+          const d = this.stage.catchSequence(e.target, from, e.ball, e.shakes, e.caught);
+          await this.wait(d);
+          if (e.caught) this.ui.removePlate(key(e.target));
+          await this.say(e.text, e.caught ? 1.6 : 1.1);
+          this.shot = { kind: 'overview' };
+          break;
+        }
         case 'end':
           this.shot = { kind: 'overview' };
-          await this.say(e.text, 1.4);
+          await this.say(e.text, e.reason === 'catch' ? 0.4 : 1.4);
           break;
         default:
           await this.say(e.text, 0.85);
@@ -391,6 +437,15 @@ export class BattleDirector {
         const lookSide = this.shot.pos.slot === 0 ? -0.8 : 1.2;
         this.wantPos.copy(s).addScaledVector(st.axis, -2.1 - h * 1.2).addScaledVector(st.right, 0.8).addScaledVector(up, 1.0 + h * 0.75);
         this.wantLook.copy(st.center).addScaledVector(st.axis, ARENA.line).addScaledVector(st.right, lookSide).addScaledVector(up, 0.1);
+        break;
+      }
+      case 'catch': {
+        // From the thrower's side, close on the creature (and then the ball at its feet).
+        const s = st.spot(this.shot.pos);
+        const h = st.model(this.shot.pos)?.height ?? 0.6;
+        const side = this.shot.pos.slot === 0 ? -1 : 1;
+        this.wantPos.copy(s).addScaledVector(st.axis, -2.4 - h * 0.9).addScaledVector(st.right, side * 1.3).addScaledVector(up, 0.9 + h * 0.5);
+        this.wantLook.copy(s).addScaledVector(up, Math.min(0.45, h * 0.4));
         break;
       }
       case 'action': {
