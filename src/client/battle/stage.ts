@@ -6,7 +6,7 @@ import type { World } from '../world/types';
 import { smoothFacing } from '../player/locomotion';
 import { resolveCircle } from '../core/collision';
 import { ACTION_RULES } from '../../shared/battle/action';
-import { makeArenaRing, makeArenaWall, makeBall, Particles, Projectile, TYPE_COLORS } from './fx';
+import { disposeBall, makeArenaRing, makeArenaWall, makeBall, Particles, Projectile, TYPE_COLORS } from './fx';
 
 export function key(p: Pos): string {
   return `${p.side}:${p.slot}`;
@@ -260,6 +260,83 @@ export class BattleStage {
       this.tween(0.4, (k) => root.scale.setScalar(Math.max(0.001, k < 0.7 ? easeOut(k / 0.7) * 1.12 : 1.12 - (k - 0.7) / 0.3 * 0.12)));
     });
     return flight + 0.55;
+  }
+
+  /**
+   * A thrown ball: it flies from the trainer, swallows the creature in a red flash, drops and
+   * wobbles `shakes` times, then either clicks shut (sparkles) or bursts open and the creature
+   * pops back out. Returns the total time.
+   */
+  catchSequence(p: Pos, from: THREE.Vector3, ball: string, shakes: number, caught: boolean): number {
+    const s = this.slots.get(key(p))!;
+    const root = s.root;
+    if (!root) return 0;
+    const g = makeBall(ball);
+    const start = from.clone().add(new THREE.Vector3(0, 1.35, 0));
+    const hitAt = this.focusOf(p);
+    const hover = hitAt.clone().add(new THREE.Vector3(0, 0.5, 0));
+    const rest = s.spot.clone().add(new THREE.Vector3(0, 0.11, 0));
+    g.position.copy(start);
+    this.root.add(g);
+    this.balls.push(g);
+    const flight = 0.55;
+    const absorb = 0.45;
+    const fall = 0.35;
+    const shake = 0.7;
+    const settle = 0.6;
+    const startScale = root.scale.x;
+    const t1 = flight;
+    const t2 = t1 + absorb;
+    const t3 = t2 + fall;
+    const t4 = t3 + shakes * shake;
+    // Flight: an arc into the creature, then a little bounce up while it opens.
+    this.tween(flight, (k) => {
+      g.position.lerpVectors(start, hitAt, k);
+      g.position.y += Math.sin(k * Math.PI) * 1.2;
+      g.rotation.x = k * 10;
+    }, () => {
+      this.particles.emit(hitAt, 30, '#ff5a4a', { speed: 2.2, life: 0.5, size: 0.3 });
+      this.tween(absorb, (k) => {
+        g.position.lerpVectors(hitAt, hover, easeOut(k));
+        g.rotation.x = 0;
+        root.scale.setScalar(Math.max(0.001, startScale * (1 - easeIn(k))));
+      }, () => {
+        root.visible = false;
+        this.tween(fall, (k) => {
+          g.position.lerpVectors(hover, rest, easeIn(k));
+          g.position.y += Math.sin(k * Math.PI) * 0.1;
+        }, () => {
+          for (let i = 0; i < shakes; i++) {
+            this.tween(i * shake, () => {}, () => this.tween(shake * 0.75, (k) => {
+              g.rotation.z = Math.sin(k * Math.PI * 2) * 0.45 * (1 - k * 0.3);
+            }));
+          }
+        });
+      });
+    });
+    // Result.
+    this.tween(t4, () => {}, () => {
+      g.rotation.z = 0;
+      if (caught) {
+        this.particles.emit(rest.clone().add(new THREE.Vector3(0, 0.15, 0)), 26, '#ffe36a', { speed: 2.4, life: 0.7, size: 0.26, up: 2 });
+        this.tween(settle + 0.4, (k) => g.scale.setScalar(1 - easeIn(Math.max(0, k - 0.6) / 0.4)), () => this.removeBall(g));
+        s.root = null;
+        s.model = null;
+        s.external = false;
+      } else {
+        this.particles.emit(rest.clone().add(new THREE.Vector3(0, 0.2, 0)), 34, '#fff6d8', { speed: 3.5, life: 0.45, size: 0.3 });
+        this.removeBall(g);
+        root.visible = true;
+        root.scale.setScalar(0.001);
+        this.tween(0.35, (k) => root.scale.setScalar(Math.max(0.001, startScale * (k < 0.7 ? easeOut(k / 0.7) * 1.1 : 1.1 - ((k - 0.7) / 0.3) * 0.1))));
+      }
+    });
+    return t4 + settle;
+  }
+
+  private removeBall(g: THREE.Group): void {
+    this.balls = this.balls.filter((b) => b !== g);
+    disposeBall(g);
   }
 
   /** Recall into a ball: a red flash and the creature shrinks away. */

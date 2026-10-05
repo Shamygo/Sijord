@@ -103,6 +103,23 @@ export class Professor {
     ];
   }
 
+  /** Balls handed over with the starter, or on the first visit after this update for older saves. */
+  ballGiftLines(count: number): DialogueLine[] {
+    return [
+      { speaker: NAME, text: "Here, you'll want these. Wear a wild Pokemon down first, and don't bother throwing at one that's fresh and far above your team's level." },
+      { speaker: '', text: `You received ${count} Poke Balls!` },
+      { speaker: NAME, text: "That's all I can spare. Once you have a workbench you can make your own." },
+    ];
+  }
+
+  /** The player ran out of balls and came back. */
+  ballRefillLines(count: number): DialogueLine[] {
+    return [
+      { speaker: NAME, text: 'Out of Poke Balls already? I have a few left over from the last batch. Make them count.' },
+      { speaker: '', text: `You received ${count} Poke Balls.` },
+    ];
+  }
+
   healLines(): DialogueLine[] {
     return [
       { speaker: NAME, text: 'Your team looks worn out. Let me take a look at them.' },

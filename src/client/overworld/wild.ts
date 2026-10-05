@@ -261,10 +261,13 @@ export class WildManager {
     }
   }
 
-  /** After a battle: fainted creatures fade away, the rest calm down and go back to grazing. */
-  leaveBattle(list: WildCreature[], fainted: Set<string>): void {
+  /** After a battle: fainted creatures fade away, caught ones are already in a ball, the rest calm down and go back to grazing. */
+  leaveBattle(list: WildCreature[], fainted: Set<string>, caught: Set<string> = new Set()): void {
     for (const m of list) {
-      if (fainted.has(m.creature.uid)) {
+      if (caught.has(m.creature.uid)) {
+        m.state = 'gone';
+        m.fade = 1;
+      } else if (fainted.has(m.creature.uid)) {
         m.state = 'gone';
         m.fade = 0;
       } else {
