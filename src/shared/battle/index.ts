@@ -6,4 +6,5 @@ export * from './stats';
 export * from './damage';
 export * from './creature';
 export * from './engine';
+export * from './catch';
 export { chooseAction } from './ai';

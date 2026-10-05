@@ -1,6 +1,7 @@
 import { ABILITIES } from '../data/abilities';
 import { moveData, STRUGGLE } from '../data/moves';
 import { species } from '../data/species';
+import { catchChance, rollCatch } from './catch';
 import { addEvs, gainXp, maxHp } from './creature';
 import { calcDamage, modify } from './damage';
 import { Rng } from './rng';
@@ -38,6 +39,8 @@ export type Choice =
   | { kind: 'move'; move: number; target?: Pos }
   | { kind: 'switch'; team: number }
   | { kind: 'run' }
+  /** Throw a ball at a wild creature; the trainer throws it, using this position's turn. */
+  | { kind: 'ball'; ball: string; target: Pos }
   | { kind: 'pass' };
 
 export type AiKind = 'wild' | 't1';
@@ -53,6 +56,8 @@ export interface TeamSetup {
   levelCap?: number;
   /** Experience multiplier (the Scholar class). */
   xpMult?: number;
+  /** Catch multiplier from class and skills. */
+  catchMult?: number;
 }
 
 export interface SideSetup {
@@ -88,6 +93,8 @@ export interface BattleMon {
   moves: { id: string; pp: number; maxPp: number }[];
   active: boolean;
   fainted: boolean;
+  /** Caught by the other side's ball; it has left the field for good. */
+  caught: boolean;
   /** Turns since it last switched in (1 on its first turn). */
   turnsOut: number;
   confused: number;
@@ -151,8 +158,10 @@ export type BattleEvent = EventBase &
     | { t: 'xp'; uid: string; owner: string; amount: number }
     | { t: 'level'; uid: string; owner: string; level: number; learned: string[] }
     | { t: 'run'; success: boolean }
+    | { t: 'throw'; pos: Pos; target: Pos; ball: string }
+    | { t: 'catch'; pos: Pos; target: Pos; uid: string; ball: string; shakes: number; caught: boolean }
     | { t: 'msg' }
-    | { t: 'end'; winner: SideId | null; reason: 'faint' | 'run' }
+    | { t: 'end'; winner: SideId | null; reason: 'faint' | 'run' | 'catch' }
   );
 
 export const STATUS_NAMES: Record<MajorStatus, string> = {
@@ -200,6 +209,8 @@ export class Battle {
   /** Set when the player side ran from a wild battle. */
   escaped = false;
   private runAttempts = 0;
+  /** The most recent creature to leave the field was caught (rather than fainting). */
+  private lastCatch = false;
   private choices = new Map<string, Choice>();
   private events: BattleEvent[] = [];
   /** Moves creatures wanted to learn while already knowing four (uid -> moves). */
@@ -243,6 +254,7 @@ export class Battle {
       moves: c.moves.map((m) => ({ id: m.id, pp: m.pp, maxPp: moveData(m.id).pp })),
       active: false,
       fainted: c.hp <= 0,
+      caught: false,
       turnsOut: 0,
       confused: 0,
       flinch: false,
@@ -309,8 +321,11 @@ export class Battle {
 
   /** Healthy team members of an owner that are not on the field. */
   bench(owner: string): BattleMon[] {
-    return this.team(owner).filter((m) => !m.fainted && !m.active);
+    return this.team(owner).filter((m) => !m.fainted && !m.active && !m.caught);
   }
+
+  /** Creatures caught during this battle, in the order they were caught. */
+  readonly caught: Creature[] = [];
 
   isAi(owner: string): boolean {
     return !!this.teamSetup(owner)?.ai;
@@ -430,9 +445,11 @@ export class Battle {
       // A failed escape costs the whole side its turn.
       if (choice.kind === 'run') choice = this.kind === 'wild' ? { kind: 'pass' } : this.defaultMove(pos);
       if (choice.kind === 'switch' && !this.validSwitch(mon.owner, choice.team)) choice = this.defaultMove(pos);
+      if (choice.kind === 'ball' && !this.validBall(pos, choice.target)) choice = { kind: 'pass' };
       if (choice.kind === 'pass') continue;
       let priority = 0;
       if (choice.kind === 'switch') priority = 7;
+      else if (choice.kind === 'ball') priority = 6;
       else if (choice.kind === 'move') priority = this.choiceMove(mon, choice).priority;
       queue.push({ mon, pos, choice, priority, speed: this.speed(mon), tie: this.rng.next() });
     }
@@ -445,6 +462,7 @@ export class Battle {
       if (!pos) continue;
       if (q.choice.kind === 'switch') this.doSwitch(pos, q.choice.team);
       else if (q.choice.kind === 'move') this.useMove(pos, q.mon, q.choice);
+      else if (q.choice.kind === 'ball') this.throwBall(pos, q.choice.ball, q.choice.target);
       q.mon.movedThisTurn = true;
       this.checkFaints();
       if (this.checkEnd()) return;
@@ -487,6 +505,61 @@ export class Battle {
     this.trackFacing();
     this.phase = 'move';
     this.enterReplacePhase();
+  }
+
+  /** Balls only work on wild creatures still on the field. */
+  private validBall(pos: Pos, target: Pos): boolean {
+    if (this.kind !== 'wild' || target.side === pos.side) return false;
+    const t = this.at(target);
+    return alive(t) && this.teamSetup(t.owner)?.ai === 'wild';
+  }
+
+  private throwBall(pos: Pos, ball: string, target: Pos): void {
+    const thrower = this.at(pos)!;
+    const setup = this.teamSetup(thrower.owner);
+    const trainer = setup?.name ?? 'You';
+    const ballName = ball === 'great-ball' ? 'Great Ball' : ball === 'ultra-ball' ? 'Ultra Ball' : 'Poke Ball';
+    let t = this.at(target);
+    // The first target went down earlier this turn: aim at the other wild one instead.
+    if (!alive(t)) {
+      const other = this.foesOf(pos)[0];
+      if (!other) return;
+      target = other;
+      t = this.at(target)!;
+    }
+    this.emit({ t: 'throw', pos, target, ball, text: `${trainer} threw a ${ballName}!` });
+    const party = this.team(thrower.owner);
+    const chance = catchChance({
+      maxHp: t.maxHp,
+      hp: t.hp,
+      catchRate: t.species.catchRate,
+      ball,
+      status: t.status,
+      level: t.creature.level,
+      partyLevel: Math.max(1, ...party.map((m) => m.creature.level)),
+      cap: setup?.levelCap ?? 100,
+      throw: 'battle',
+      classMod: setup?.catchMult,
+    });
+    const roll = rollCatch(chance, this.rng);
+    if (roll.caught) {
+      this.emit({ t: 'catch', pos, target, uid: t.uid, ball, shakes: roll.shakes, caught: true, text: `Gotcha! ${t.name} was caught!` });
+      t.caught = true;
+      t.status = t.status === 'tox' ? 'psn' : t.status;
+      this.awardExperience(t);
+      t.active = false;
+      this.sides[target.side].active[target.slot] = null;
+      this.caught.push(t.creature);
+      this.lastCatch = true;
+      return;
+    }
+    const near = ['Oh no! It broke free!', 'Aww! It appeared to be caught!', 'Argh! Almost had it!', 'Gah! It was so close, too!'][roll.shakes];
+    this.emit({ t: 'catch', pos, target, uid: t.uid, ball, shakes: roll.shakes, caught: false, text: near });
+    // Territorial and aggressive creatures don't take kindly to it (DESIGN §5.3).
+    if ((t.species.temperament === 'territorial' || t.species.temperament === 'aggressive') && t.boosts.atk < 6) {
+      t.boosts.atk++;
+      this.emit({ t: 'boost', pos: target, stat: 'atk', amount: 1, text: `${this.label(target)} is enraged! Its Attack rose!` });
+    }
   }
 
   private validSwitch(owner: string, team: number): boolean {
@@ -1165,6 +1238,7 @@ export class Battle {
       m.fainted = true;
       m.status = undefined;
       this.emit({ t: 'faint', pos: p, uid: m.uid, text: `${this.label(p)} fainted!` });
+      this.lastCatch = false;
       this.awardExperience(m);
     }
   }
@@ -1203,10 +1277,15 @@ export class Battle {
 
   private checkEnd(): boolean {
     if (this.phase === 'ended') return true;
-    const out = ([0, 1] as SideId[]).map((side) => this.sides[side].teams.every((t) => t.mons.every((m) => m.fainted)));
+    const out = ([0, 1] as SideId[]).map((side) => this.sides[side].teams.every((t) => t.mons.every((m) => m.fainted || m.caught)));
     if (!out[0] && !out[1]) return false;
     this.phase = 'ended';
     this.winner = out[0] && out[1] ? null : out[0] ? 1 : 0;
+    // Catching the last wild creature ends the battle on the catch, with no "You won".
+    if (this.winner === 0 && this.lastCatch) {
+      this.emit({ t: 'end', winner: 0, reason: 'catch' });
+      return true;
+    }
     const text = this.winner === 0 ? 'You won the battle!' : this.winner === 1 ? 'You lost the battle...' : 'The battle ended in a draw.';
     this.emit({ t: 'end', winner: this.winner, reason: 'faint', text });
     return true;

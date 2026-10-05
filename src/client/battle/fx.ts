@@ -292,9 +292,12 @@ export function makeArenaWall(center: THREE.Vector3, radius: number, heightAt: (
 }
 
 /** A red-and-white ball for throws and recalls. */
-export function makeBall(): THREE.Group {
+/** Top-half colour per ball. */
+export const BALL_COLORS: Record<string, number> = { 'poke-ball': 0xe8392f, 'great-ball': 0x2f6fe8, 'ultra-ball': 0x2a2a30 };
+
+export function makeBall(ball = 'poke-ball'): THREE.Group {
   const g = new THREE.Group();
-  const top = new THREE.Mesh(new THREE.SphereGeometry(0.11, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xe8392f, roughness: 0.35 }));
+  const top = new THREE.Mesh(new THREE.SphereGeometry(0.11, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: BALL_COLORS[ball] ?? 0xe8392f, roughness: 0.35 }));
   const bottom = new THREE.Mesh(new THREE.SphereGeometry(0.11, 18, 10, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xf6f3ee, roughness: 0.4 }));
   const band = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.012, 6, 24), new THREE.MeshStandardMaterial({ color: 0x222226, roughness: 0.5 }));
   band.rotation.x = Math.PI / 2;
@@ -303,4 +306,15 @@ export function makeBall(): THREE.Group {
   button.position.z = 0.108;
   g.add(top, bottom, band, button);
   return g;
+}
+
+/** Free a ball made by makeBall. */
+export function disposeBall(g: THREE.Group): void {
+  g.removeFromParent();
+  g.traverse((o) => {
+    if (o instanceof THREE.Mesh) {
+      o.geometry.dispose();
+      (o.material as THREE.Material).dispose();
+    }
+  });
 }
