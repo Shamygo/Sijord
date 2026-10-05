@@ -9,6 +9,8 @@ export interface MoveInput {
   right: number;
   sprint: boolean;
   jump: boolean;
+  /** Hold to ascend a nearby ladder or a steep rock slope. */
+  climb?: boolean;
 }
 
 /** Terrain height at a world (x, z). */

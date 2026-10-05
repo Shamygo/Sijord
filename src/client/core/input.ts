@@ -11,6 +11,7 @@ export class Input {
   locked = false;
   /** When the pointer was last released; browsers refuse to re-lock for about a second after Esc. */
   private unlockedAt = 0;
+  private lockRequest = 0;
 
   /**
    * `onInstant` receives menu-type actions the moment the key goes down, rather than on the next
@@ -20,6 +21,7 @@ export class Input {
     private canvas: HTMLCanvasElement,
     private settings: () => Settings,
     private onInstant: (a: Action | 'pause') => void,
+    private canCapture: () => boolean = () => true,
   ) {
     addEventListener('keydown', (e) => {
       if (isTyping(e)) return;
@@ -50,13 +52,17 @@ export class Input {
     }, { passive: true });
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.canvas;
+      // A browser can grant an in-flight request after a menu has already opened.
+      if(this.locked && !this.canCapture()){this.lockRequest++;this.locked=false;document.exitPointerLock();}
       if (!this.locked) this.unlockedAt = performance.now();
     });
   }
 
   /** Capture the mouse. Retries once after the browser's post-Esc cooldown if it refuses. */
   requestLock(): void {
+    const request = ++this.lockRequest;
     const attempt = () => {
+      if (request !== this.lockRequest || !this.canCapture()) return;
       try {
         const r = this.canvas.requestPointerLock() as unknown;
         if (r instanceof Promise) r.catch(() => {});
@@ -70,6 +76,7 @@ export class Input {
   }
 
   releaseLock(): void {
+    this.lockRequest++;
     if (document.pointerLockElement) document.exitPointerLock();
   }
 
@@ -92,6 +99,7 @@ export class Input {
       right: Math.max(-1, Math.min(1, k('right') - k('left') + raw('ArrowRight') - raw('ArrowLeft'))),
       sprint: this.keys.has(keys.sprint),
       jump: this.pressed.has(keys.jump),
+      climb: this.keys.has(keys.climb),
     };
   }
 

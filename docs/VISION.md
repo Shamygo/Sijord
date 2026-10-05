@@ -63,3 +63,25 @@ So the repo is public and the game is served at https://shamygo.github.io/Sijord
 > This needs many changes. The graphics need massive improvement. I want it to have a mix that looks exactly like the reference image I sent you earlier in this chat, make sure the ANIMATIONS match the professional quality similar to legends arceus. Additionally, dont make the player too overpowered, the game should be hard, the 5 classes at the beginning were a little too powerful. Moreover, include a settings menu that allows the player to toggle controls, settings, etc. The "M" button should open the map for example, the "B" button should open the bag, etc. Additionally, the menus didnt seemt to be working at first, make sure it is operational.
 
 PR #3 was the response to this. See [HANDOFF.md](HANDOFF.md) for what it did and what still falls short.
+
+## Later direct feedback: Pokémon, both battle modes and polish (2026-10-05)
+
+These requests are later than the original spec and change the art/animation/public-access and collaboration direction where applicable. Reference images and exact implementation notes are in [POLISH_HANDOFF.md](POLISH_HANDOFF.md).
+
+The user requested downloaded Pokémon models/items and a trainer from the games, with animations, for personal play with a friend; they explicitly said to keep the game public so both can access it. Asked whether trainer free-roam commands and direct Pokémon control/dodging should both exist, they replied:
+
+> add both as different gamemodes so we can test which is better
+
+After supplying six UI inspirations, they wrote:
+
+> also here are some ui inspirations i want for the game, can you make the changes to the ui as well, while also downloading the pokemon item assets and using them for the game as well
+
+Then, with the existing empty-party UI and Arceus battle/terrain/town screenshots:
+
+> the mouse disappears when clicking and trying to use the ui and then pressing escape undoes it, but very messed up. continue polishing the ui as the pokemon explorer looks bad, and when first starting out in this save ui doesnt look like that to me. also have the pokemon blend in better with the surrounding graphics/lighting of the world. find character model that fits in world better too, and find animations along with it. i relaly like the legends arceus character model, and the animations which fit in the world, add climbing with animations as well, but find better pokemon player model and find the actual animations as well. also continue polishing up graphics and towns should feel like the legends arceus screenshot, actual substantial and detailed
+
+> also add ui animations so it feels like a polished experience
+
+And for the next Claude session:
+
+> continue and whne you're finished leave notes that for certain claude when coming back into the repo will see, and know exactly what was changed and why I wanted it changed

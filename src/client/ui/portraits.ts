@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
 import type { Appearance } from '../../shared/types';
 import { createAvatar } from '../player/avatar';
 import { createCreatureModel } from '../creatures';
@@ -64,8 +65,11 @@ export class Portraits {
     this.scene.add(model.root);
     const h = model.height;
     // Frame the head: three-quarter view from the front-left, slightly above.
-    const look = new THREE.Vector3(0, h * 0.62, h * 0.12);
-    const dist = Math.max(0.55, h * 1.25);
+    // Wide quadrupeds have low faces; the upright crop otherwise shows only their back.
+    const dex=POKEMON_VISUALS[species]?.dex;
+    const wide = (dex !== undefined && dex <= 3) || model.radius > h * .6;
+    const look = new THREE.Vector3(0, h * (wide ? .38 : .62), h * .12);
+    const dist = Math.max(.55, h * (wide ? 1.9 : 1.25), wide ? model.radius * 2.2 : 0);
     this.camera.position.set(look.x + dist * 0.55, look.y + dist * 0.18, look.z + dist * 0.85);
     this.camera.lookAt(look);
     r.render(this.scene, this.camera);

@@ -70,8 +70,8 @@ export class GameMenu {
     this.el.append(
       h('div.menu-panel', {}, h('div.menu-head', {}, this.tabBar, h('button.act', {onclick: (e: Event)=>{this.deps.onSave();const button=e.currentTarget as HTMLButtonElement;button.textContent='Saved';setTimeout(()=>{button.textContent='Save progress';},1500);}}, 'Save progress'), h('button.menu-close', { onclick: () => this.close(), title: 'Close (Esc)' }, '✕')), this.body, h('div.menu-footer', {}, 'Esc · Back to exploring')),
     );
-    this.el.addEventListener('mousedown', (e) => {
-      if (e.target === this.el) this.close();
+    this.el.addEventListener('click', (e) => {
+      if (e.target === this.el) { e.stopPropagation(); this.close(); }
     });
     // Capture so a key press while rebinding never reaches the game.
     addEventListener('keydown', (e) => this.onKey(e), true);
@@ -237,24 +237,27 @@ export class GameMenu {
     const draw = () => {
       const term = search.value.toLowerCase();
       const entries = catalogue.models.filter(m => `${m.name} ${m.dex} ${m.form}`.toLowerCase().includes(term));
-      list.replaceChildren(...entries.slice(0,150).map(m => h('a.dex-entry', {href:assetUrl(`pokemon.html?model=${encodeURIComponent(m.id)}`),target:'_blank',rel:'noopener'}, h('span', {}, String(m.dex ?? '—').padStart(3,'0')), h('b', {},m.name), h('small', {},m.form === 'regular' ? 'Regular' : m.form), h('span', {},m.animations.length ? 'Animated ↗' : 'View model ↗'))));
+      list.replaceChildren(...entries.slice(0,150).map(m => h('a.dex-entry', {href:assetUrl(`pokemon.html?model=${encodeURIComponent(m.id)}`),target:'_blank',rel:'noopener'}, h('img.dex-icon', {src:assetUrl(`pokemon-icons/${m.dex}.png`),alt:'',loading:'lazy'}), h('div.dex-name', {}, h('small',{},`#${String(m.dex ?? '—').padStart(3,'0')}`),h('b', {},m.name)), h('small', {},m.form === 'regular' ? 'Regular' : m.form), h('span', {},m.animations.length ? 'Animated ↗' : 'View model ↗'))));
       if (!entries.length) list.append(h('p.empty', {}, 'No matching Pokémon.'));
     };
     search.addEventListener('input',draw);draw();
-    return h('div.dex-screen', {}, h('h2', {},'Pokédex · model collection'), h('p.hint-dark', {},`${catalogue.models.length.toLocaleString()} models and forms. Search to narrow the list; the first 150 matches are shown. World encounters currently use 21 species.`), search,list);
+    return h('div.dex-screen', {}, h('h2', {},'Pokémon explorer'), h('p.hint-dark', {},`${catalogue.models.length.toLocaleString()} models and forms. Search to narrow the list; the first 150 matches are shown. World encounters currently use 21 species.`), search,list);
   }
 
   private renderParty(): HTMLElement {
     const party = this.deps.party();
     if (!party.length) {
-      return h(
-        'div.party-grid',
-        {},
-        ...Array.from({ length: 6 }, (_, i) =>
-          h('div.party-slot', {}, h('div.party-ball', {}, '◓'), h('div', {}, i < 2 ? `Slot ${i + 1} · battles first` : `Slot ${i + 1}`), h('small', {}, 'Empty')),
-        ),
-        h('p.hint-dark', {}, 'Every battle is a double battle: the first two Pokemon in your party go out together. Professor Hazel will give you your first partner.'),
-      );
+      const professor = this.deps.world.anchors.professor;
+      return h('div.party-screen.party-start', {},
+        h('div.trainer-preview', {}, this.trainerImage ? h('img', {src:this.trainerImage,alt:'Your trainer'}) : null, h('span', {}, 'Your adventure begins')),
+        h('div.mon-list', {}, h('h2', {}, 'Your party'), ...Array.from({length:6}, (_,i) =>
+          h('div.mon-card.empty-mon', {}, h('span.empty-ball', {}, '◓'), h('div.mon-main', {}, h('div.mon-name', {}, `Partner ${i+1}`), h('small', {}, i === 0 ? 'Waiting for your first Pokémon' : 'An adventure still to come'))))),
+        h('div.starter-welcome', {}, h('span.eyebrow', {}, 'FIRST STEPS'), h('h2', {}, 'Meet your first partner'),
+          h('p', {}, 'Professor Hazel is waiting outside the laboratory. Find her in Bramblewick to choose the Pokémon that will travel with you.'),
+          h('div.starter-portraits', {}, ...['fernfawn','cindlet','splashpup'].map(sp => h('img', {src:this.deps.portrait(sp),alt:species(sp).name}))),
+          h('button.btn', {onclick: () => {this.deps.setDestination({x:professor.x,z:professor.z,label:'Professor Hazel'});this.close();}}, 'Guide me to Professor Hazel'),
+          h('p.hint-dark', {}, 'Follow the compass marker to the laboratory. In co-op, each trainer commands their own Pokémon.')));
+
     }
     this.selectedMon = Math.min(this.selectedMon, party.length - 1);
     const leads = party.filter(isUsable).slice(0, 2);

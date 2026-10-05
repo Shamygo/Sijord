@@ -1,0 +1,76 @@
+{
+  "model": "Rei (Pok\u00e9mon Legends: Arceus)",
+  "file": "rei.glb",
+  "bytes": 1934184,
+  "sha256": "d4405b1af003678bbd2f09cfb803de872fa18fd8113695bc1e8061e4c70de3ba",
+  "sourceArchive": {
+    "url": "https://drive.google.com/file/d/1yyMBpUxzEFzJsSVf07hZdje7ubTrYPzG/view",
+    "sha256": "12d845db1c7512adbac9919cfc5cac11f9d6b096095737d9f300716fc07b2308",
+    "modelDirectory": "tr0036_00_senpai_m"
+  },
+  "importer": "https://github.com/SomeKitten/LegendsArceusBlenderScript",
+  "conversion": "Blender 3.6.23, LOD0 only, coordinate conversion, baked retarget at 30 fps, glTF-transform Draco/512px",
+  "animationSource": {
+    "author": "Quaternius",
+    "license": "CC0 1.0",
+    "library1": "https://quaternius.com/packs/universalanimationlibrary.html",
+    "mirror1": "https://github.com/J-Ponzo/gltf-universal-animation-library",
+    "mirrorCommit1": "e24c23cf2a1323488a3faa226ea7ea21f644b73e",
+    "library2": "https://quaternius.com/packs/universalanimationlibrary2.html",
+    "archive2Sha256": "4008ea208a604773a2b2177d965f0f5d3195498b5bf838c3f5785d68e95f2a68",
+    "originalGameClips": false
+  },
+  "animations": [
+    {
+      "name": "idle",
+      "source": "Idle_Loop",
+      "seconds": 2.0,
+      "bones": 22
+    },
+    {
+      "name": "walk",
+      "source": "Walk_Loop",
+      "seconds": 1.0666666666666667,
+      "bones": 22
+    },
+    {
+      "name": "run",
+      "source": "Sprint_Loop",
+      "seconds": 0.5333333333333333,
+      "bones": 22
+    },
+    {
+      "name": "jump",
+      "source": "Jump_Start",
+      "seconds": 1.0666666666666667,
+      "bones": 22
+    },
+    {
+      "name": "fall",
+      "source": "Jump_Loop",
+      "seconds": 2.0,
+      "bones": 22
+    },
+    {
+      "name": "land",
+      "source": "Jump_Land",
+      "seconds": 1.0,
+      "bones": 22
+    },
+    {
+      "name": "climb",
+      "source": "ClimbUp_1m",
+      "seconds": 0.5333333333333333,
+      "bones": 22
+    },
+    {
+      "name": "throw",
+      "source": "OverhandThrow",
+      "seconds": 1.0666666666666667,
+      "bones": 22
+    }
+  ],
+  "joints": 191,
+  "importerCommit": "d28be849e5a479e84dbf9c772fe44ff4c833b711",
+  "importerScriptSha256": "c18bed006c988c9ca41ba77bc8c1ad8b3c1a0fb5a562a8d22d19fbea78922c37"
+}

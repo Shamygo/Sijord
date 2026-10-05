@@ -53,7 +53,7 @@ export class Hud {
   private prompt = h('div.prompt');
   private net = h('div.net');
   private toast = h('div.toast');
-  private clickToPlay = h('div.click-to-play', {}, 'Click to play');
+  private clickToPlay = h('button.click-to-play', {type:'button'}, 'Click to play');
   private fadeEl = h('div.fade');
   private party = h('div.party', {}, h('div.party-empty', {}, 'No Pokemon yet. Professor Hazel is waiting at her lab.'));
   private hasParty = false;
@@ -108,7 +108,7 @@ export class Hud {
       this.hot('🎒', 'bag', 'Bag', s),
     );
     this.help.replaceChildren(
-      k('forward'), k('left'), k('back'), k('right'), ' move  ', k('sprint'), ' sprint  ', k('jump'), ' jump  ', k('interact'), ' talk / battle  ',
+      k('forward'), k('left'), k('back'), k('right'), ' move  ', k('sprint'), ' sprint  ', k('jump'), ' jump  ', k('climb'), ' climb  ', k('interact'), ' talk / battle  ',
       k('party'), ' party  ', k('map'), ' map  ', k('bag'), ' bag  ', h('span.key', {}, 'Esc'), ' menu',
     );
     this.help.style.display = s.showControlsHint ? '' : 'none';
@@ -167,9 +167,9 @@ export class Hud {
     );
   }
 
-  setPrompt(text: string | null): void {
+  setPrompt(text: string | null, key = 'E'): void {
     this.prompt.classList.toggle('show', !!text);
-    if (text) this.prompt.replaceChildren(h('span.key', {}, 'E'), text);
+    if (text) this.prompt.replaceChildren(h('span.key', {}, key), text);
   }
 
   setNetStatus(text: string): void {

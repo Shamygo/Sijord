@@ -3,14 +3,16 @@ import { mulberry32 } from './noise';
 import { TOWN, GATE_HALF_WIDTH } from './layout';
 import {
   Frame, box, cottage, lab, signpost, lantern, crate, barrel, well, bench, garden, flowerBed, fenceSegment, addSignBoard, cart, COL,
-  type Kit,
+  type Kit, streetHouse, marketStall,
 } from './buildings';
 import { signTexture } from './shared';
-import type { WorldAnchors, Region } from './types';
+import type { WorldAnchors, Region, ClimbPoint, Platform } from './types';
 import type { TreeKind } from './vegetation';
 
 export interface TownResult {
   anchors: WorldAnchors;
+  climbs:ClimbPoint[];
+  platforms:Platform[];
   region: Region;
   flowerSpots: [number, number, number][];
   trees: { kind: string; x: number; y: number; z: number; s: number }[];
@@ -24,12 +26,39 @@ export function buildHometown(kit: Kit, kinds: Record<string, TreeKind>): TownRe
   const at = (lx: number, lz: number): [number, number, number] => [X + lx, Y, Z + lz];
 
   // ---- buildings ----
-  const p1Door = cottage(kit, ...at(27, 20), Math.PI, { w: 8, d: 7, wallH: 3.2, roof: COL.roofRed, shutter: 0x3a7d44 });
+  const p1Door = cottage(kit, ...at(27, 20), Math.PI, { w: 8, d: 7, wallH: 3.2, roof: 0x567080, shutter: 0x3a7d44 });
   const p2Door = cottage(kit, ...at(14, 20), Math.PI, { w: 8, d: 7, wallH: 3.2, roof: COL.roofBlue, shutter: 0xd9a03f, wall: 0xf6ecd6 });
-  cottage(kit, ...at(-16, 22), Math.PI, { w: 7, d: 6, wallH: 3.0, roof: COL.roofGreen, shutter: 0xb5553a, wall: 0xefe0bf });
-  cottage(kit, ...at(-28, -2), Math.PI / 2, { w: 7.5, d: 6, wallH: 4.6, roof: COL.roofOrange, shutter: 0x3d6fc4, floors: 2 });
-  cottage(kit, ...at(28, -10), -Math.PI / 2, { w: 7, d: 6, wallH: 3.0, roof: COL.roofPurple, shutter: 0x4f8f3a, wall: 0xf3e3d0 });
+  cottage(kit, ...at(-16, 22), Math.PI, { w: 7, d: 6, wallH: 3.0, roof: 0x596f64, shutter: 0xb5553a, wall: 0xefe0bf });
+  cottage(kit, ...at(-28, -2), Math.PI / 2, { w: 7.5, d: 6, wallH: 4.6, roof: 0x7f6b58, shutter: 0x3d6fc4, floors: 2 });
+  cottage(kit, ...at(28, -10), -Math.PI / 2, { w: 7, d: 6, wallH: 3.0, roof: 0x596779, shutter: 0x4f8f3a, wall: 0xf3e3d0 });
   const labDoor = lab(kit, ...at(0, -30), 0);
+
+  // A denser commercial street, with porches facing the central avenue.
+  for(const [x,z,yaw,label] of [
+    [-20,38,Math.PI/2,'FIELD SUPPLIES'],[-20,9,Math.PI/2,'THE CLOTHIER'],[-20,-20,Math.PI/2,'WAYFARER INN'],
+    [20,40,-Math.PI/2,'CRAFT WORKSHOP'],[20,0,-Math.PI/2,'APOTHECARY'],[20,-26,-Math.PI/2,'SURVEY LODGE'],
+  ] as [number,number,number,string][])streetHouse(kit,...at(x,z),yaw,label,0x526e7b);
+  // Broad dirt avenue with stone edging; keep the plaza and every existing quest approach open.
+  const street=new Frame(X,Y,Z,0);
+  box(kit.solid,street,[11.2,.035,76],[0,.012,16],0xb8a080);
+  for(const sx of [-5.9,5.9])for(let z=-21;z<54;z+=1.3)box(kit.solid,street,[.34,.12,1.1],[sx,.06,z],0x9c9687);
+  for(const [x,z,color] of [[-9,26,0x315c65],[9,16,0xa95744]] as [number,number,number][])marketStall(kit,...at(x,z),0,color);
+  const climbs:ClimbPoint[]=[],platforms:Platform[]=[];
+  for(const [lx,lz,name] of [[9,47,'Gate lookout'],[-10,-5,'Village lookout']] as [number,number,string][]){
+    const f=new Frame(...at(lx,lz),0),top=Y+4.8;
+    for(const sx of [-1.8,1.8])for(const sz of [-1.8,1.8]){
+      box(kit.solid,f,[.22,4.8,.22],[sx,2.4,sz],COL.woodDark);
+      kit.colliders.push({kind:'circle',x:X+lx+sx,z:Z+lz+sz,r:.18,maxY:top});
+    }
+    for(let x=-1.8;x<=1.8;x+=.3)box(kit.solid,f,[.28,.18,4],[x,4.71,0],COL.woodLight);
+    for(const sx of [-1.95,1.95]){box(kit.solid,f,[.12,1,4],[sx,5.3,0],COL.woodDark);}
+    box(kit.solid,f,[4,1,.12],[0,5.3,1.95],COL.woodDark);
+    // Ladder front, with open access to the platform at the top.
+    for(const sx of [-.42,.42])box(kit.solid,f,[.095,4.9,.095],[sx,2.45,-2.18],COL.wood);
+    for(let h=.22;h<4.9;h+=.32)box(kit.solid,f,[.9,.075,.11],[0,h,-2.18],COL.woodLight);
+    climbs.push({id:name,bottom:{x:X+lx,y:Y,z:Z+lz-2.6},top:{x:X+lx,y:top,z:Z+lz-2.6},landing:{x:X+lx,y:top,z:Z+lz-1.35},yaw:0});
+    platforms.push({minX:X+lx-2,maxX:X+lx+2,minZ:Z+lz-2,maxZ:Z+lz+2,y:top});
+  }
 
   // ---- plaza ----
   well(kit, ...at(0, 0));
@@ -63,7 +92,7 @@ export function buildHometown(kit: Kit, kinds: Record<string, TreeKind>): TownRe
   crate(kit, ...at(-11.5, 25), 0.4, 0.9);
   crate(kit, ...at(33, -15), 0.1, 0.9);
   barrel(kit, ...at(32.5, -6));
-  cart(kit, ...at(-20, 6), 0.4);
+  cart(kit, ...at(-10, 37), 0.4);
   // laundry line between the player houses
   const lf = new Frame(...at(20.5, 26.5), 0);
   for (const sx of [-2.4, 2.4]) box(kit.solid, lf, [0.12, 2.2, 0.12], [sx, 1.1, 0], COL.woodDark);
@@ -129,7 +158,7 @@ export function buildHometown(kit: Kit, kinds: Record<string, TreeKind>): TownRe
   const treeSpots: [string, number, number][] = [
     ['round', -40, -30], ['wide', 39, -38], ['round', 43, 30], ['tall', -42, 30], ['round', -34, 43], ['wide', 34, 45],
     ['tall', -13, -46], ['round', 17, -46], ['wide', -47, 4], ['tall', 47, 8], ['round', -24, -40], ['tall', 44, -14],
-    ['round', 8, 40], ['tall', -8, 42],
+    ['round', 35, 33], ['tall', -8, 42],
   ];
   for (const [kind, lx, lz] of treeSpots) {
     const s = 0.9 + rnd() * 0.35;
@@ -160,5 +189,5 @@ export function buildHometown(kit: Kit, kinds: Record<string, TreeKind>): TownRe
     ],
   };
   const region: Region = { name: 'Bramblewick', tier: 'small', centerX: X, centerZ: Z, radius: R + 5 };
-  return { anchors, region, flowerSpots, trees, hedges };
+  return { anchors, region, flowerSpots, trees, hedges, climbs, platforms };
 }

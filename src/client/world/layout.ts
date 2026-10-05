@@ -144,6 +144,8 @@ export function findBridge(): { x: number; z: number; dirX: number; dirZ: number
 const T = (pts: P2[]): P2[] => pts.map(([x, z]) => [TOWN.x + x, TOWN.z + z] as P2);
 
 export const TOWN_PATHS: Polyline[] = [
+  { pts: T([[0, -22], [0, 54]]), width: 5.6 },
+  ...[[-20,38],[-20,9],[-20,-20],[20,40],[20,0],[20,-26]].map(([x,z]) => ({pts:T([[0,z],[x < 0 ? -15 : 15,z]]),width:1.5})),
   { pts: T([[0, 8], [0, 62]]), width: 2.4 },
   { pts: T([[0, -8], [0, -23]]), width: 2.1 },
   { pts: T([[33, 13], [0, 13], [-16, 13], [-16, 18]]), width: 1.5 },

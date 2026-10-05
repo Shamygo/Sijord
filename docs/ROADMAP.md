@@ -2,11 +2,13 @@
 
 Every milestone ends in a **playable build** that two people can open in a browser and play together. Each one adds a vertical slice on top of the last instead of building systems in isolation. Scope details refer to [DESIGN.md](DESIGN.md) sections (§).
 
+**2026-10-05 cross-milestone update:** M2 remains complete and M3 catching is still next. At the user's request, imported Pokémon/Rei, public hosting, both shared free-roam battle variants, UI polish and climbing have landed ahead of later milestones. These additions do not complete M3 catching or M6 gyms. See [POLISH_HANDOFF.md](POLISH_HANDOFF.md).
+
 **Guiding principles**
 - **Playable at every step.** No milestone ends with "the systems are in but you can't do anything."
 - **Battle engine early.** It's the deepest system and everything (gyms, catching, AI) depends on it.
 - **Data-driven content.** Species, moves, items, recipes, quests and POIs live in data files, so content can grow in parallel with code.
-- **Original or placeholder art throughout.** An art pass replaces placeholders gradually.
+- **Art follows current user direction.** Environments remain procedural; imported Pokémon and Rei/Red character assets are explicitly requested. Preserve source/animation provenance and the latest reference targets.
 
 ---
 

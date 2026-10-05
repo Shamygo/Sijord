@@ -4,8 +4,8 @@ import type { BattleFrame, BattleControl } from './battle/session';
 export type PlayerClassId = 'ranger' | 'tamer' | 'artisan' | 'scholar' | 'medic';
 
 export interface Appearance {
-  /** Omitted in old saves: defaults to Red. */
-  trainerModel?: 'red' | 'custom';
+  /** Omitted in old saves: defaults to Rei. */
+  trainerModel?: 'rei' | 'red' | 'custom';
   /** CSS hex colours, e.g. "#f1c27d". */
   skinTone: string;
   hairColor: string;
@@ -24,7 +24,7 @@ export interface PlayerProfile {
 }
 
 /** Locomotion state a remote avatar needs to animate itself. */
-export type MoveAnim = 'idle' | 'walk' | 'run' | 'jump' | 'fall';
+export type MoveAnim = 'idle' | 'walk' | 'run' | 'jump' | 'fall' | 'climb';
 
 export interface PlayerSnapshot {
   x: number;
@@ -32,7 +32,7 @@ export interface PlayerSnapshot {
   z: number;
   /** Facing yaw in radians. */
   yaw: number;
-  /** Horizontal speed in metres per second, used to blend walk/run. */
+  /** Locomotion speed in metres per second: horizontal on ground, vertical while climbing. */
   speed: number;
   anim: MoveAnim;
   /** Species of the lead creature walking beside the player, if one is out. */

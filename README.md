@@ -29,7 +29,8 @@ For development, `npm run dev` serves the game at http://localhost:5173.
 | Mouse | Look around (click the game to capture the mouse, Esc to release) |
 | W A S D | Move |
 | Shift | Sprint (uses stamina) |
-| Space | Jump |
+| Space | Jump / let go while climbing |
+| C / S+C | Climb up / climb down; release C to hang |
 | E | Talk / interact, advance dialogue |
 | M / B / P / J | Map, bag, party, quests |
 | Esc | Pause and settings (rebind keys, sensitivity, FOV, quality) |
@@ -68,12 +69,14 @@ npm test
 npm run build
 ```
 
-The landscape is procedural. Pokémon and Red use imported models; see [model assets](docs/MODEL_ASSETS.md) for source credits and animation coverage. The [Pokémon library](https://shamygo.github.io/Sijord/pokemon.html) contains all 1,322 available models/forms and their included animation clips. Gameplay currently uses 21 of those Pokémon; adding more encounters is separate from importing models.
+The landscape is procedural. Pokémon, Rei and Red use imported models; see [model assets](docs/MODEL_ASSETS.md) for source credits and animation coverage. The [Pokémon library](https://shamygo.github.io/Sijord/pokemon.html) contains all 1,322 available models/forms and their included animation clips. Gameplay currently uses 21 of those Pokémon; adding more encounters is separate from importing models.
 
 ### Imported Pokémon, battle modes and interface
 
-The public build includes a searchable collection of 1,322 Pokémon models/forms (404 with included animation clips), the Pokémon Masters Red trainer, and 2,035 item icons. The existing world has 21 gameplay species, now represented by animated Pokémon models. Source coverage and credits are in [MODEL_ASSETS.md](docs/MODEL_ASSETS.md).
+The public build includes a searchable collection of 1,322 Pokémon models/forms (404 with included animation clips), the Legends: Arceus Rei trainer (with eight retargeted Quaternius animation clips), the optional Pokémon Masters Red trainer, and 2,035 item icons. The existing world has 21 gameplay species, now represented by animated Pokémon models. Source coverage and credits are in [MODEL_ASSETS.md](docs/MODEL_ASSETS.md).
 
 Battles offer a free-roam trainer mode with the original turn-based commands, and an experimental action mode with direct Pokémon movement and spatial dodging. Friends join an encounter lobby with E before the host chooses its mode, then command one Pokémon each. WASD moves, Shift runs, Space jumps/dodges, 1–4 selects moves, X switches, and Tab toggles commands/mouse look. Both players use the same world code.
 
 The bag, party, map and battle panels follow the supplied dark/cyan interface references. Medicines can heal a selected Pokémon from the bag; the Pokédex searches the full model collection. Catching, fast travel and additional world encounters remain separate gameplay work.
+
+The latest polish update fixes pointer capture over menus, animates panel/tab/selection transitions with reduced-motion support, improves empty-party onboarding and the Pokémon explorer, and adds matte world-lit character materials. Rei replaces the previous default trainer without resetting progression. Bramblewick has larger detailed street façades, covered porches, market stalls and two climbable lookout platforms. Shop fronts are decorative. Hold C on a ladder or while moving into a steep slope; S+C descends a ladder, and Space lets go. Original Arceus player motion files were unavailable; the included keyframes are separately sourced CC0 animations retargeted to Rei.
