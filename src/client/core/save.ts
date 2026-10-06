@@ -1,5 +1,6 @@
 import { normalizeCreature } from '../../shared/battle/creature';
 import type { Creature } from '../../shared/battle/types';
+import type { Meters } from '../../shared/survival';
 import type { PlayerProfile } from '../../shared/types';
 
 const KEY = 'sijord.save.v1';
@@ -37,6 +38,8 @@ export interface SaveData {
   toolWear?: Record<string, number>;
   /** Recipes made at least once (the first time gives experience). */
   crafted?: string[];
+  /** Hunger, thirst and queasiness (DESIGN §6.1). Missing on older saves: fed, watered and well. */
+  meters?: Meters;
 }
 
 export function loadSave(): SaveData | null {

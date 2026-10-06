@@ -28,6 +28,8 @@ export interface ResourceContext {
   waterDist(x: number, z: number): number;
   /** Grass blade weight (0..1); loose stones only count where they show above it. */
   grassAt(x: number, z: number): number;
+  /** Thin the grass blades around a point (before the grass is built), so a prop shows. */
+  thinGrass?(x: number, z: number, r: number, keep: number): void;
   colliders: Collider[];
   half: number;
   town: { x: number; z: number; r: number };
@@ -40,10 +42,10 @@ export interface ResourceContext {
 /** How far past a node's edge the trainer can reach it from. */
 const REACH = 0.95;
 /** Metres of head start the rarer nodes get over common ones in reach, so a berry bush beside a plain bush offers berries. */
-const PRIORITY: Partial<Record<NodeKind, number>> = { berry: 0.8, apricorn: 0.8, copper: 0.8 };
+const PRIORITY: Partial<Record<NodeKind, number>> = { berry: 0.8, apricorn: 0.8, copper: 0.8, mushroom: 0.8 };
 const CELL = 8;
 const SHOW_WITHIN = 180;
-const counts = { berry: 26, apricorn: 14, copper: 12 };
+const counts = { berry: 26, apricorn: 14, copper: 12, mushroom: 40 };
 
 const key = (cx: number, cz: number) => (cx + 32768) * 65536 + (cz + 32768);
 
@@ -72,6 +74,7 @@ export class ResourceField {
     this.placeBerryBushes(ctx);
     this.placeApricornTrees(ctx);
     this.placeCopperVeins(ctx);
+    this.placeMushroomLogs(ctx);
   }
 
   private add(n: ResourceNode, visual?: (empty: boolean) => void): void {
@@ -314,5 +317,96 @@ export class ResourceField {
     }
     ore.count = made * per;
     this.root.add(ore);
+  }
+
+  /**
+   * Mossy fallen logs in the woods with wild mushrooms growing on them. Mushrooms on their own
+   * would vanish in the meadow grass; a log stands out and gives the player something to look for.
+   */
+  private placeMushroomLogs(ctx: ResourceContext): void {
+    const rnd = mulberry32(6619);
+    // Colour noise has its own stream so mesh detail never moves the logs.
+    const tint = mulberry32(6620);
+    const taken: { x: number; z: number }[] = [];
+    const bark = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.95 });
+    const cut = new THREE.MeshStandardMaterial({ color: 0xa88a62, roughness: 0.9 });
+    const per = 9;
+    const capGeo = new THREE.SphereGeometry(1, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2);
+    capGeo.scale(1, 0.55, 1);
+    const stemGeo = new THREE.CylinderGeometry(0.28, 0.36, 1, 7);
+    stemGeo.translate(0, -0.5, 0);
+    const caps = new THREE.InstancedMesh(capGeo, new THREE.MeshStandardMaterial({ color: 0xc27a3e, roughness: 0.55 }), counts.mushroom * per);
+    const stems = new THREE.InstancedMesh(stemGeo, new THREE.MeshStandardMaterial({ color: 0xeee3c8, roughness: 0.8 }), counts.mushroom * per);
+    caps.castShadow = true;
+    const q = new THREE.Quaternion(), v = new THREE.Vector3(), s = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0), zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    const bark0 = new THREE.Color(0x8a6c52), moss = new THREE.Color(0x86a34a), c = new THREE.Color();
+    let made = 0;
+    for (let i = 0; i < counts.mushroom; i++) {
+      const p = this.spot(ctx, rnd, (x, z) => this.treesNear(ctx, x, z, 14) >= 3, 1.8, 22, taken, 0.25);
+      if (!p) break;
+      const r = 0.27 + rnd() * 0.09, half = 1.0 + rnd() * 0.4, yaw = rnd() * Math.PI;
+      const ax = Math.sin(yaw), az = Math.cos(yaw);
+      // Sit it on the lower of its two ends so it doesn't float on a slope.
+      const ground = Math.min(ctx.heightAt(p.x + ax * half, p.z + az * half), ctx.heightAt(p.x - ax * half, p.z - az * half), p.y);
+      const cy = ground + r * 0.75;
+      const geo = new THREE.CylinderGeometry(r, r * 0.9, half * 2, 14, 6);
+      const pos = geo.getAttribute('position');
+      // Knobbly, not a perfect tube: bulges that wind along it, the same at every shared corner.
+      for (let k = 0; k < pos.count; k++) {
+        const x = pos.getX(k), y = pos.getY(k), z = pos.getZ(k), ang = Math.atan2(x, z);
+        const bulge = 1 + 0.07 * Math.sin(3 * ang + y * 2.3 + i) + 0.04 * Math.sin(7 * ang - y * 4.1) + 0.05 * Math.sin(y * 3.7 + i * 2);
+        pos.setXYZ(k, x * bulge, y, z * bulge);
+      }
+      geo.computeVertexNormals();
+      const nrm = geo.getAttribute('normal');
+      const colors = new Float32Array(pos.count * 3);
+      for (let k = 0; k < pos.count; k++) {
+        // Lying down, the cylinder's +Z side faces up: moss there, bark below, darker in the grooves.
+        const ang = Math.atan2(pos.getX(k), pos.getZ(k));
+        const mossy = Math.max(0, nrm.getZ(k)) * (0.75 + 0.25 * Math.sin(pos.getY(k) * 5 + i));
+        c.copy(bark0).multiplyScalar(0.8 + 0.2 * Math.sin(9 * ang)).lerp(moss, Math.min(1, mossy * 1.1)).multiplyScalar(0.9 + tint() * 0.15);
+        colors.set([c.r, c.g, c.b], k * 3);
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      const log = new THREE.Mesh(geo, [bark, cut, cut]);
+      log.position.set(p.x, cy, p.z);
+      log.quaternion.setFromAxisAngle(up, yaw).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2));
+      log.castShadow = log.receiveShadow = true;
+      log.name = 'mushroom-log';
+      this.root.add(log);
+      this.props.push(log);
+      // Caps along the top and upper sides, a couple on the ground beside it.
+      const mats: THREE.Matrix4[][] = [];
+      for (let b = 0; b < per; b++) {
+        const t = (rnd() * 2 - 1) * half * 0.85;
+        const onLog = b < per - 2;
+        const side = rnd() < 0.5 ? -1 : 1, ang = onLog ? (rnd() * 2 - 1) * 1.1 : side * 1.5;
+        const across = { x: Math.cos(yaw), z: -Math.sin(yaw) };
+        const out = onLog ? r : r + 0.12 + rnd() * 0.15;
+        const bx = p.x + ax * t + across.x * Math.sin(ang) * out, bz = p.z + az * t + across.z * Math.sin(ang) * out;
+        const by = onLog ? cy + Math.cos(ang) * r : ctx.heightAt(bx, bz);
+        const size = 0.07 + rnd() * 0.07, stem = size * (0.8 + rnd() * 0.6);
+        q.setFromAxisAngle(up, rnd() * 6).premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(across.x, 0, across.z), -Math.sin(ang) * 0.35));
+        mats.push([
+          new THREE.Matrix4().compose(v.set(bx, by + stem, bz), q, s.set(size, size, size)),
+          new THREE.Matrix4().compose(v.set(bx, by + stem, bz), q, s.set(size, stem, size)),
+        ]);
+      }
+      const first = made * per;
+      const show = (e: boolean) => {
+        mats.forEach(([cm, sm], b) => { caps.setMatrixAt(first + b, e ? zero : cm); stems.setMatrixAt(first + b, e ? zero : sm); });
+        caps.instanceMatrix.needsUpdate = stems.instanceMatrix.needsUpdate = true;
+      };
+      show(false);
+      this.add({ key: `mushroom:${i}`, kind: 'mushroom', x: p.x, y: ground, z: p.z, r: half * 0.75 }, show);
+      // Shade under the trees: the grass is short and sparse around the log.
+      ctx.thinGrass?.(p.x, p.z, half + 1.5, 0.25);
+      ctx.colliders.push({ kind: 'obox', x: p.x, z: p.z, hw: r, hd: half, yaw, maxY: cy + r });
+      made++;
+    }
+    caps.count = stems.count = made * per;
+    caps.name = 'mushrooms';
+    this.root.add(caps, stems);
   }
 }

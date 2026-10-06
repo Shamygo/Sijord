@@ -1,6 +1,7 @@
 /**
- * Crafting (DESIGN §6.4), tiers T0 and T1. Tools are made by hand anywhere; food is cooked at
- * a campfire; Poke Balls and Potions need the workbench in Bramblewick and trainer level 3.
+ * Crafting (DESIGN §6.4), tiers T0 and T1. Tools are made by hand anywhere; food is cooked and
+ * water boiled at a campfire; Poke Balls, Potions and canteens need the workbench in Bramblewick
+ * and trainer level 3.
  * Costs are deliberately steep: crafting is how supplies come in, but it takes a trip out.
  */
 export type Station = 'hand' | 'campfire' | 'workbench';
@@ -24,8 +25,11 @@ export const RECIPES: Recipe[] = [
   { id: 'stone-hatchet', out: 'stone-hatchet', count: 1, cost: { wood: 3, stone: 2, fiber: 2 }, station: 'hand', level: 1, seconds: 2 },
   { id: 'stone-pick', out: 'stone-pick', count: 1, cost: { wood: 3, stone: 3, fiber: 2 }, station: 'hand', level: 1, seconds: 2 },
   { id: 'treat', out: 'treat', count: 1, cost: { 'bramble-berry': 2, 'red-apricorn': 1 }, station: 'campfire', level: 1, seconds: 3 },
+  { id: 'mushroom-skewer', out: 'mushroom-skewer', count: 1, cost: { 'wild-mushroom': 3, wood: 1 }, station: 'campfire', level: 1, seconds: 4 },
+  { id: 'boiled-water', out: 'water-flask', count: 1, cost: { 'river-water': 1, wood: 1 }, station: 'campfire', level: 1, seconds: 3 },
   { id: 'potion', out: 'bandage', count: 1, cost: { 'bramble-berry': 2, fiber: 1 }, station: 'workbench', level: 3, seconds: 2.5 },
   { id: 'poke-ball', out: 'poke-ball', count: 1, cost: { 'red-apricorn': 1, 'copper-ore': 1, fiber: 2 }, station: 'workbench', level: 3, seconds: 3 },
+  { id: 'canteen', out: 'canteen', count: 1, cost: { 'copper-ore': 1, fiber: 2, wood: 2 }, station: 'workbench', level: 3, seconds: 3 },
 ];
 
 export function recipeById(id: string): Recipe | undefined {

@@ -90,6 +90,13 @@ export class TrainerVitals {
     return this.hp <= 0 ? 'out' : 'down';
   }
 
+  /** Lose HP without a knockdown (hunger, thirst). Returns true if that took the last of it. */
+  drain(amount: number): boolean {
+    if (this.hp <= 0 || amount <= 0) return false;
+    this.hp = Math.max(0, this.hp - amount);
+    return this.hp <= 0;
+  }
+
   /** Restore HP; returns how much was actually healed. */
   heal(amount: number): number {
     const before = this.hp;
@@ -110,12 +117,15 @@ export class TrainerVitals {
     this.sinceHit = Infinity;
   }
 
-  /** `threatened`: something is attacking nearby or a battle is on, so no regeneration. */
-  update(dt: number, threatened: boolean): void {
+  /**
+   * `threatened`: something is attacking nearby or a battle is on, so no regeneration.
+   * `heals`: false while starving or parched, which also stops it.
+   */
+  update(dt: number, threatened: boolean, heals = true): void {
     this.down = Math.max(0, this.down - dt);
     this.guard = Math.max(0, this.guard - dt);
     this.sinceHit += dt;
     if (threatened) this.sinceHit = Math.min(this.sinceHit, 0);
-    if (this.hp > 0 && this.sinceHit >= TRAINER_HP.regenDelay) this.hp = Math.min(this.max, this.hp + TRAINER_HP.regenRate * dt);
+    if (heals && this.hp > 0 && this.sinceHit >= TRAINER_HP.regenDelay) this.hp = Math.min(this.max, this.hp + TRAINER_HP.regenRate * dt);
   }
 }

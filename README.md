@@ -32,7 +32,7 @@ For development, `npm run dev` serves the game at http://localhost:5173.
 | Space | Jump; on a wall, leap up (or sideways with A/D); S+Space kicks off |
 | (walk into rock) | Climb cliffs, big rocks, steep slopes and ladders; W A S D move on the wall, pull-up at the top is automatic |
 | C | Let go of a wall |
-| E | Talk / interact, advance dialogue, battle a nearby wild Pokémon, gather from trees, rocks, bushes, berries, apricorns and copper |
+| E | Talk / interact, advance dialogue, battle a nearby wild Pokémon, gather from trees, rocks, bushes, berries, apricorns, copper and mushroom logs, drink or fill a canteen at water |
 | K | Crafting (by hand anywhere; the campfire and workbench add recipes) |
 | Q (hold) or right mouse | Aim a Poke Ball or Treat; release to throw, wheel to pick, E to cancel |
 | V | Dodge roll (backstep with no direction held) |
@@ -44,7 +44,7 @@ For development, `npm run dev` serves the game at http://localhost:5173.
 
 ## What's in the game so far
 
-Milestones 1, 2 and 3 are done. You get a trainer creator, Bramblewick with both players' houses and Professor Hazel's lab, a starter and a rival battle, and 45 Kanto species roaming Hearthmeadow in herds both players share. Battles are 2v2, in tactical or action mode, and you can catch in battle or by sneaking up and throwing in the overworld. A failed catch can make a Pokémon charge you: dodge it, calm it with a Treat or send your partner at it. Hearthmeadow hides supply caches (the best ones on top of rocks and mesas), Lysfolk tablets that Professor Hazel trades Great Balls for, and pages of her lost field notes. There is a party of 6 with a PC box, a region Dex, and co-op battles a friend can join. Milestone 4 has begun: you gain trainer levels, gather wood, stone, fibre, berries, apricorns and copper, make a stone hatchet and pick, and craft your own Poke Balls and Potions at the Bramblewick workbench. [docs/HANDOFF.md](docs/HANDOFF.md) has the details.
+Milestones 1, 2 and 3 are done. You get a trainer creator, Bramblewick with both players' houses and Professor Hazel's lab, a starter and a rival battle, and 45 Kanto species roaming Hearthmeadow in herds both players share. Battles are 2v2, in tactical or action mode, and you can catch in battle or by sneaking up and throwing in the overworld. A failed catch can make a Pokémon charge you: dodge it, calm it with a Treat or send your partner at it. Hearthmeadow hides supply caches (the best ones on top of rocks and mesas), Lysfolk tablets that Professor Hazel trades Great Balls for, and pages of her lost field notes. There is a party of 6 with a PC box, a region Dex, and co-op battles a friend can join. Milestone 4 has begun: you gain trainer levels, gather wood, stone, fibre, berries, apricorns and copper, make a stone hatchet and pick, and craft your own Poke Balls and Potions at the Bramblewick workbench. Hunger and thirst run down in the wild: cook mushroom skewers and boil water at the campfire, drink at rivers and ponds, and carry a canteen. [docs/HANDOFF.md](docs/HANDOFF.md) has the details.
 
 ## Docs
 

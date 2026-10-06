@@ -1,4 +1,6 @@
-export type ItemCategory = 'items' | 'balls' | 'battle' | 'materials' | 'tools' | 'key';
+import type { FoodValue } from './survival';
+
+export type ItemCategory = 'items' | 'food' | 'balls' | 'battle' | 'materials' | 'tools' | 'key';
 
 export interface ItemInfo {
   id: string;
@@ -9,10 +11,13 @@ export interface ItemInfo {
   icon: string;
   sprite?: string;
   heal?: number;
+  /** Eaten or drunk by the trainer (hunger and thirst, DESIGN §6.1). */
+  food?: FoodValue;
 }
 
 export const ITEM_CATEGORIES: { id: ItemCategory; label: string }[] = [
   { id: 'items', label: 'Items' },
+  { id: 'food', label: 'Food' },
   { id: 'balls', label: 'Balls' },
   { id: 'battle', label: 'Battle' },
   { id: 'materials', label: 'Materials' },
@@ -22,12 +27,12 @@ export const ITEM_CATEGORIES: { id: ItemCategory; label: string }[] = [
 
 export const ITEMS: Record<string, ItemInfo> = {
   'bramble-berry': {
-    id: 'bramble-berry', name: 'Oran Berry', category: 'items', icon: '🫐', sprite: 'oran-berry', heal:10,
-    description: 'A berry that restores 10 HP to one Pokémon.',
+    id: 'bramble-berry', name: 'Oran Berry', category: 'items', icon: '🫐', sprite: 'oran-berry', heal:10, food: { hunger: 6, thirst: 2 },
+    description: 'A berry that restores 10 HP to one Pokémon. A trainer can eat it too, though it barely takes the edge off.',
   },
   'water-flask': {
-    id: 'water-flask', name: 'Fresh Water', category: 'items', icon: '💧', sprite:'fresh-water', heal:30,
-    description: 'Refreshing drinking water. Restores 30 HP to one Pokémon.',
+    id: 'water-flask', name: 'Fresh Water', category: 'items', icon: '💧', sprite:'fresh-water', heal:30, food: { thirst: 40 },
+    description: 'Clean, boiled drinking water. Quenches your thirst, or restores 30 HP to one Pokémon.',
   },
   'bandage': {
     id: 'bandage', name: 'Potion', category: 'items', icon: '🩹', sprite:'potion', heal:20,
@@ -36,6 +41,18 @@ export const ITEMS: Record<string, ItemInfo> = {
   'treat': {
     id: 'treat', name: 'Treat', category: 'items', icon: '🍪', sprite: 'lava-cookie',
     description: 'A crumbly honey biscuit Pokémon can\'t resist. Throw it while aiming: an angry Pokémon calms down to eat it, and a calm one is too busy eating to notice you.',
+  },
+  'river-water': {
+    id: 'river-water', name: 'River Water', category: 'food', icon: '💧', sprite: 'mystic-water', food: { thirst: 30, queasy: 0.35 },
+    description: 'Water scooped into your canteen from a river or lake. Drinkable, but it may leave you queasy. Boil it at a campfire to be safe.',
+  },
+  'wild-mushroom': {
+    id: 'wild-mushroom', name: 'Wild Mushroom', category: 'food', icon: '🍄', sprite: 'tiny-mushroom', food: { hunger: 6, queasy: 0.3 },
+    description: 'Picked from the forest floor. Edible raw if you must, but it may leave you queasy. Much better grilled at a campfire.',
+  },
+  'mushroom-skewer': {
+    id: 'mushroom-skewer', name: 'Mushroom Skewer', category: 'food', icon: '🍢', food: { hunger: 35 },
+    description: 'Wild mushrooms grilled over a campfire on a stick. A proper meal.',
   },
   'poke-ball': {
     id: 'poke-ball', name: 'Poke Ball', category: 'balls', icon: '◓', sprite:'poke-ball',
@@ -76,6 +93,10 @@ export const ITEMS: Record<string, ItemInfo> = {
   'stone-pick': {
     id: 'stone-pick', name: 'Stone Pick', category: 'tools', icon: '⛏',
     description: 'A heavy stone point on a handle. Mines copper veins and breaks stone off boulders. Wears out after 30 uses.',
+  },
+  'canteen': {
+    id: 'canteen', name: 'Canteen', category: 'tools', icon: '🍶',
+    description: 'A copper-lined flask. Each one carries three drinks: fill it at any river, lake or pond.',
   },
   'trainer-journal': {
     id: 'trainer-journal', name: 'Trainer Journal', category: 'key', icon: '📓', sprite:'fashion-case',

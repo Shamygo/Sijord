@@ -13,6 +13,7 @@ import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
 import { ITEMS, ITEM_CATEGORIES, type ItemCategory } from '../../shared/items';
 import { craftBlock, RECIPES, STATION_LABEL, type Recipe, type Station } from '../../shared/crafting';
 import { TOOL_USES, type ToolId } from '../../shared/gathering';
+import { CANTEEN_DRINKS, type Meters } from '../../shared/survival';
 import { TYPE_COLORS } from '../battle/fx';
 import { STATUS_LABEL } from '../battle/ui';
 import { ACTION_LABELS, DEFAULT_SETTINGS, keyLabel, rebind, type Action, type Settings } from '../core/settings';
@@ -56,6 +57,10 @@ export interface MenuDeps {
   craft(id: string): boolean;
   /** Uses left on the tool in hand. */
   toolUses(id: string): number | undefined;
+  /** Eat or drink an item; false if it did nothing. */
+  eat(id: string): boolean;
+  /** Hunger, thirst and queasiness right now. */
+  meters(): Meters;
   settings: Settings;
   onSettings(s: Settings): void;
   onSave(): void;
@@ -261,11 +266,29 @@ export class GameMenu {
           {},
           info ? h('h3', {}, this.itemArt(selected!), info.name) : h('h3', {}, 'Bag'),
           h('p', {}, info ? info.description : 'Gather materials out in the wild, and buy supplies in towns. Prices in Sijord are steep.'),
-          info?.category === 'tools' && selected ? h('p.tool-wear', {}, `${this.deps.toolUses(selected) ?? TOOL_USES[selected as ToolId]} of ${TOOL_USES[selected as ToolId]} uses left on the one in hand`) : null,
+          selected && selected in TOOL_USES ? h('p.tool-wear', {}, `${this.deps.toolUses(selected) ?? TOOL_USES[selected as ToolId]} of ${TOOL_USES[selected as ToolId]} uses left on the one in hand`) : null,
+          selected === 'canteen' ? h('p.tool-wear', {}, `Carrying ${bag['river-water'] ?? 0} of ${bag.canteen * CANTEEN_DRINKS} drinks of river water`) : null,
+          info?.food && selected ? this.foodPanel(selected) : null,
           info?.heal && selected ? h('button.btn', {onclick: () => {this.itemTarget = !this.itemTarget; this.render();}}, 'Use on Pokémon') : null,
           this.itemTarget && info?.heal && selected ? h('div.item-targets', {}, ...this.deps.party().map(c => h('button.act', {disabled:c.hp <= 0 || c.hp >= maxHp(c), onclick: () => {this.deps.useItem(selected,c.uid); this.itemTarget = false; this.render();}}, h('img', {src:this.deps.portrait(c.species),alt:''}), `${displayName(c)} · ${c.hp}/${maxHp(c)}`))) : null,
         ),
       ),
+    );
+  }
+
+  /** What a food or drink does for you, how you're doing, and the button to have it. */
+  private foodPanel(id: string): HTMLElement {
+    const food = ITEMS[id].food!, m = this.deps.meters();
+    const gives = [
+      food.hunger ? `+${food.hunger} hunger` : '',
+      food.thirst ? `+${food.thirst} thirst` : '',
+      food.queasy ? `${Math.round(food.queasy * 100)}% chance of feeling queasy` : '',
+    ].filter(Boolean);
+    const verb = food.hunger ? 'Eat' : 'Drink';
+    return h('div.food-info', {},
+      h('p.food-gives', {}, gives.join(' · ')),
+      h('p.food-now', {}, `You: hunger ${Math.round(m.hunger)} · thirst ${Math.round(m.thirst)}${m.queasy > 0 ? ' · queasy' : ''}`),
+      h('button.btn', { onclick: () => { this.deps.eat(id); this.render(); } }, verb),
     );
   }
 

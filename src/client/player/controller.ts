@@ -133,6 +133,9 @@ export class PlayerController {
   grounded = false;
   /** 0..1 */
   stamina = 1;
+  /** Survival bends on stamina (src/shared/survival.ts): regeneration speed and how full it can get. */
+  staminaRegenScale = 1;
+  staminaCap = 1;
   /** True while sprint is locked out after emptying stamina. */
   exhausted = false;
   /** True while sprint is actually being applied this frame. */
@@ -280,7 +283,7 @@ export class PlayerController {
     // ---- Stamina / sprint ------------------------------------------------------------------
     if (this.exhausted) {
       this.exhaustT -= dt;
-      if (this.exhaustT <= 0 && this.stamina >= T.exhaustRecoverTo) this.exhausted = false;
+      if (this.exhaustT <= 0 && this.stamina >= Math.min(T.exhaustRecoverTo, this.staminaCap)) this.exhausted = false;
     }
     const wantsSprint = input.sprint && hasInput && wishMag > 0.5 && !this.exhausted;
     this.sprinting = wantsSprint && (this.grounded || this.sprinting);
@@ -294,8 +297,9 @@ export class PlayerController {
       }
     } else {
       this.sinceSprint += dt;
-      if (this.sinceSprint >= T.staminaRegenDelay) this.stamina = Math.min(1, this.stamina + T.staminaRegen * dt);
+      if (this.sinceSprint >= T.staminaRegenDelay) this.stamina = Math.min(this.staminaCap, this.stamina + T.staminaRegen * this.staminaRegenScale * dt);
     }
+    this.stamina = Math.min(this.stamina, this.staminaCap);
 
     // ---- Dodge -------------------------------------------------------------------------------
     this.dodgeCooldownT = Math.max(0, this.dodgeCooldownT - dt);

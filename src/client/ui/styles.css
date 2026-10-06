@@ -605,3 +605,22 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .gather-ring.show { display: block; }
 .gather-ring > i { display: block; height: 100%; width: 0; background: var(--accent); }
 @media (max-width: 640px) { .craft-top { grid-template-columns: 1fr; } }
+/* Hunger, thirst and queasiness under the stamina bar (DESIGN §6.1). */
+.bar.stamina { position: relative; }
+.bar.stamina > b { position: absolute; right: 0; top: 0; bottom: 0; width: 0; background: repeating-linear-gradient(135deg, rgba(255,255,255,.18) 0 3px, rgba(0,0,0,.25) 3px 6px); }
+.vitals .meters { display: flex; align-items: center; gap: 10px; }
+.vitals .meter { display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0; }
+.vitals .meter > span { font-size: 12px; line-height: 1; width: 14px; text-align: center; }
+.vitals .meter .bar { flex: 1; height: 5px; }
+.bar.hunger > i { background: #f0a24a; }
+.bar.thirst > i { background: #5ab4ff; }
+.vitals .meter.low .bar > i { background: #ff9d5c; }
+.vitals .meter.low > span, .vitals .meter.empty > span { animation: meter-pulse 1.1s ease-in-out infinite; }
+.vitals .meter.empty .bar { box-shadow: 0 0 0 1px var(--danger) inset; }
+.vitals .queasy { display: none; font-size: 10px; font-weight: 900; color: #c7f08a; background: rgba(90,130,40,.45); border-radius: 6px; padding: 1px 6px; }
+.vitals .queasy.show { display: inline-block; }
+@keyframes meter-pulse { 50% { transform: scale(1.35); filter: drop-shadow(0 0 4px #ff6a4a); } }
+.food-info { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.food-info p { margin: 0; }
+.food-gives { color: var(--accent); font-weight: 800; }
+.food-now { color: var(--muted); font-weight: 700; font-size: 13px; }
