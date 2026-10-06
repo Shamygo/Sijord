@@ -165,6 +165,9 @@ export class Game {
       quests: () => this.quests,
       bag: () => this.save.bag ?? {},
       party: () => this.party,
+      box: () => (this.save.box ??= []),
+      nearPc: () => this.nearPc(),
+      dex: () => (this.save.dex ??= { seen: [], caught: [] }),
       portrait: (sp: string) => this.portraits.get(sp),
       trainerPortrait: () => this.portraits.trainer(save.profile.appearance),
       useItem: (id,uid) => {
@@ -542,6 +545,29 @@ export class Game {
     this.endScene();
   }
 
+  /**
+   * Turn-based battles frame like Legends: Arceus: the trainer stands left of centre and the
+   * camera looks past them into the ring, so they never block the Pokémon.
+   */
+  private battleFocus(ring: THREE.Vector3): THREE.Vector3 {
+    const p = this.controller.position;
+    const dx = ring.x - p.x;
+    const dz = ring.z - p.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const fx = dx / d;
+    const fz = dz / d;
+    const ahead = Math.min(d * 0.4, 2.2);
+    return this.tmpFocus.set(p.x + fx * ahead - fz * 1.1, p.y, p.z + fz * ahead + fx * 1.1);
+  }
+  private tmpFocus = new THREE.Vector3();
+
+  /** The PC sits in Hazel's lab: close to the lab or to Hazel counts. */
+  private nearPc(): boolean {
+    const p = this.controller.position;
+    const lab = this.world.anchors.landmarks.find((l) => l.id === 'lab')?.position ?? this.professor.position;
+    return Math.hypot(p.x - lab.x, p.z - lab.z) < 14 || Math.hypot(p.x - this.professor.position.x, p.z - this.professor.position.z) < 6;
+  }
+
   private ballCount(): number {
     const bag = this.save.bag ?? {};
     return Object.entries(bag).reduce((n, [id, c]) => n + (ITEMS[id]?.category === 'balls' ? c : 0), 0);
@@ -717,6 +743,7 @@ export class Game {
         portraits: this.portraits,
         connected: this.partners.size > 0,
         trainerPosition: () => this.controller.position,
+        soloMode: this.settings.battleMode === 'ask' ? undefined : this.settings.battleMode,
         project: (v) => this.project(v),
         onThrow: (side) => (side === 0 ? this.avatar.gesture('throw') : start.kind === 'trainer' && this.rival.gesture('throw')),
       },
@@ -897,7 +924,8 @@ export class Game {
       }
     }
     this.remoteBattle?.update(dt);
-    const focus = actionMode ? battle?.director.stage.spot({side:0,slot:0}) ?? this.remoteBattle?.focus ?? this.controller.position : this.controller.position;
+    const ring = battle && battle.closing === null ? battle.director.stage.center : this.remoteBattle?.stage.center;
+    const focus = actionMode ? battle?.director.stage.spot({side:0,slot:0}) ?? this.remoteBattle?.focus ?? this.controller.position : ring ? this.battleFocus(ring) : this.controller.position;
     this.cam.update(dt, focus, this.world, move.sprint && snap.speed > 5);
 
     // Interaction

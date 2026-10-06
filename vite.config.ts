@@ -12,4 +12,6 @@ export default defineConfig(({ mode }) => ({
     chunkSizeWarningLimit: 1600,
     outDir: mode === 'single' ? 'dist-single' : 'dist',
   },
+  // Agent worktrees under .claude/ carry their own copies of the tests.
+  test: { exclude: ['**/node_modules/**', '**/dist/**', '.claude/**'] },
 }));

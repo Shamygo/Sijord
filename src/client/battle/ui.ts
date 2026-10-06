@@ -81,7 +81,8 @@ export class BattleUi {
     return new Promise(resolve => {
       this.panel.replaceChildren(h('div.panel-head', {}, 'Try a battle mode'),
         h('button.act', {onclick: () => {this.closePanel(); resolve('tactical');}}, 'Free-roam · turn-based'),
-        h('button.act', {onclick: () => {this.closePanel(); resolve('action');}}, 'Action · move and dodge'));
+        h('button.act', {onclick: () => {this.closePanel(); resolve('action');}}, 'Action · move and dodge'),
+        ...(connected ? [] : [h('p.hint-dark', {}, 'Settings → Battles sets a default so solo battles skip this.')]));
       this.panel.classList.add('show');
     });
   }
