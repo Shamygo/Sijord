@@ -557,6 +557,8 @@ export class PlayerController {
   get climbing():boolean {return !!this.activeClimb || this.terrainClimbing;}
   get anim(): MoveAnim {
     if(this.climbing)return 'climb';
+    // The slide out of a dodge hop plays the landing, not a run cycle going the wrong way.
+    if (this.dodgeT > 0 && this.grounded) return 'idle';
     // Brief drops (stairs, bumps) keep the grounded animation.
     if (!this.grounded && (this.velocity.y > 0.5 || this.airTime > 0.12)) {
       return this.velocity.y > 0 ? 'jump' : 'fall';

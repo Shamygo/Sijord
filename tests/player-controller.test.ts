@@ -329,10 +329,14 @@ describe('dodge', () => {
     expect(c.grounded).toBe(true);
   });
 
-  it('backsteps with no direction held', () => {
+  it('backsteps with no direction held, landing rather than running backwards', () => {
     const w = fakeWorld();
     const c = spawn(w);
     c.update(DT, press(idle), 0, w);
+    expect(c.anim).toBe('jump');
+    while (!c.grounded) c.update(DT, idle, 0, w);
+    expect(c.dodging).toBe(true);
+    expect(c.anim).toBe('idle');
     run(c, w, idle, 0.6);
     expect(c.position.z).toBeLessThan(-1.5);
   });
