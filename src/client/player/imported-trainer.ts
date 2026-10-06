@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Appearance } from '../../shared/types';
 import { instantiateAsset, loadAsset, loadedAsset, trainerUrl } from '../assets/loader';
+import { boneChain, type BoneChain } from './bone-chain';
 import { REI_STANCE_SPEED } from './locomotion';
 import { chopPitch, toolModel } from './tools';
 import type { AnimateInput, Avatar, GroundFn } from './types';
@@ -58,6 +59,8 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
   let heldId: string | null = null, held: THREE.Group | undefined, grip: THREE.Object3D | undefined;
   let fingers: { bone: THREE.Object3D; rest: THREE.Quaternion; curled: THREE.Quaternion }[] = [];
   const gripAt = new THREE.Vector3(), X_AXIS = new THREE.Vector3(1, 0, 0);
+  /** Rei's scarf tail: no clip moves its bones, so it hangs and swings on a spring. */
+  let scarf: BoneChain | null = null;
 
   const action = (name: string) => actions.get(name);
   /** Restart a one-shot (or loop) from its first frame. */
@@ -74,7 +77,7 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
 
   const removeVisual = () => {
     mixer?.stopAllAction();if(mixer&&visual)mixer.uncacheRoot(visual.scene);mixer=undefined;clips=[];actions.clear();weights.clear();lastPosition=undefined;
-    held?.removeFromParent(); held = undefined; grip = undefined; fingers = [];
+    held?.removeFromParent(); held = undefined; grip = undefined; fingers = []; scarf = null; delete root.userData.scarf;
     motion?.removeFromParent(); visual?.release(); visual = undefined; motion = undefined; links = [];
     procedural.visible = true;
   };
@@ -170,6 +173,8 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
       root.userData.trainerModel = 'Red (Pokémon Masters)';
       if(clips.length){links=[];root.userData.trainerModel='Rei (Pokémon Legends: Arceus)';root.userData.animations=clips.map(c=>c.name);}
       fingers = fistBones(visual.scene);
+      scarf = boneChain(visual.scene, ['parts_01', 'parts_02', 'parts_03', 'parts_04'], { stiffness: 0.008, damping: 0.9, drag: 0.012, body: { from: 'spine_01', to: 'neck', radius: [0.235, 0.19], facing: root, behind: 0.08 } });
+      if (scarf) root.userData.scarf = scarf.joints;
       showTool();
       pose();
     } catch {
@@ -334,6 +339,7 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
       root.userData.animationRate = lead && (GAITS as readonly string[]).includes(top) ? phaseRate * lead.getClip().duration : lead?.timeScale;
       mixer.update(dt);
       if (motion) motion.position.set(0, 0, 0);
+      scarf?.step(dt);
       aimTool();
       previousAnim = snapshot.anim;
     },
