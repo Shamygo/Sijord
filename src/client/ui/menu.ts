@@ -341,7 +341,7 @@ export class GameMenu {
     const card = (r: Recipe) => {
       const block = craftBlock(r, bag, tr.level, stations, learned);
       const busy = this.crafting?.id === r.id;
-      const reason = block === 'level' ? `Needs trainer Lv. ${r.level}` : block === 'learn' ? 'Not learned yet' : block === 'station' ? `Needs the ${STATION_LABEL[r.station].toLowerCase()}` : block === 'materials' ? 'Not enough materials' : '';
+      const reason = block === 'level' ? `Needs trainer Lv. ${r.level}` : block === 'learn' ? (r.prize && !r.tp ? r.prize : 'Not learned yet') : block === 'station' ? `Needs the ${STATION_LABEL[r.station].toLowerCase()}` : block === 'materials' ? 'Not enough materials' : '';
       const bar = h('i');
       const button = h('button.btn.craft-go', {
         disabled: !!block || !!this.crafting,
@@ -362,7 +362,7 @@ export class GameMenu {
         {},
         h('div.craft-head', {}, this.itemArt(r.out), h('div', {}, h('b', {}, ITEMS[r.out].name + (r.count > 1 ? ` ×${r.count}` : '')), h('small', {}, `You have ${bag[r.out] ?? 0}`))),
         h('div.craft-cost', {}, ...Object.entries(r.cost).map(([id, n]) => h('span.cost' + ((bag[id] ?? 0) < n ? '.short' : ''), { title: ITEMS[id].name }, this.itemArt(id), `${bag[id] ?? 0}/${n}`))),
-        h('div.craft-foot', {}, reason ? h('small.craft-why', {}, reason) : h('small', {}, `${this.deps.craftSeconds(r.id).toFixed(1)} s`), busy ? h('div.craft-progress', {}, bar) : block === 'learn' ? learnButton : button),
+        h('div.craft-foot', {}, reason ? h('small.craft-why', {}, reason) : h('small', {}, `${this.deps.craftSeconds(r.id).toFixed(1)} s`), busy ? h('div.craft-progress', {}, bar) : block === 'learn' ? (r.tp ? learnButton : null) : button),
       );
     };
     const NOTES: Record<Station, string> = { hand: '', campfire: 'the campfire at the campsite, north-west of Bramblewick', workbench: 'on the Craft Workshop porch in Bramblewick · trainer Lv. 3' };

@@ -19,6 +19,8 @@ export interface Recipe {
   seconds: number;
   /** Technology Points to learn it (DESIGN §6.4). Missing: every trainer knows it. */
   tp?: number;
+  /** Won rather than learned: how to get it (it can't be bought with Technology Points). */
+  prize?: string;
 }
 
 export const STATION_LABEL: Record<Station, string> = { hand: 'By hand', campfire: 'Campfire', workbench: 'Workbench' };
@@ -31,6 +33,7 @@ export const RECIPES: Recipe[] = [
   { id: 'treat', out: 'treat', count: 1, cost: { 'bramble-berry': 2, 'red-apricorn': 1 }, station: 'campfire', level: 1, seconds: 3 },
   { id: 'mushroom-skewer', out: 'mushroom-skewer', count: 1, cost: { 'wild-mushroom': 3, wood: 1 }, station: 'campfire', level: 1, seconds: 4 },
   { id: 'boiled-water', out: 'water-flask', count: 1, cost: { 'river-water': 1, wood: 1 }, station: 'campfire', level: 1, seconds: 3 },
+  { id: 'hearty-stew', out: 'hearty-stew', count: 1, cost: { 'wild-mushroom': 2, 'bramble-berry': 2, 'river-water': 1, wood: 1 }, station: 'campfire', level: 1, seconds: 6, prize: "Win it in Gudrun's cook-off under the lone tree" },
   { id: 'potion', out: 'bandage', count: 1, cost: { 'bramble-berry': 2, fiber: 1 }, station: 'workbench', level: 3, seconds: 2.5 },
   { id: 'poke-ball', out: 'poke-ball', count: 1, cost: { 'red-apricorn': 1, 'copper-ore': 1, fiber: 2 }, station: 'workbench', level: 3, seconds: 3 },
   { id: 'canteen', out: 'canteen', count: 1, cost: { 'copper-ore': 1, fiber: 2, wood: 2 }, station: 'workbench', level: 3, seconds: 3 },
@@ -48,7 +51,7 @@ export type CraftBlock = 'level' | 'learn' | 'station' | 'materials' | null;
 /** Why a recipe can't be made right now (the first reason that applies), or null if it can. */
 export function craftBlock(r: Recipe, bag: Record<string, number>, level: number, stations: readonly Station[], learned: readonly string[] = []): CraftBlock {
   if (level < r.level) return 'level';
-  if (r.tp && !learned.includes(r.id)) return 'learn';
+  if ((r.tp || r.prize) && !learned.includes(r.id)) return 'learn';
   if (r.station !== 'hand' && !stations.includes(r.station)) return 'station';
   for (const [id, n] of Object.entries(r.cost)) if ((bag[id] ?? 0) < n) return 'materials';
   return null;

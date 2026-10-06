@@ -18,6 +18,8 @@ export const TRAINER_XP = {
   note: 10,
   /** The first time you craft each recipe. */
   firstCraft: 25,
+  /** The first time you beat Gudrun in a cook-off. */
+  cookoff: 40,
 };
 
 /** Experience needed to go from `level` to `level + 1`. */

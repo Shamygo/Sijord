@@ -21,6 +21,7 @@ export const VALUE: Record<string, number> = {
   'bramble-berry': 120,
   'water-flask': 120,
   'mushroom-skewer': 180,
+  'hearty-stew': 320,
   canteen: 1200,
   'woven-cloth': 80,
   'cloth-cap': 500,
