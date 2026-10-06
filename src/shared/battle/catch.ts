@@ -34,7 +34,12 @@ export interface CatchInput {
   throw: ThrowKind;
   /** Class and skill multiplier (Tamer skills, the Ranger's small edge). */
   classMod?: number;
+  /** An Alpha (DESIGN §4.6) fights the ball much harder. */
+  alpha?: boolean;
 }
+
+/** How much harder an Alpha is to catch. */
+export const ALPHA_CATCH = 0.35;
 
 /**
  * Easier on weaker targets (up to x1.25), steeply harder on stronger ones.
@@ -62,6 +67,7 @@ export function catchChance(i: CatchInput): number {
   a *= THROW_MOD[i.throw];
   a *= i.classMod ?? 1;
   if (i.level > i.cap) a *= 0.5;
+  if (i.alpha) a *= ALPHA_CATCH;
   return Math.pow(Math.max(0, Math.min(1, a / 255)), 0.75);
 }
 

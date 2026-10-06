@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ALPHA, ALPHA_LAIRS, alphaCreature, alphaDay, alphaKey, type AlphaLair } from '../../shared/alpha';
 import { createCreature, newUid } from '../../shared/battle/creature';
 import { Rng } from '../../shared/battle/rng';
 import type { Creature } from '../../shared/battle/types';
@@ -113,6 +114,8 @@ export interface WildCreature {
   remoteBusy?: boolean;
   /** The Treat it's going to or eating. */
   food?: Bait;
+  /** An Alpha (DESIGN §4.6): the lair it guards. */
+  alpha?: AlphaLair;
 }
 
 interface Herd {
@@ -125,6 +128,8 @@ interface Herd {
   cell?: string;
   /** The time window it was rolled in (shared herds only). */
   epoch?: number;
+  /** An Alpha's lair: the herd stays centred on it. */
+  lair?: AlphaLair;
 }
 
 /**
@@ -312,6 +317,10 @@ export class WildManager {
   private friendCells = new Map<string, number>();
   /** Treats lying on the ground. */
   private baits: Bait[] = [];
+  /** Alphas that roared and charged the trainer since the last consumeRoars(). */
+  private roars: WildCreature[] = [];
+  /** An Alpha was beaten or caught, here or by a friend (the key goes in the save). */
+  onAlphaTaken?: (key: string) => void;
 
   private clock: () => number;
   private modelReady: (species: string) => boolean;
@@ -343,15 +352,21 @@ export class WildManager {
     if (this.spawnTimer <= 0 && !paused) {
       this.spawnTimer = 1.5;
       this.despawnFar(player);
+      this.spawnAlphas(player);
       if (this.herds.length < MAX_HERDS) this.trySpawn(player);
       const cut = this.clock() - SHARED_SPAWN.shareMs;
       this.recentTaken = this.recentTaken.filter((t) => t.at >= cut);
     }
     this.updateBaits(dt, paused);
     for (const h of this.herds) {
-      // The herd's centre drifts slowly so the group roams.
-      h.cx += (this.rng.next() - 0.5) * dt * 0.6;
-      h.cz += (this.rng.next() - 0.5) * dt * 0.6;
+      // The herd's centre drifts slowly so the group roams. An Alpha keeps to its lair.
+      if (h.lair) {
+        h.cx = h.lair.x;
+        h.cz = h.lair.z;
+      } else {
+        h.cx += (this.rng.next() - 0.5) * dt * 0.6;
+        h.cz += (this.rng.next() - 0.5) * dt * 0.6;
+      }
       for (const m of h.members) this.think(m, dt, player, playerSpeed, sprinting, paused);
     }
     // Drop fully faded members and empty herds.
@@ -389,7 +404,9 @@ export class WildManager {
 
     // A creature reacting to a throw ignores its usual reflexes until it's done.
     const reacting = m.state === 'startle' || m.state === 'attack';
-    if (!paused && !reacting) {
+    if (m.alpha) {
+      if (!paused && !reacting && m.state !== 'eat') this.guardLair(m, dt, dist);
+    } else if (!paused && !reacting) {
       if (temperament === 'skittish' && sprinting && dist < 12 && m.state !== 'flee') {
         m.state = 'flee';
         m.timer = 2.5 + this.rng.next() * 1.5;
@@ -477,6 +494,36 @@ export class WildManager {
     m.root.rotation.x = food && food.eater === m && food.at ? 0.1 * (1 - Math.cos(food.left * 9)) : 0;
     m.model.update(dt, m.mover.speed);
     void playerSpeed;
+  }
+
+  /**
+   * An Alpha squares up to a trainer who comes near its lair, roars, then charges with
+   * telegraphed lunges like a furious creature (DESIGN §4.6, §5.3). It won't back down from a
+   * sprinting trainer, and once it calms down it waits a while before charging again.
+   */
+  private guardLair(m: WildCreature, dt: number, dist: number): void {
+    if (dist < ALPHA.notice && m.calm <= 0) {
+      if (m.state !== 'watch') {
+        m.state = 'watch';
+        m.tension = 0;
+        m.model.play('special');
+      }
+      m.tension += dt;
+      if (m.tension >= ALPHA.roar) {
+        this.breakOut(m, 'charge');
+        this.roars.push(m);
+      }
+    } else if (m.state === 'watch') {
+      m.state = 'graze';
+      m.tension = 0;
+    }
+  }
+
+  /** Alphas that started charging the trainer since the last call. */
+  consumeRoars(): WildCreature[] {
+    const out = this.roars;
+    this.roars = [];
+    return out;
   }
 
   /**
@@ -691,6 +738,7 @@ export class WildManager {
     if (!m.key || this.taken.has(m.key)) return;
     this.taken.add(m.key);
     this.recentTaken.push({ key: m.key, at: this.clock() });
+    if (m.alpha) this.onAlphaTaken?.(m.key);
   }
 
   /** Keys taken here recently, for the network snapshot (empty most of the time). */
@@ -710,6 +758,7 @@ export class WildManager {
     for (const key of keys) {
       if (this.taken.has(key)) continue;
       this.taken.add(key);
+      if (key.startsWith('alpha:')) this.onAlphaTaken?.(key);
       const m = this.creatures.find((c) => c.key === key);
       if (m && m.state !== 'battle' && m.state !== 'ball' && m.state !== 'gone') {
         m.state = 'gone';
@@ -938,6 +987,32 @@ export class WildManager {
     return herd;
   }
 
+  /** Today's Alphas come out at their lairs when a trainer is near, unless someone already took them. */
+  private spawnAlphas(player: THREE.Vector3): void {
+    const day = alphaDay(this.clock());
+    for (const lair of ALPHA_LAIRS) {
+      if (this.herds.some((h) => h.lair === lair)) continue;
+      if (Math.hypot(lair.x - player.x, lair.z - player.z) > ALPHA.spawn) continue;
+      if (this.taken.has(alphaKey(lair, day)) || !this.modelReady(lair.species)) continue;
+      this.spawnAlpha(lair, day);
+    }
+  }
+
+  /** An Alpha at its lair: the same creature on every machine for the same world and day. */
+  spawnAlpha(lair: AlphaLair, day = alphaDay(this.clock())): Herd {
+    const herd: Herd = { id: this.nextId++, species: lair.species, cx: lair.x, cz: lair.z, members: [], lair };
+    const creature = alphaCreature(lair, mix(this.spawnSeed, seedFromName(lair.id), day), newUid(this.rng));
+    const m = this.addMember(herd, creature, lair.x, lair.z, 0, alphaKey(lair, day));
+    m.alpha = lair;
+    this.herds.push(herd);
+    return herd;
+  }
+
+  /** The Alphas out right now (for the compass). */
+  get alphas(): WildCreature[] {
+    return this.herds.filter((h) => h.lair).flatMap((h) => h.members).filter((m) => m.state !== 'gone' && !m.remoteBusy);
+  }
+
   spawnable(x: number, z: number): boolean {
     const w = this.world;
     if (Math.abs(x) > w.halfSize - 20 || Math.abs(z) > w.halfSize - 20) return false;
@@ -969,21 +1044,26 @@ export class WildManager {
       const timer = rng.next() * 3;
       // Taken this epoch (here or by a friend): the rest of the herd still comes out the same.
       if (key && this.taken.has(key)) continue;
-      const model = createCreatureModel(entry.species);
-      const root = new THREE.Group();
-      root.add(model.root);
-      const mover = new Mover(Math.max(0.2, model.radius * 0.8), 10, 6);
-      mover.place(x + Math.cos(a) * rr, z + Math.sin(a) * rr, this.world, yaw);
-      root.position.copy(mover.pos);
-      const m: WildCreature = {
-        id: this.nextId++, creature, model, root, mover, herd, state: 'graze', timer,
-        tx: x, tz: z, tension: 0, calm: 0, fade: 0, alert: 0, key,
-      };
-      herd.members.push(m);
-      this.root.add(root);
+      this.addMember(herd, creature, x + Math.cos(a) * rr, z + Math.sin(a) * rr, yaw, key, timer);
     }
     this.herds.push(herd);
     return herd;
+  }
+
+  private addMember(herd: Herd, creature: Creature, x: number, z: number, yaw: number, key?: string, timer = 0): WildCreature {
+    const model = createCreatureModel(creature.species, { alpha: creature.alpha });
+    const root = new THREE.Group();
+    root.add(model.root);
+    const mover = new Mover(Math.max(0.2, model.radius * 0.8), 10, 6);
+    mover.place(x, z, this.world, yaw);
+    root.position.copy(mover.pos);
+    const m: WildCreature = {
+      id: this.nextId++, creature, model, root, mover, herd, state: 'graze', timer,
+      tx: herd.cx, tz: herd.cz, tension: 0, calm: 0, fade: 0, alert: 0, key,
+    };
+    herd.members.push(m);
+    this.root.add(root);
+    return m;
   }
 
   /**

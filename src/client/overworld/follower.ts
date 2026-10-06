@@ -12,6 +12,7 @@ export class Follower {
   readonly root = new THREE.Group();
   model: CreatureModel | null = null;
   species: string | null = null;
+  alpha = false;
   readonly mover = new Mover(0.35, 16, 8);
   private visible = true;
   private placed = false;
@@ -42,9 +43,11 @@ export class Follower {
     else (this.rush ??= new THREE.Vector3()).copy(target);
   }
 
-  setSpecies(id: string | null): void {
-    if (id === this.species) return;
+  /** Which Pokemon follows, and whether it's an Alpha (bigger, glowing eyes). */
+  setSpecies(id: string | null, alpha = false): void {
+    if (id === this.species && alpha === this.alpha) return;
     this.species = id;
+    this.alpha = alpha;
     this.placed = false;
     this.buildModel();
   }
@@ -58,7 +61,7 @@ export class Follower {
     const id = this.species;
     this.provisional = !!id && !creatureModelReady(id);
     if (id) {
-      this.model = createCreatureModel(id);
+      this.model = createCreatureModel(id, { alpha: this.alpha });
       this.root.add(this.model.root);
     }
   }

@@ -337,7 +337,7 @@ export class BattleDirector {
     const m = this.battle.at(t)!;
     if (t.side === from.side) return `${m.name} (ally)`;
     const pct = Math.max(1, Math.round((m.hp / m.maxHp) * 100));
-    return `${this.battle.kind === 'wild' ? 'Wild ' : ''}${m.name}  Lv. ${m.creature.level}  ·  ${pct}%`;
+    return `${this.battle.kind === 'wild' ? (m.creature.alpha ? 'Alpha ' : 'Wild ') : ''}${m.name}  Lv. ${m.creature.level}  ·  ${pct}%`;
   }
 
   // ------------------------------------------------------------------------------------------
@@ -364,11 +364,11 @@ export class BattleDirector {
             // Wind up first so the ball leaves the trainer's hand.
             this.deps.onThrow?.(e.pos.side);
             await this.wait(THROW_RELEASE);
-            dur = this.stage.sendOut(e.pos, e.species, mine ? (this.deps.trainerPosition?.() ?? this.stage.trainerSpot) : this.stage.foeTrainerSpot);
+            dur = this.stage.sendOut(e.pos, e.species, mine ? (this.deps.trainerPosition?.() ?? this.stage.trainerSpot) : this.stage.foeTrainerSpot, e.alpha);
           }
           this.ui.setPlate(k, {
             name: e.name, level: e.level, hp: e.hp, maxHp: e.maxHp, status: e.status, mine,
-            tag: mine ? '' : this.start.kind === 'wild' ? 'Wild' : this.start.foeName,
+            tag: mine ? '' : this.start.kind === 'wild' ? (e.alpha ? 'Alpha' : 'Wild') : this.start.foeName,
             portrait: mine ? this.deps.portraits.get(e.species) : undefined,
           });
           await this.say(e.text, Math.max(dur, 0.9));

@@ -47,6 +47,8 @@ export interface SaveData {
   learned?: string[];
   /** Armour worn, by slot (item ids that are also in the bag). */
   equipped?: Partial<Record<ArmourSlot, string>>;
+  /** Today's Alphas already beaten or caught, here or by a friend (`alpha:lair:day`). */
+  alphas?: string[];
 }
 
 export function loadSave(): SaveData | null {

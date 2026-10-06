@@ -19,7 +19,7 @@ export interface BattleFrame {
   winner: 0 | 1 | null;
   escaped: boolean;
   caption: string;
-  slots: { pos: Pos; uid: string; species: string; name: string; level: number; hp: number; maxHp: number; status?: MajorStatus; position: [number, number, number] }[];
+  slots: { pos: Pos; uid: string; species: string; name: string; level: number; hp: number; maxHp: number; status?: MajorStatus; position: [number, number, number]; alpha?: boolean }[];
   events: { seq: number; event: BattleEvent }[];
   prompt?: { token: number; kind: 'move' | 'replace'; move?: MovePrompt; bench?: MovePrompt['bench'] };
   result?: { party: Creature[]; pendingMoves: [string, string[]][]; caught?: Creature[]; ballsUsed?: Record<string, number> };
