@@ -16,7 +16,7 @@ Always `git fetch origin main` and start from a fresh `main`. Other people push 
 
 ## People and permissions
 
-- **Simon** (GitHub `Shamygo`) owns the game and the repo. He plays it with his friend and sends feedback as short messages.
+- **Simon** (GitHub `Shamygo`) owns the game and the repo, plays it with a friend, and sends feedback as short messages.
 - **Jordan** (GitHub `jiweep`) works on the game with Simon and runs the Claude project that does most of the building. Jordan asked Claude to treat Sijord as its own project.
 - **Merging:** Jordan said "always merge". Merge your own PRs into `main` once typecheck, tests and build pass, without asking. Every push to `main` redeploys the live site, so keep `main` playable.
 - **Ask first** before closing or merging a PR someone else opened. PR #1, an obsolete 2D prototype, is still open: closing it needs Jordan's or Simon's OK.
