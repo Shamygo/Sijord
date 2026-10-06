@@ -533,3 +533,29 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .hurt-flash.show { opacity:1; transition:none; }
 @keyframes vitals-hit { 0% { transform:translateX(0); } 20% { transform:translateX(-6px); } 45% { transform:translateX(5px); } 70% { transform:translateX(-3px); } 100% { transform:none; } }
 .hud.in-battle .aim-hud, .hud.in-battle .hurt-flash { display:none; }
+/* Region Pokédex and PC box */
+.dex-top { display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; margin-bottom:12px; }
+.dex-top h2 { margin:0; }
+.dex-count { color:#b4cfdb; }
+.dex-link { color:#8ad7fb; text-decoration:none; margin-left:auto; }
+.dex-detail .dex-link { margin-left:0; }
+.dex-body { display:grid; grid-template-columns:minmax(0,1fr) minmax(260px,340px); gap:16px; min-height:0; }
+.dex-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(132px,1fr)); gap:8px; align-content:start; overflow:auto; max-height:62vh; padding-right:4px; }
+.dex-card { position:relative; display:flex; flex-direction:column; align-items:center; gap:2px; padding:10px 6px 8px; border-radius:8px; background:#102b37; border:1px solid #b3d9f32b; color:white; }
+.dex-card:hover { border-color:#83cff7; background:#264d65; }
+.dex-card.on { border-color:#8ad7fb; box-shadow:0 0 12px #65d9ff3b; background:#244a60b0; }
+.dex-card small { color:#b4cfdb; }
+.dex-card.unseen b { color:#7d95a0; }
+.dex-card .dex-icon { width:56px; height:56px; grid-row:auto; }
+.dex-icon.unseen { filter:brightness(0) opacity(.45); }
+.dex-caught { position:absolute; top:6px; right:8px; color:#ff6b5e; font-size:14px; }
+.dex-detail { background:#10252dbb; border:1px solid #bed7e525; border-radius:10px; padding:16px; display:flex; flex-direction:column; gap:10px; overflow:auto; max-height:62vh; }
+.dex-detail-head { display:flex; gap:14px; align-items:center; }
+.dex-detail-head .dex-icon { width:96px; height:96px; }
+.dex-detail-head h3 { margin:2px 0 6px; }
+.box-head { margin:14px 0 2px; font-size:15px; color:#cae4ec; }
+.box-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(64px,1fr)); gap:6px; }
+.box-slot { display:flex; flex-direction:column; align-items:center; padding:4px; border-radius:8px; background:#10252dbb; border:1px solid #bed7e525; color:#cae4ec; }
+.box-slot img { width:48px; height:48px; object-fit:contain; image-rendering:pixelated; }
+.box-slot.on { border-color:#8ad7fb; box-shadow:0 0 12px #65d9ff3b; background:#244a60b0; }
+@media(max-width:800px) { .dex-body { grid-template-columns:1fr; } .dex-grid, .dex-detail { max-height:none; } }
