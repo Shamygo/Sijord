@@ -3,7 +3,7 @@ import { mulberry32 } from './noise';
 import { TOWN, GATE_HALF_WIDTH } from './layout';
 import {
   Frame, box, cottage, lab, signpost, lantern, crate, barrel, well, bench, garden, flowerBed, fenceSegment, addSignBoard, cart, COL,
-  type Kit, streetHouse, marketStall,
+  type Kit, streetHouse, marketStall, workbench,
 } from './buildings';
 import { signTexture } from './shared';
 import type { WorldAnchors, Region, ClimbPoint, Platform } from './types';
@@ -38,6 +38,9 @@ export function buildHometown(kit: Kit, kinds: Record<string, TreeKind>): TownRe
     [-20,38,Math.PI/2,'FIELD SUPPLIES'],[-20,9,Math.PI/2,'THE CLOTHIER'],[-20,-20,Math.PI/2,'WAYFARER INN'],
     [20,40,-Math.PI/2,'CRAFT WORKSHOP'],[20,0,-Math.PI/2,'APOTHECARY'],[20,-26,-Math.PI/2,'SURVEY LODGE'],
   ] as [number,number,number,string][])streetHouse(kit,...at(x,z),yaw,label,0x526e7b);
+  // The village workbench stands on the Craft Workshop's porch, by the door.
+  const bench0 = new Frame(...at(20, 40), -Math.PI / 2).p(2.7, 0, 4.25);
+  const workbenchSpot = workbench(kit, bench0[0], Y + 0.11, bench0[2], -Math.PI / 2);
   // Broad dirt avenue with stone edging; keep the plaza and every existing quest approach open.
   const street=new Frame(X,Y,Z,0);
   box(kit.solid,street,[11.2,.035,76],[0,.012,16],0xb8a080);
@@ -187,6 +190,7 @@ export function buildHometown(kit: Kit, kinds: Record<string, TreeKind>): TownRe
       { id: 'lab', label: "Hazel's Lab", position: labDoor.setY(Y) },
       { id: 'gate', label: 'Route 1', position: new THREE.Vector3(X, Y, Z + R) },
     ],
+    stations: [{ kind: 'workbench', position: workbenchSpot }],
   };
   const region: Region = { name: 'Bramblewick', tier: 'small', centerX: X, centerZ: Z, radius: R + 5 };
   return { anchors, region, flowerSpots, trees, hedges, climbs, platforms };

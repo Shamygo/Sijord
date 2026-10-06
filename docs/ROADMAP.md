@@ -21,7 +21,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 | M1 | Hometown and co-op presence | Walk around Bramblewick with a friend and talk to Professor Hazel | Done |
 | M2 | First creatures and battles | Pick a starter and fight wild double battles near Bramblewick | Done |
 | M3 | Catching, party and the first route | Catch creatures (overworld and in battle) across the starter biome, with aggression | Done 2026-10-06 apart from its two-browser exit check (catching in battle and overworld, aggression, trainer HP, dodge, Treats, partner interceptions, resting, party/PC, Dex, 45 species, shared herds, Hearthmeadow supply caches, tablets and field notes) |
-| M4 | Survival and crafting core | Hunger, thirst and stamina, gathering, T0-T1 crafting, Poke Ball crafting, tools and armour | L |
+| M4 | Survival and crafting core | Hunger, thirst and stamina, gathering, T0-T1 crafting, Poke Ball crafting, tools and armour | L · in progress (trainer levels, gathering, hatchet and pick, T0-T1 crafting with Poke Balls, Potions and Treats are in) |
 | M5 | Open world and settlements | Streamed 6x6 km terrain with 4-5 biomes, villages and towns, NPCs, shops | XL |
 | M6 | First gym slice | Two-player puzzle gym, co-op boss battle, competitive AI T1-T2, badges and level caps | XL |
 | M7 | Player levels, classes and quests | XP, skill trees for all 5 classes, quest system, first side quests | L |
@@ -89,6 +89,8 @@ Every milestone ends in a **playable build** that two people can open in a brows
 - Shops with high prices (§6.7). Money.
 
 **Exit criterion:** a 45-minute session where both players survive in the wilderness by gathering, cooking and crafting their own Poke Balls and armour, with meters that genuinely shape decisions.
+
+**Status 2026-10-06:** part 1 is in. Trainer levels (§7.1) with experience from catches, battles, finds and first crafts; gathering nodes for wood, stone, fibre, Oran Berries, Red Apricorns and copper ore that regrow on real time, per player; a stone hatchet and stone pick with durability; the Craft tab with hand, campfire and workbench recipes, including Poke Balls and Potions at the Bramblewick workbench from trainer Lv. 3. Still to do: hunger, thirst and temperature with cooking and drinking, money and shops, armour, the sickle, canteen and lantern, Technology Points and partner gathering help.
 
 ---
 

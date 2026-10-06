@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Appearance } from '../../shared/types';
 import { instantiateAsset, loadAsset, loadedAsset, trainerUrl } from '../assets/loader';
 import { REI_STANCE_SPEED } from './locomotion';
+import { chopPitch, toolModel } from './tools';
 import type { AnimateInput, Avatar, GroundFn } from './types';
 
 /**
@@ -13,7 +14,11 @@ export const THROW_CLIP = { windup: 0.18, release: 0.26 };
 /** Rei's gaits, blended by speed on one shared stride phase so the feet never skip a beat. */
 const GAITS = ['walk', 'jog', 'run'] as const;
 type Gait = typeof GAITS[number];
-const LOOPED = new Set(['idle', 'walk', 'jog', 'run', 'fall', 'climb']);
+const LOOPED = new Set(['idle', 'walk', 'jog', 'run', 'fall', 'climb', 'chop']);
+/** Gathering clips: kneel at the ground and pick play once; the tool swing loops. */
+const GATHER_CLIPS = new Set(['gather', 'pick', 'chop']);
+/** Finger curl (degrees, knuckle to tip) for a fist round a tool's haft. */
+const FIST = [62, 84, 52];
 /** Speeds (m/s) where walk hands over to jog, and jog to run. */
 const GAIT_BLEND = { jog: [1.4, 2.6], run: [5.4, 7.0] } as const;
 /** Metres climbed per cycle of the climbing loop. */
@@ -49,6 +54,10 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
   };
   let phase = 0, phaseRate = 0, smoothSpeed = 0;
   let lastPosition: {x:number;z:number} | undefined;
+  /** The tool in the right hand (and the grip point it follows), if any, and the finger bones that close round it. */
+  let heldId: string | null = null, held: THREE.Group | undefined, grip: THREE.Object3D | undefined;
+  let fingers: { bone: THREE.Object3D; rest: THREE.Quaternion; curled: THREE.Quaternion }[] = [];
+  const gripAt = new THREE.Vector3(), X_AXIS = new THREE.Vector3(1, 0, 0);
 
   const action = (name: string) => actions.get(name);
   /** Restart a one-shot (or loop) from its first frame. */
@@ -65,6 +74,7 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
 
   const removeVisual = () => {
     mixer?.stopAllAction();if(mixer&&visual)mixer.uncacheRoot(visual.scene);mixer=undefined;clips=[];actions.clear();weights.clear();lastPosition=undefined;
+    held?.removeFromParent(); held = undefined; grip = undefined; fingers = [];
     motion?.removeFromParent(); visual?.release(); visual = undefined; motion = undefined; links = [];
     procedural.visible = true;
   };
@@ -159,10 +169,65 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
       root.position.copy(savedPos); root.quaternion.copy(savedQ); procedural.visible = false;
       root.userData.trainerModel = 'Red (Pokémon Masters)';
       if(clips.length){links=[];root.userData.trainerModel='Rei (Pokémon Legends: Arceus)';root.userData.animations=clips.map(c=>c.name);}
+      fingers = fistBones(visual.scene);
+      showTool();
       pose();
     } catch {
       if (!disposed && request === generation) { removeVisual(); root.userData.trainerModel = 'custom (asset unavailable)'; }
     }
+  };
+  /**
+   * Both hands' finger bones with their rest and fist rotations. The clips leave the fingers
+   * alone, so a fist set once stays until it's opened again. Each joint bends about the axis
+   * across the palm, which turns the finger towards the palm (the side the grip point is on).
+   */
+  const fistBones = (scene: THREE.Object3D) => {
+    const out: typeof fingers = [];
+    for (const side of ['left', 'right']) {
+      const grip = scene.getObjectByName(`${side}_attach_on`), middle = scene.getObjectByName(`${side}_middle_01`);
+      if (!grip || !middle) continue;
+      const along = middle.position.clone().normalize();
+      const palm = grip.position.clone().sub(along.clone().multiplyScalar(grip.position.dot(along))).normalize();
+      const axis = along.clone().cross(palm).normalize();
+      for (const finger of ['index', 'middle', 'ring', 'pinky']) {
+        // The bend axis in each joint's parent space; turning about it leaves it in place, so
+        // the rest rotations of the joints above are enough to carry it down the finger.
+        const local = axis.clone();
+        for (let k = 1; k <= 3; k++) {
+          const bone = scene.getObjectByName(`${side}_${finger}_0${k}`);
+          if (!bone) break;
+          const rest = bone.quaternion.clone();
+          out.push({ bone, rest, curled: new THREE.Quaternion().setFromAxisAngle(local, FIST[k - 1] * Math.PI / 180).multiply(rest) });
+          local.applyQuaternion(rest.clone().invert());
+        }
+      }
+    }
+    return out;
+  };
+  /**
+   * Put the held tool (or nothing) in the right hand and close or open the fingers to match.
+   * The tool hangs off the trainer's root rather than the hand bone (whose imported transform
+   * carries the model's scale and axis flips) and follows the grip point every frame.
+   */
+  const showTool = () => {
+    held?.removeFromParent(); held = undefined;
+    grip = visual?.scene.getObjectByName('right_attach_on');
+    const model = heldId && grip ? toolModel(heldId) : null;
+    if (model) { held = model; root.add(model); }
+    for (const f of fingers) f.bone.quaternion.copy(held ? f.curled : f.rest);
+  };
+  /**
+   * Aim the haft for this moment of the swing. The clip moves the hands; the haft's pitch
+   * follows the chop's keys in the trainer's own frame (+Z ahead), so the head always leads.
+   */
+  const aimTool = () => {
+    const chop = action('chop');
+    if (!held || !grip) return;
+    grip.updateWorldMatrix(true, false);
+    held.position.copy(root.worldToLocal(grip.getWorldPosition(gripAt)));
+    const pitch = chopPitch(chop ? chop.time / chop.getClip().duration : 0.3);
+    held.quaternion.setFromAxisAngle(X_AXIS, (90 - pitch) * Math.PI / 180);
+    root.userData.toolPitch = pitch;
   };
   const pose = () => {
     if (!motion || mixer) return;
@@ -190,6 +255,10 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
       const name = anim === 'mantle' ? 'climbup' : anim;
       if (entering) start(name);
       return { [name]: 1 };
+    }
+    if (GATHER_CLIPS.has(anim) && action(anim)) {
+      if (entering) start(anim);
+      return { [anim]: 1 };
     }
     if (anim === 'climb') {
       const a = action('climb');
@@ -265,6 +334,7 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
       root.userData.animationRate = lead && (GAITS as readonly string[]).includes(top) ? phaseRate * lead.getClip().duration : lead?.timeScale;
       mixer.update(dt);
       if (motion) motion.position.set(0, 0, 0);
+      aimTool();
       previousAnim = snapshot.anim;
     },
     gesture(name) {
@@ -283,6 +353,11 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
       aimHold=on;
       if(on){start('throw');gesture=null;gestureTime=0;landingTime=0;}
       else{const a=action('throw');if(a)a.timeScale=1;gesture=null;gestureTime=0;}
+    },
+    hold(tool: string | null) {
+      if (tool === heldId) return;
+      heldId = tool;
+      showTool();
     },
     setGround(fn: GroundFn | null) { driver.setGround(fn); },
     setAppearance(next) {

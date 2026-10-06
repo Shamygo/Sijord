@@ -439,6 +439,41 @@ export function campsite(kit: Kit, x: number, y: number, z: number, yaw: number,
   return new THREE.Vector3(x, y, z);
 }
 
+/**
+ * The village workbench: a heavy plank bench with a vice, a mallet and a few half-made Poke
+ * Balls, apricorn halves and copper on it. Returns where to stand to use it (in front).
+ */
+export function workbench(kit: Kit, x: number, y: number, z: number, yaw: number): THREE.Vector3 {
+  const f = new Frame(x, y, z, yaw), b = kit.solid;
+  // Top and legs, with a lower shelf.
+  box(b, f, [1.9, 0.1, 0.85], [0, 0.92, 0], COL.woodLight);
+  box(b, f, [1.94, 0.06, 0.06], [0, 0.88, 0.42], COL.woodDark);
+  for (const sx of [-0.85, 0.85]) for (const sz of [-0.34, 0.34]) box(b, f, [0.11, 0.88, 0.11], [sx, 0.44, sz], COL.wood);
+  box(b, f, [1.8, 0.05, 0.7], [0, 0.22, 0], COL.wood);
+  for (const sx of [-0.85, 0.85]) box(b, f, [0.07, 0.07, 0.72], [sx, 0.62, 0], COL.woodDark);
+  // Vice on the left end.
+  box(b, f, [0.22, 0.16, 0.3], [-0.78, 1.05, 0.28], 0x5a5853);
+  box(b, f, [0.05, 0.05, 0.3], [-0.78, 1.05, 0.5], 0x77746c, [Math.PI / 2, 0, 0]);
+  // Mallet and a coil of fibre cord.
+  box(b, f, [0.08, 0.08, 0.32], [0.55, 1.02, 0.1], 0x8a6a45, [0, 0.4, 0]);
+  box(b, f, [0.16, 0.12, 0.12], [0.62, 1.03, -0.05], COL.woodDark, [0, 0.4, 0]);
+  b.add(new THREE.TorusGeometry(0.1, 0.03, 6, 14), 0xc9b98a, f.p(0.25, 0.99, -0.22), [Math.PI / 2, 0, 0]);
+  // Ball shells in progress: red apricorn halves, a finished ball, copper clasps.
+  for (const [lx, lz, top] of [[-0.2, 0.05, true], [0, -0.15, false], [-0.38, -0.2, true]] as [number, number, boolean][]) {
+    b.add(new THREE.SphereGeometry(0.09, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), top ? 0xb83a2c : 0xefe9de, f.p(lx, 0.97, lz), [top ? 0 : Math.PI, 0, 0]);
+  }
+  b.add(new THREE.SphereGeometry(0.09, 12, 8), 0xc0392b, f.p(0.12, 1.06, 0.12));
+  for (let i = 0; i < 3; i++) b.add(new THREE.DodecahedronGeometry(0.045, 0), 0xc87533, f.p(0.36 + i * 0.07, 0.99, 0.24 - i * 0.05));
+  // A basket of apricorns and a log on the shelf.
+  cyl(b, f, 0.2, 0.24, 0.2, [-0.45, 0.35, 0], 0x9a7448, 10);
+  for (let i = 0; i < 4; i++) b.add(new THREE.SphereGeometry(0.075, 8, 6), 0xb83a2c, f.p(-0.5 + (i % 2) * 0.1, 0.47, -0.05 + Math.floor(i / 2) * 0.1));
+  cyl(b, f, 0.13, 0.13, 0.9, [0.4, 0.33, 0], COL.wood, 8, [0, 0, Math.PI / 2]);
+  const c = f.p(0, 0, 0);
+  kit.colliders.push({ kind: 'obox', x: c[0], z: c[2], hw: 0.98, hd: 0.45, yaw, maxY: y + 0.97 });
+  const stand = f.p(0, 0, 1.05);
+  return new THREE.Vector3(stand[0], y, stand[2]);
+}
+
 /** Simple open wooden cart. */
 export function cart(kit: Kit, x: number, y: number, z: number, yaw: number): void {
   const f = new Frame(x, y, z, yaw);

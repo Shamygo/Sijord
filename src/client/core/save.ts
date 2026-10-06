@@ -29,6 +29,14 @@ export interface SaveData {
   found?: string[];
   /** Lysfolk tablets Professor Hazel has already paid for. */
   tabletsReported?: number;
+  /** The trainer's own experience (DESIGN §7.1). Missing on saves from before trainer levels. */
+  trainerXp?: number;
+  /** Emptied resource nodes (`kind:index`) and when (ms since epoch) each grows back. */
+  depleted?: Record<string, number>;
+  /** Uses left on the tool in hand, per tool id (missing: a fresh one). */
+  toolWear?: Record<string, number>;
+  /** Recipes made at least once (the first time gives experience). */
+  crafted?: string[];
 }
 
 export function loadSave(): SaveData | null {

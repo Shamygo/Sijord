@@ -50,6 +50,8 @@ export interface Avatar {
    * clips just throw from the start.
    */
   aim?(on: boolean): void;
+  /** Show a tool (an item id such as 'stone-hatchet') in the right hand, or nothing. Optional. */
+  hold?(tool: string | null): void;
   /** Terrain height function used to plant the feet on slopes (null: estimate from motion). */
   setGround(fn: GroundFn | null): void;
   dispose(): void;

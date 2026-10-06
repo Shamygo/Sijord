@@ -1,4 +1,5 @@
 import type * as THREE from 'three';
+import type { ResourceField } from './resources';
 
 /**
  * Static obstacles on the ground plane. Players are resolved as circles against these.
@@ -34,6 +35,13 @@ export interface WorldAnchors {
   professorYaw: number;
   /** Labelled points shown on the minimap and compass (house doors, the lab, the town exit). */
   landmarks: { id: string; label: string; position: THREE.Vector3 }[];
+  /** Crafting stations (DESIGN §6.4): where to stand to use them. */
+  stations?: CraftStationSpot[];
+}
+
+export interface CraftStationSpot {
+  kind: 'workbench' | 'campfire';
+  position: THREE.Vector3;
 }
 
 export interface ClimbPoint {
@@ -50,6 +58,8 @@ export interface World {
   climbs?: ClimbPoint[];
   surfaceHeightAt?(x:number,z:number,feetY:number):number;
   colliders: Collider[];
+  /** Trees, bushes, stones, berries, apricorns and copper that can be gathered. */
+  resources?: ResourceField;
   regions: Region[];
   anchors: WorldAnchors;
   /** Half the side length of the playable square, centred on the origin. */

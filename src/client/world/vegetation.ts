@@ -420,7 +420,8 @@ export class VegBatch {
     this.mesh.receiveShadow = true;
   }
 
-  add(hi: THREE.BufferGeometry, lo: THREE.BufferGeometry, x: number, y: number, z: number, rot: number, sx: number, sy: number, color: THREE.Color): void {
+  /** Returns the instance id (for `setVisible`). */
+  add(hi: THREE.BufferGeometry, lo: THREE.BufferGeometry, x: number, y: number, z: number, rot: number, sx: number, sy: number, color: THREE.Color): number {
     const hiId = this.geoIds.get(hi)!;
     const loId = this.geoIds.get(lo)!;
     const id = this.mesh.addInstance(loId);
@@ -429,6 +430,12 @@ export class VegBatch {
     this.mesh.setMatrixAt(id, this.m);
     this.mesh.setColorAt(id, color);
     this.items.push({ id, x, z, hi: hiId, lo: loId, isHi: false });
+    return id;
+  }
+
+  /** Show or hide one instance (a stone that was picked up). */
+  setVisible(id: number, visible: boolean): void {
+    this.mesh.setVisibleAt(id, visible);
   }
 
   setLodScale(s: number): void {
@@ -477,7 +484,17 @@ export interface ScatterContext {
   fixedBushes?: { x: number; y: number; z: number; s: number; sy?: number }[];
 }
 
-export function scatterVegetation(ctx: ScatterContext): { group: THREE.Group; batches: VegBatch[]; foliage: THREE.MeshLambertMaterial } {
+/** What the scatter placed that can be gathered (DESIGN §6.3), in placement order. */
+export interface ScatterNodes {
+  trees: { x: number; y: number; z: number; r: number }[];
+  bushes: { x: number; y: number; z: number; r: number }[];
+  /** Small loose rocks, by instance id in the rocks batch. */
+  stones: { x: number; y: number; z: number; r: number; id: number }[];
+  /** Big rocks with a collider; `top` is their standing height. */
+  boulders: { x: number; y: number; z: number; r: number; top: number }[];
+}
+
+export function scatterVegetation(ctx: ScatterContext): { group: THREE.Group; batches: VegBatch[]; foliage: THREE.MeshLambertMaterial; rocks: VegBatch; nodes: ScatterNodes } {
   const group = new THREE.Group();
   group.name = 'vegetation';
   const kinds = makeTreeKinds();
@@ -488,7 +505,7 @@ export function scatterVegetation(ctx: ScatterContext): { group: THREE.Group; ba
   const rockGeos = [makeRockGeometry(1), makeRockGeometry(2), makeRockGeometry(3), makeRockGeometry(4, 1, true), makeRockGeometry(5, 1, true)];
   const rockLo = [makeRockGeometry(1, 0), makeRockGeometry(2, 0), makeRockGeometry(3, 0), rockGeos[3], rockGeos[4]];
 
-  type P = { kind: string; x: number; y: number; z: number; rot: number; sx: number; sy: number; c: THREE.Color };
+  type P = { kind: string; x: number; y: number; z: number; rot: number; sx: number; sy: number; c: THREE.Color; top?: number; r?: number };
   const treeList: P[] = [];
   const bushList: P[] = [];
   const rockList: (P & { k: number })[] = [];
@@ -580,7 +597,9 @@ export function scatterVegetation(ctx: ScatterContext): { group: THREE.Group; ba
         // Anything chest-high or taller can be climbed and stood on; boulders round off at the rim.
         const top = rock.y + rock.sy * (blocky ? 0.98 : 0.82);
         const climb = top - y > 0.7;
-        ctx.colliders.push({ kind: 'circle', x: px, z: pz, r: sc * (blocky ? 0.95 : 0.85), ...(climb ? { maxY: top, climb, dome: rock.sy * (blocky ? 0.12 : 0.3) } : {}) });
+        const r = sc * (blocky ? 0.95 : 0.85);
+        ctx.colliders.push({ kind: 'circle', x: px, z: pz, r, ...(climb ? { maxY: top, climb, dome: rock.sy * (blocky ? 0.12 : 0.3) } : {}) });
+        Object.assign(rock, { top, r });
       }
       if (big) {
         for (let n = 0; n < 3; n++) {
@@ -603,10 +622,20 @@ export function scatterVegetation(ctx: ScatterContext): { group: THREE.Group; ba
   bushes.mesh.castShadow = true;
   bushes.mesh.customDepthMaterial = depth;
   const rocks = new VegBatch([...rockGeos, ...rockLo], rockList.length, rockMat, 110, 'rocks');
-  for (const p of rockList) rocks.add(rockGeos[p.k], rockLo[p.k], p.x, p.y, p.z, p.rot, p.sx, p.sy, p.c);
+  const nodes: ScatterNodes = {
+    trees: treeList.map((p) => ({ x: p.x, y: p.y, z: p.z, r: kinds[p.kind].radius * p.sx })),
+    bushes: bushList.map((p) => ({ x: p.x, y: p.y, z: p.z, r: p.sx })),
+    stones: [],
+    boulders: [],
+  };
+  for (const p of rockList) {
+    const id = rocks.add(rockGeos[p.k], rockLo[p.k], p.x, p.y, p.z, p.rot, p.sx, p.sy, p.c);
+    if (p.top !== undefined && p.r !== undefined) nodes.boulders.push({ x: p.x, y: p.y, z: p.z, r: p.r, top: p.top });
+    else if (p.sx >= 0.3 && p.sx <= 0.9) nodes.stones.push({ x: p.x, y: p.y + p.sy * 0.3, z: p.z, r: p.sx * 0.8, id });
+  }
   rocks.mesh.castShadow = true;
   group.add(trees.mesh, bushes.mesh, rocks.mesh);
-  return { group, batches: [trees, bushes, rocks], foliage };
+  return { group, batches: [trees, bushes, rocks], foliage, rocks, nodes };
 }
 
 /** Small instanced flowers for the town flower beds. */

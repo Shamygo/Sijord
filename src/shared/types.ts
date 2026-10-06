@@ -24,7 +24,7 @@ export interface PlayerProfile {
 }
 
 /** Locomotion state a remote avatar needs to animate itself. */
-export type MoveAnim = 'idle' | 'walk' | 'run' | 'jump' | 'fall' | 'climb' | 'roll' | 'mantle' | 'vault';
+export type MoveAnim = 'idle' | 'walk' | 'run' | 'jump' | 'fall' | 'climb' | 'roll' | 'mantle' | 'vault' | 'gather' | 'pick' | 'chop';
 
 export interface PlayerSnapshot {
   x: number;
@@ -47,6 +47,8 @@ export interface PlayerSnapshot {
   ballCatch?: BallCatchFx;
   /** Knockdown pose, 0 standing to 1 flat on the ground. */
   down?: number;
+  /** Tool in hand while chopping or mining (an item id). */
+  tool?: string;
   /** Shared wild creatures this player caught or defeated recently (spawn keys). */
   wildTaken?: string[];
   /** Shared wild creatures this player is battling or catching right now. */

@@ -11,6 +11,8 @@ import { PARTY_MAX } from '../../shared/items';
 import { DISCOVERIES, DISCOVERY_LABEL, discoveryCounts, type DiscoveryKind } from '../../shared/discoveries';
 import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
 import { ITEMS, ITEM_CATEGORIES, type ItemCategory } from '../../shared/items';
+import { craftBlock, RECIPES, STATION_LABEL, type Recipe, type Station } from '../../shared/crafting';
+import { TOOL_USES, type ToolId } from '../../shared/gathering';
 import { TYPE_COLORS } from '../battle/fx';
 import { STATUS_LABEL } from '../battle/ui';
 import { ACTION_LABELS, DEFAULT_SETTINGS, keyLabel, rebind, type Action, type Settings } from '../core/settings';
@@ -19,7 +21,7 @@ import { h } from './dom';
 import type { Quest } from './hud';
 import type { Minimap } from './minimap';
 
-export type MenuTab = 'map' | 'bag' | 'party' | 'quests' | 'settings' | 'pokedex';
+export type MenuTab = 'map' | 'bag' | 'craft' | 'party' | 'quests' | 'settings' | 'pokedex';
 
 export interface MenuDeps {
   world: World;
@@ -44,6 +46,16 @@ export interface MenuDeps {
   /** The party order changed in the menu. */
   onPartyChanged(): void;
   levelCap(): number;
+  /** The trainer's own level and progress through it (DESIGN §7.1). */
+  trainer(): { level: number; into: number; need: number };
+  /** Crafting stations within reach right now. */
+  stations(): Station[];
+  /** Seconds one craft of a recipe takes this trainer. */
+  craftSeconds(id: string): number;
+  /** Make one; false if it can't be made after all. */
+  craft(id: string): boolean;
+  /** Uses left on the tool in hand. */
+  toolUses(id: string): number | undefined;
   settings: Settings;
   onSettings(s: Settings): void;
   onSave(): void;
@@ -54,6 +66,7 @@ export interface MenuDeps {
 const TABS: { id: MenuTab; label: string; action?: Action }[] = [
   { id: 'map', label: 'Map', action: 'map' },
   { id: 'bag', label: 'Bag', action: 'bag' },
+  { id: 'craft', label: 'Craft', action: 'craft' },
   { id: 'party', label: 'Party', action: 'party' },
   { id: 'quests', label: 'Quests', action: 'quests' },
   { id: 'pokedex', label: 'Pokédex' },
@@ -77,6 +90,8 @@ export class GameMenu {
   private map: MapView | null = null;
   private trainerImage = '';
   private itemTarget = false;
+  /** The recipe being made, and when it started and finishes (performance.now ms). */
+  private crafting: { id: string; start: number; end: number; bar: HTMLElement } | null = null;
 
   constructor(private deps: MenuDeps) {
     void deps.trainerPortrait().then(src => {this.trainerImage = src; if (this.open_ && this.tab === 'party') this.render();});
@@ -109,6 +124,7 @@ export class GameMenu {
     if (!this.open_) return;
     this.open_ = false;
     this.listening = null;
+    this.crafting = null;
     this.el.classList.remove('show');
     this.map?.dispose();
     this.map = null;
@@ -123,12 +139,22 @@ export class GameMenu {
 
   /** Redraw after the data behind the open tab changed. */
   refresh(): void {
-    if (this.open_ && (this.tab === 'party' || this.tab === 'pokedex' || this.tab === 'quests')) this.render();
+    if (this.open_ && (this.tab === 'party' || this.tab === 'pokedex' || this.tab === 'quests' || this.tab === 'craft' || this.tab === 'bag')) this.render();
   }
 
   /** Called each frame while open so the map shows live positions. */
   update(): void {
     this.map?.draw();
+    const c = this.crafting;
+    if (c) {
+      const now = performance.now();
+      c.bar.style.width = `${Math.min(100, ((now - c.start) / (c.end - c.start)) * 100)}%`;
+      if (now >= c.end) {
+        this.crafting = null;
+        this.deps.craft(c.id);
+        if (this.open_ && this.tab === 'craft') this.render();
+      }
+    }
   }
 
   private onKey(e: KeyboardEvent): void {
@@ -173,6 +199,9 @@ export class GameMenu {
         break;
       case 'bag':
         this.body.replaceChildren(this.renderBag());
+        break;
+      case 'craft':
+        this.body.replaceChildren(this.renderCraft());
         break;
       case 'party':
         this.body.replaceChildren(this.renderParty());
@@ -232,10 +261,56 @@ export class GameMenu {
           {},
           info ? h('h3', {}, this.itemArt(selected!), info.name) : h('h3', {}, 'Bag'),
           h('p', {}, info ? info.description : 'Gather materials out in the wild, and buy supplies in towns. Prices in Sijord are steep.'),
+          info?.category === 'tools' && selected ? h('p.tool-wear', {}, `${this.deps.toolUses(selected) ?? TOOL_USES[selected as ToolId]} of ${TOOL_USES[selected as ToolId]} uses left on the one in hand`) : null,
           info?.heal && selected ? h('button.btn', {onclick: () => {this.itemTarget = !this.itemTarget; this.render();}}, 'Use on Pokémon') : null,
           this.itemTarget && info?.heal && selected ? h('div.item-targets', {}, ...this.deps.party().map(c => h('button.act', {disabled:c.hp <= 0 || c.hp >= maxHp(c), onclick: () => {this.deps.useItem(selected,c.uid); this.itemTarget = false; this.render();}}, h('img', {src:this.deps.portrait(c.species),alt:''}), `${displayName(c)} · ${c.hp}/${maxHp(c)}`))) : null,
         ),
       ),
+    );
+  }
+
+  /** Recipes by station: what you can make, what you're short of, and why a recipe is locked. */
+  private renderCraft(): HTMLElement {
+    const bag = this.deps.bag(), tr = this.deps.trainer(), stations = this.deps.stations();
+    const where = stations.includes('workbench') ? 'At the workbench' : stations.includes('campfire') ? 'At the campfire' : 'Crafting by hand';
+    const card = (r: Recipe) => {
+      const block = craftBlock(r, bag, tr.level, stations);
+      const busy = this.crafting?.id === r.id;
+      const reason = block === 'level' ? `Needs trainer Lv. ${r.level}` : block === 'station' ? `Needs the ${STATION_LABEL[r.station].toLowerCase()}` : block === 'materials' ? 'Not enough materials' : '';
+      const bar = h('i');
+      const button = h('button.btn.craft-go', {
+        disabled: !!block || !!this.crafting,
+        onclick: () => {
+          if (this.crafting || craftBlock(r, this.deps.bag(), this.deps.trainer().level, this.deps.stations())) return;
+          const now = performance.now();
+          this.crafting = { id: r.id, start: now, end: now + this.deps.craftSeconds(r.id) * 1000, bar };
+          this.render();
+        },
+      }, busy ? 'Making…' : 'Craft');
+      if (busy && this.crafting) this.crafting.bar = bar;
+      return h(
+        'div.craft-card' + (block ? '.blocked' : ''),
+        {},
+        h('div.craft-head', {}, this.itemArt(r.out), h('div', {}, h('b', {}, ITEMS[r.out].name + (r.count > 1 ? ` ×${r.count}` : '')), h('small', {}, `You have ${bag[r.out] ?? 0}`))),
+        h('div.craft-cost', {}, ...Object.entries(r.cost).map(([id, n]) => h('span.cost' + ((bag[id] ?? 0) < n ? '.short' : ''), { title: ITEMS[id].name }, this.itemArt(id), `${bag[id] ?? 0}/${n}`))),
+        h('div.craft-foot', {}, reason ? h('small.craft-why', {}, reason) : h('small', {}, `${this.deps.craftSeconds(r.id).toFixed(1)} s`), busy ? h('div.craft-progress', {}, bar) : button),
+      );
+    };
+    const NOTES: Record<Station, string> = { hand: '', campfire: 'the campfire at the campsite, north-west of Bramblewick', workbench: 'on the Craft Workshop porch in Bramblewick · trainer Lv. 3' };
+    const order = [...new Set<Station>([...stations, 'hand', 'campfire', 'workbench'])];
+    const section = (st: Station, note: string) => [
+      h('h3', {}, STATION_LABEL[st], h('span.craft-note', {}, note)),
+      h('div.craft-grid', {}, ...RECIPES.filter((r) => r.station === st).map(card)),
+    ];
+    return h(
+      'div.craft',
+      {},
+      h('div.craft-top', {},
+        h('div.craft-level', {}, h('b', {}, `Trainer Lv. ${tr.level}`), h('div.xp-bar', {}, h('i', { style: `width:${tr.need ? Math.round((tr.into / tr.need) * 100) : 100}%` })), h('small', {}, tr.need ? `${tr.need - tr.into} XP to Lv. ${tr.level + 1}` : 'Top level')),
+        h('div.craft-where', {}, h('b', {}, where), h('small', {}, 'Catching, battling, finding things and crafting something new all give trainer experience.')),
+      ),
+      // The station you're standing at comes first, so its recipes aren't below the fold.
+      ...order.flatMap((st) => section(st, st === 'hand' ? 'anywhere' : stations.includes(st) ? 'you are here' : NOTES[st])),
     );
   }
 
