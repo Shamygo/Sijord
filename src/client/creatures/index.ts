@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ALPHA } from '../../shared/alpha';
 import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
 import { assetStatus, loadedAsset, pokemonUrl } from '../assets/loader';
 import { importedCreature } from './imported';
@@ -136,12 +137,36 @@ export function creatureModelReady(speciesId: string): boolean {
   return !!loadedAsset(url) || assetStatus.failed.has(url);
 }
 
-export function createCreatureModel(speciesId: string): CreatureModel {
-  const id = speciesId.toLowerCase();
+/** An Alpha (DESIGN §4.6) is the same model, bigger, with glowing red eyes. */
+export interface CreatureModelOptions {
+  alpha?: boolean;
+}
+
+export function createCreatureModel(speciesId: string, opts: CreatureModelOptions = {}): CreatureModel {
+  const model = buildCreatureModel(speciesId.toLowerCase(), opts);
+  return opts.alpha ? enlarged(model, ALPHA.scale) : model;
+}
+
+/** The model scaled up as a whole: its strides grow with it, so it animates at speed / k. */
+function enlarged(m: CreatureModel, k: number): CreatureModel {
+  m.root.scale.multiplyScalar(k);
+  m.root.userData.alpha = true;
+  return {
+    root: m.root,
+    height: m.height * k,
+    radius: m.radius * k,
+    update: (dt, speed) => m.update(dt, speed / k),
+    play: (action) => m.play(action),
+    reset: () => m.reset(),
+    dispose: () => m.dispose(),
+  };
+}
+
+function buildCreatureModel(id: string, opts: CreatureModelOptions): CreatureModel {
   const visual = POKEMON_VISUALS[id];
   const asset = visual && loadedAsset(pokemonUrl(visual.dex));
   if (asset) {
-    const model = importedCreature(asset, IMPORTED_HEIGHTS[id] ?? (SPECIES[id] ?? fallbackSpecies()).height);
+    const model = importedCreature(asset, IMPORTED_HEIGHTS[id] ?? (SPECIES[id] ?? fallbackSpecies()).height, { glowEyes: opts.alpha });
     model.root.name = `creature:${id}`;
     return model;
   }

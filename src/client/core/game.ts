@@ -36,6 +36,7 @@ import { DISCOVERY_LABEL, discoveryCounts, tabletReward } from '../../shared/dis
 import { applyCraft, canLearn, craftBlock, craftSpend, RECIPES, recipeById, techPoints, type Station } from '../../shared/crafting';
 import { CLEAN_WATER_TYPE, FIRE_COOK_TIME, gatherWay, NODE_RULES, partnerHelp, pruneDepleted, rollPartner, rollYield, wearTool, type GatherWay, type PartnerHelp, type ToolId } from '../../shared/gathering';
 import { earnedXp, trainerLevel, TRAINER_XP } from '../../shared/trainer-level';
+import { ALPHA, ALPHA_LAIRS, ALPHA_REWARD, alphaDay, alphaPrize, currentAlphaKeys } from '../../shared/alpha';
 import type { ResourceNode } from '../world/resources';
 import { TOWN } from '../world/layout';
 import { waterDistance } from '../world/terrain';
@@ -74,6 +75,7 @@ interface ActiveBattle {
 interface PartnerFollower {
   follower: Follower;
   lead: string | null;
+  leadAlpha: boolean;
   /** The node their partner is helping them gather from. */
   work: [number, number, number] | null;
   last: THREE.Vector3;
@@ -153,6 +155,10 @@ export class Game {
   private catchRng = new Rng(randomSeed());
   /** A creature that broke out and will start a battle once it has popped back out. */
   private pendingBattle: { m: WildCreature; t: number } | null = null;
+  /** Alphas whose roar has been heard this session (`alpha:lair:day`). */
+  private alphasHeard = new Set<string>();
+  /** Shown once the battle that beat an Alpha has closed. */
+  private alphaToast: [string, string, number] | null = null;
   /** The partner rushing a charging wild Pokemon; the battle starts when it gets there. */
   private intercept: { m: WildCreature; t: number } | null = null;
   /** Per friend: shared wild creatures they're battling or catching (hidden here meanwhile), and their herds' cells. */
@@ -163,8 +169,8 @@ export class Game {
   private lastCatch: { species: string; chance: number; unaware: boolean; caught?: boolean; reaction?: CatchReaction } | null = null;
   /** Gathering in progress (DESIGN §6.3): the node (or the water you're kneeling at), how, and seconds so far. */
   private gathering: { node: ResourceNode | null; water?: WaterSpot; way: GatherWay; t: number; helper?: { help: PartnerHelp; name: string } } | null = null;
-  /** The wild side of the friend's battle we joined: levels seen and who fainted (prize money). */
-  private remoteFoes: { id: string; levels: Map<string, number>; fainted: Set<string> } | null = null;
+  /** The wild side of the friend's battle we joined: levels seen, who fainted (prize money) and the Alphas' names. */
+  private remoteFoes: { id: string; levels: Map<string, number>; fainted: Set<string>; alphas: Map<string, string> } | null = null;
   private guestPrize = 0;
   /** Hunger, thirst and queasiness (DESIGN §6.1); the same object as `save.meters`. */
   private meters: Meters;
@@ -224,6 +230,9 @@ export class Game {
     this.scene.add(this.follower.root);
     // Herds come from the world's name, so both friends meet the same ones.
     this.wild = new WildManager(this.world, randomSeed(), seedFromName(save.room));
+    // Alphas beaten or caught today (here or by a friend) stay gone until tomorrow.
+    this.wild.onAlphaTaken = (key) => this.rememberAlpha(key);
+    this.wild.applyTaken(currentAlphaKeys(save.alphas ?? [], alphaDay(Date.now())));
     this.scene.add(this.wild.root);
     this.throws = new OverworldThrows({
       world: this.world,
@@ -352,6 +361,7 @@ export class Game {
         }
         if (this.remoteBattleHost === id) this.receiveRemoteBattle(s.battleFrame);
         if (pf) pf.lead = s.lead && !s.battle && SPECIES[s.lead] ? s.lead : null;
+        if (pf) pf.leadAlpha = !!pf.lead && s.leadAlpha === true;
         if (pf) pf.work = Array.isArray(s.work) && s.work.length === 3 && s.work.every(Number.isFinite) ? s.work : null;
         // The partner's throws replay here (catching itself is decided on their side).
         if (s.ballThrow && ITEMS[s.ballThrow.ball] && this.throws.remoteThrow(id, s.ballThrow, THROW_CLIP.release)) this.partners.get(id)?.remote.avatar.gesture('throw');
@@ -422,6 +432,13 @@ export class Game {
     const yaw = this.controller.yaw;
     const herd = this.wild.spawnHerd(p.x + Math.sin(yaw) * 5, p.z + Math.cos(yaw) * 5, speciesId, level);
     void this.startWildBattle(herd.members[0], false);
+  }
+
+  /** Dev only: stand `dist` metres south of today's Alpha lair, facing it. */
+  debugAlpha(dist = 30): { x: number; z: number } {
+    const lair = ALPHA_LAIRS[0];
+    this.debugTeleport(lair.x, lair.z - dist, 0);
+    return { x: lair.x, z: lair.z };
   }
 
   /** Dev only: run game time faster (automated tests in slow headless browsers). */
@@ -505,8 +522,9 @@ export class Game {
     if (!frame || (this.remoteFrame && frame.id !== this.remoteFrame.id)) {this.finishRemoteBattle(); return;}
     this.remoteFrame = frame;
     // Wild Pokemon that faint during a friend's battle, for the joiner's own prize money.
-    if (this.remoteFoes?.id !== frame.id) this.remoteFoes = { id: frame.id, levels: new Map(), fainted: new Set() };
+    if (this.remoteFoes?.id !== frame.id) this.remoteFoes = { id: frame.id, levels: new Map(), fainted: new Set(), alphas: new Map() };
     for (const sl of frame.slots) if (sl.pos.side === 1) this.remoteFoes.levels.set(sl.uid, sl.level);
+    for (const sl of frame.slots) if (sl.pos.side === 1 && sl.alpha) this.remoteFoes.alphas.set(sl.uid, sl.name);
     for (const { event } of frame.events) if (event.t === 'faint' && event.pos.side === 1) this.remoteFoes.fainted.add(event.uid);
     if (!frame.lobby && !frame.guest) {this.finishRemoteBattle(); this.hud.showToast('The battle has already started', 'Join before your friend chooses a mode.'); return;}
     if (frame.guest && !this.remoteBattle) {
@@ -534,13 +552,15 @@ export class Game {
       // A won wild battle pays the friend who joined it too, for the Pokemon that fainted.
       const foes = this.remoteFoes;
       if (frame.winner === 0 && frame.kind === 'wild' && foes?.id === frame.id) {
-        const beaten = [...foes.fainted].map((uid) => foes.levels.get(uid) ?? 1);
+        const beaten = [...foes.fainted].filter((uid) => !foes.alphas.has(uid)).map((uid) => foes.levels.get(uid) ?? 1);
         if (beaten.length) {
           this.gainXp(beaten.length * TRAINER_XP.wildWin);
           // Shown as the battle closes, in place of "Back to exploring".
           this.guestPrize = wildPrize(beaten);
           this.earn(this.guestPrize, 'Prize money', false);
         }
+        // Both friends who brought down an Alpha get its reward.
+        for (const [uid, name] of foes.alphas) if (foes.fainted.has(uid)) this.alphaBeaten(foes.levels.get(uid) ?? 1, name);
       }
       this.guestProgression = {winner:frame.winner,escaped:frame.escaped,fainted:new Set(),pendingMoves:new Map(frame.result.pendingMoves),caught:[],ballsUsed:{},partnerCaught:[]};
     }
@@ -552,7 +572,9 @@ export class Game {
     this.remoteBattle?.dispose(); this.remoteBattle = null; this.remoteBattleHost = null; this.remoteFrame = undefined;
     this.battleControl = undefined; this.hud.setBattleMode(false); this.refreshFollower();
     if (this.guestPrize) this.prizeToast(this.guestPrize, 'Prize money');
-    else this.hud.showToast('Back to exploring');
+    else if (!this.alphaToast) this.hud.showToast('Back to exploring');
+    if (this.alphaToast) this.hud.showToast(...this.alphaToast);
+    this.alphaToast = null;
     this.guestPrize = 0;
     if (this.guestProgression) {const outcome = this.guestProgression; this.guestProgression = null; void (async()=>{await this.afterBattle(outcome);if(!this.party.some(isUsable))await this.blackout();})();}
   }
@@ -621,7 +643,7 @@ export class Game {
     this.partners.set(id, { remote, profile });
     const follower = new Follower();
     this.scene.add(follower.root);
-    this.partnerFollowers.set(id, { follower, lead: null, work: null, last: new THREE.Vector3(), speed: 0 });
+    this.partnerFollowers.set(id, { follower, lead: null, leadAlpha: false, work: null, last: new THREE.Vector3(), speed: 0 });
     this.updatePartnerStatus();
   }
 
@@ -682,7 +704,7 @@ export class Game {
 
   private refreshFollower(): void {
     const lead = this.party.find(isUsable);
-    this.follower.setSpecies(lead ? lead.species : null);
+    this.follower.setSpecies(lead ? lead.species : null, !!lead?.alpha);
     this.follower.setVisible(this.followerOut && !this.battle && !this.remoteBattleHost);
   }
 
@@ -865,9 +887,11 @@ export class Game {
       const isNew = !(this.save.dex?.caught ?? []).includes(c.species);
       this.markDex(c.species, true);
       this.gainXp(isNew ? TRAINER_XP.catchNew : TRAINER_XP.catchAgain);
+      // Catching an Alpha is the hardest thing in the meadow (DESIGN §4.6).
+      if (c.alpha) this.gainXp(ALPHA_REWARD.xp);
       if (this.party.length < PARTY_MAX) {
         this.party.push(c);
-        this.hud.showToast(`${displayName(c)} joined your team!`, `Lv. ${c.level} ${species(c.species).name}`, 3);
+        this.hud.showToast(`${displayName(c)} joined your team!`, `Lv. ${c.level} ${c.alpha ? 'Alpha ' : ''}${species(c.species).name}`, 3);
       } else {
         (this.save.box ??= []).push(c);
         this.hud.showToast(`${displayName(c)} was sent to the PC`, 'Your party is full. Swap it in at Hazel\'s lab.', 3.5);
@@ -1019,7 +1043,7 @@ export class Game {
       const edge = this.project(mid.clone().addScaledVector(right, Math.max(target.model.radius, h * 0.55) + 0.25));
       const p = this.controller.position;
       view = {
-        name: displayName(c), level: c.level, hp: c.hp, maxHp: maxHp(c), x: scr.x, y: scr.y, visible: scr.visible,
+        name: target.alpha ? `Alpha ${displayName(c)}` : displayName(c), level: c.level, hp: c.hp, maxHp: maxHp(c), x: scr.x, y: scr.y, visible: scr.visible,
         radius: Math.hypot(edge.x - scr.x, edge.y - scr.y),
         unaware: isUnaware({ state: target.state, alert: target.alert, x: target.mover.pos.x, z: target.mover.pos.z, yaw: target.mover.yaw, px: p.x, pz: p.z }),
       };
@@ -1038,7 +1062,7 @@ export class Game {
     const chance = catchChance({
       maxHp: maxHp(c), hp: c.hp, catchRate: species(c.species).catchRate, ball, status: c.status, level: c.level,
       partyLevel: Math.max(1, ...this.party.map((x) => x.level)), cap: this.levelCap, throw: unaware ? 'unaware' : 'overworld',
-      classMod: classInfo(this.save.profile.playerClass).modifiers.catchRate,
+      classMod: classInfo(this.save.profile.playerClass).modifiers.catchRate, alpha: c.alpha,
     });
     let roll = rollCatch(chance, this.catchRng);
     const forced = this.debugCatch?.caught;
@@ -1063,7 +1087,8 @@ export class Game {
     }
     const ref = Math.min(Math.max(1, ...this.party.map((x) => x.level)), this.levelCap);
     const canBattle = this.party.some(isUsable);
-    let reaction = failedCatchReaction(species(c.species).temperament, c.level - ref, this.catchRng.next(), canBattle);
+    // An Alpha never runs or backs off: it comes for you.
+    let reaction: CatchReaction = m.alpha ? 'charge' : failedCatchReaction(species(c.species).temperament, c.level - ref, this.catchRng.next(), canBattle);
     if (this.debugCatch?.reaction) reaction = this.debugCatch.reaction === 'battle' && !canBattle ? 'charge' : this.debugCatch.reaction;
     if (this.lastCatch) Object.assign(this.lastCatch, { caught: false, reaction });
     this.wild.breakOut(m, reaction);
@@ -1075,7 +1100,7 @@ export class Game {
       const ways = [`dodge with ${keyLabel(this.settings.keys.dodge)}`];
       if (lead) ways.push(`${keyLabel(this.settings.keys.partner)} sends ${displayName(lead)} to cut it off`);
       if (this.save.bag?.[TREAT_ITEM]) ways.push('a Treat calms it');
-      this.hud.showToast(`The wild ${name} is furious!`, `It's charging you: ${ways.join(' · ')}`, 3.6);
+      this.hud.showToast(`The ${this.wildName(m)} is furious!`, `It's charging you: ${ways.join(' · ')}`, 3.6);
     }
     else {
       this.hud.showToast(near, `The wild ${name} wants to fight!`, 2);
@@ -1090,9 +1115,9 @@ export class Game {
       this.hud.showToast('The Treat landed', 'A Pokemon that wanders close will come and eat it', 2);
       return;
     }
-    const name = displayName(eater.creature);
-    if (calmed) this.hud.showToast(`The wild ${name} calmed down`, 'It went for the Treat instead of you', 2.4);
-    else this.hud.showToast(`The wild ${name} went for the Treat`, 'Busy eating, it won\'t notice you unless it\'s already wary', 2.4);
+    const name = this.wildName(eater);
+    if (calmed) this.hud.showToast(`The ${name} calmed down`, 'It went for the Treat instead of you', 2.4);
+    else this.hud.showToast(`The ${name} went for the Treat`, 'Busy eating, it won\'t notice you unless it\'s already wary', 2.4);
   }
 
   /** A wild Pokemon charging the trainer, close enough for the partner to cut it off. */
@@ -1149,7 +1174,7 @@ export class Game {
     if (this.battle || this.remoteBattleHost || this.talking || this.scripted) return;
     // A well-timed dodge lets the lunge pass straight through.
     if (this.controller.invulnerable) return;
-    const dmg = chargeDamage(m.creature.level, undefined, this.defence);
+    const dmg = chargeDamage(m.creature.level, m.alpha ? ALPHA.chargePower : undefined, this.defence);
     const r = this.vitals.hit(dmg);
     if (r === 'ignored') return;
     this.cancelAim();
@@ -1163,9 +1188,52 @@ export class Game {
     this.hud.hurt();
     if (r === 'out') {
       this.knockedOut = true;
-      this.hud.showToast('You were knocked out!', `The wild ${displayName(m.creature)} was too much`, 2);
-    } else this.hud.showToast(`The wild ${displayName(m.creature)} slammed into you!`, `-${dmg} HP`, 1.8);
+      this.hud.showToast('You were knocked out!', `The ${this.wildName(m)} was too much`, 2);
+    } else this.hud.showToast(`The ${this.wildName(m)} slammed into you!`, `-${dmg} HP`, 1.8);
     this.save.trainerHp = this.vitals.hp;
+  }
+
+  /** "wild Nibblet" or "Alpha Ponyta", after "the". */
+  private wildName(m: WildCreature): string {
+    return `${m.alpha ? 'Alpha' : 'wild'} ${displayName(m.creature)}`;
+  }
+
+  /** An Alpha noticed the trainer near its lair and is coming for them (DESIGN §4.6). */
+  private onAlphaRoar(m: WildCreature): void {
+    const lead = this.party.find(isUsable);
+    const ways = [`dodge with ${keyLabel(this.settings.keys.dodge)}`];
+    if (lead) ways.push(`${keyLabel(this.settings.keys.partner)} sends ${displayName(lead)} to cut it off`);
+    if (this.save.bag?.[TREAT_ITEM]) ways.push('a Treat calms it');
+    this.hud.showToast(`The ${this.wildName(m)} charges!`, ways.join(' · '), 3.6);
+  }
+
+  /** The first time an Alpha shows itself near the trainer, a roar gives it away. */
+  private announceAlphas(busy: boolean): void {
+    for (const m of this.wild.alphas) {
+      if (!m.key || this.alphasHeard.has(m.key) || busy) continue;
+      this.alphasHeard.add(m.key);
+      this.hud.showToast(`A roar echoes ${m.alpha!.place}`, `An Alpha ${displayName(m.creature)} guards its lair. It's far stronger than anything else here.`, 4.5);
+    }
+  }
+
+  /** Today's Alpha in a lair was beaten or caught, here or by a friend: it stays gone until tomorrow. */
+  private rememberAlpha(key: string): void {
+    const kept = currentAlphaKeys(this.save.alphas ?? [], alphaDay(Date.now()));
+    if (!kept.includes(key)) kept.push(key);
+    this.save.alphas = kept;
+    writeSave(this.save);
+  }
+
+  /** The reward for bringing down an Alpha: experience, a big prize and what it was guarding. */
+  private alphaBeaten(level: number, name: string): void {
+    this.gainXp(ALPHA_REWARD.xp);
+    const prize = alphaPrize(level);
+    this.earn(prize, 'Prize money', false);
+    const bag = (this.save.bag ??= {});
+    for (const [id, n] of Object.entries(ALPHA_REWARD.items)) bag[id] = (bag[id] ?? 0) + n;
+    writeSave(this.save);
+    const items = Object.entries(ALPHA_REWARD.items).map(([id, n]) => `${ITEMS[id]?.name ?? id} ×${n}`).join(' · ');
+    this.alphaToast = [`You beat the Alpha ${name}!`, `${formatMoney(prize)} · ${items} it was guarding · back tomorrow`, 4];
   }
 
   /** H: a Potion from the bag patches the trainer up. */
@@ -1621,7 +1689,9 @@ export class Game {
     const facing = Math.atan2(m.mover.pos.x - p.x, m.mover.pos.z - p.z);
     const names = list.map((w) => displayName(w.creature));
     const lead = this.party.find(isUsable);
-    const intro = intercepted && lead
+    const intro = m.alpha
+      ? intercepted && lead ? `${displayName(lead)} cut off the ${this.wildName(m)}!` : charged ? `The ${this.wildName(m)} charged at you!` : `You challenged the ${this.wildName(m)}!`
+      : intercepted && lead
       ? `${displayName(lead)} cut off the wild ${names[0]}!`
       : charged
       ? `A wild ${names[0]} charged at you!${names[1] ? ` Another ${names[1]} joined in!` : ''}`
@@ -1693,11 +1763,14 @@ export class Game {
     }
     await this.storeCaught(outcome.caught);
     if (start.kind === 'wild' && outcome.winner === 0) {
-      const beaten = start.foes.filter((f) => outcome.fainted.has(f.uid));
+      const beaten = start.foes.filter((f) => outcome.fainted.has(f.uid) && !f.alpha);
       if (beaten.length) {
         this.gainXp(beaten.length * TRAINER_XP.wildWin);
         this.earn(wildPrize(beaten.map((f) => f.level)), 'Prize money');
       }
+      for (const f of start.foes) if (f.alpha && outcome.fainted.has(f.uid)) this.alphaBeaten(f.level, displayName(f));
+      if (this.alphaToast) this.hud.showToast(...this.alphaToast);
+      this.alphaToast = null;
     }
     this.onPartyChanged();
     await this.afterBattle(outcome);
@@ -1814,7 +1887,7 @@ export class Game {
       money: this.save.money ?? 0,
       meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },
       throwing: { aiming: this.aiming, ball: this.aimBall, balls: Object.fromEntries(this.throwKinds().map((b) => [b, this.save.bag?.[b] ?? 0])), treats: this.wild.treats.length, intercept: this.intercept ? displayName(this.intercept.m.creature) : null, inFlight: this.throws.busy, dropped: this.throws.droppedCount, lastCatch: this.lastCatch },
-      wildCreatures: this.wild.creatures.map((m) => ({ species: m.creature.species, level: m.creature.level, state: m.state, alert: Math.round(m.alert), attack: m.attack?.phase, position: [m.mover.pos.x, m.mover.pos.z].map((v) => Math.round(v * 10) / 10) })) });
+      wildCreatures: this.wild.creatures.map((m) => ({ species: m.creature.species, level: m.creature.level, alpha: m.alpha ? true : undefined, state: m.state, alert: Math.round(m.alert), attack: m.attack?.phase, position: [m.mover.pos.x, m.mover.pos.z].map((v) => Math.round(v * 10) / 10) })) });
   }
 
   private frame(step?: number): void {
@@ -1935,7 +2008,7 @@ export class Game {
       const lead = this.party.find(isUsable);
       // Lying on the ground: no prompts until back on your feet.
       if (knocked) this.hud.setPrompt(null);
-      else if (chargingAt && lead) this.hud.setPrompt(`Send ${displayName(lead)} to cut off the wild ${displayName(chargingAt.creature)}`, keyLabel(this.settings.keys.partner));
+      else if (chargingAt && lead) this.hud.setPrompt(`Send ${displayName(lead)} to cut off the ${this.wildName(chargingAt)}`, keyLabel(this.settings.keys.partner));
       else if (invite && canFight) this.hud.setPrompt('Join your friend’s battle');
       else if (nearProf) this.hud.setPrompt(`Talk to ${this.professor.name}`);
       else if (nearRival) this.hud.setPrompt(`Talk to ${this.rival.name}`);
@@ -1944,7 +2017,7 @@ export class Game {
       else if (home) this.hud.setPrompt(`Rest at ${home.id === 'p1-house' ? 'home' : 'your friend’s house'}`);
       else if (shop) this.hud.setPrompt(shop.prompt);
       else if (station) this.hud.setPrompt(station === 'workbench' ? 'Use the workbench' : 'Cook at the campfire');
-      else if (wildMon) this.hud.setPrompt(canFight ? `Battle the wild ${displayName(wildMon.creature)} · Lv. ${wildMon.creature.level}` : `Wild ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
+      else if (wildMon) this.hud.setPrompt(canFight ? `Battle the ${this.wildName(wildMon)} · Lv. ${wildMon.creature.level}` : `${wildMon.alpha ? 'Alpha' : 'Wild'} ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
       else if (this.gathering) this.hud.setPrompt(`${this.gathering.way.doing}…`, '');
       else if (water) this.hud.setPrompt(this.waterPrompt(water));
       else if (gather) {
@@ -2022,7 +2095,7 @@ export class Game {
       const rp = p.remote.root.position;
       pf.speed += (rp.distanceTo(pf.last) / Math.max(dt, 1e-3) - pf.speed) * Math.min(1, dt * 8);
       pf.last.copy(rp);
-      pf.follower.setSpecies(pf.lead);
+      pf.follower.setSpecies(pf.lead, pf.leadAlpha);
       pf.follower.setVisible(!!pf.lead && p.remote.root.visible);
       pf.follower.workAt(pf.work ? { x: pf.work[0], z: pf.work[1], r: pf.work[2] } : null, rp);
       pf.follower.update(dt, rp, p.remote.avatar.root.rotation.y, pf.speed, this.world);
@@ -2030,20 +2103,24 @@ export class Game {
     this.throws.update(dt);
     // A furious creature's lunge that connects knocks the trainer down.
     for (const m of this.wild.consumeHits()) if (!busy) this.onTrainerHit(m);
+    for (const m of this.wild.consumeRoars()) if (!busy) this.onAlphaRoar(m);
+    this.announceAlphas(busy);
     const lead = this.follower.active ? this.follower.species ?? undefined : undefined;
+    const leadAlpha = lead && this.follower.alpha ? true : undefined;
     const ballThrow = this.netThrow && now < this.netThrow.until ? this.netThrow.fx : undefined;
     const ballCatch = this.netCatch && now < this.netCatch.until ? this.netCatch.fx : undefined;
     const wildTaken = this.wild.sharedTaken;
     const wildBusy = this.wild.sharedBusy;
     const wildCells = this.wild.liveCells;
     const work: [number, number, number] | undefined = partnerWork ? [partnerWork.x, partnerWork.z, partnerWork.r].map((v) => Math.round(v * 100) / 100) as [number, number, number] : undefined;
-    this.net.send({ ...snap, lead, work, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl, ballThrow, ballCatch, down: down > 0 ? Math.round(down * 100) / 100 : undefined, wildTaken: wildTaken.length ? wildTaken : undefined, wildBusy: wildBusy.length ? wildBusy : undefined, wildCells: wildCells.length ? wildCells : undefined }, now);
+    this.net.send({ ...snap, lead, leadAlpha, work, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl, ballThrow, ballCatch, down: down > 0 ? Math.round(down * 100) / 100 : undefined, wildTaken: wildTaken.length ? wildTaken : undefined, wildBusy: wildBusy.length ? wildBusy : undefined, wildCells: wildCells.length ? wildCells : undefined }, now);
 
     // Also keeps the sun's shadow camera centred on the player.
     this.world.update(dt, this.elapsed, this.controller.position);
     this.discoveries.update(dt, this.elapsed, this.controller.position);
 
     const partner = [...this.partners.values()][0]?.remote.root.position;
+    const alpha = this.wild.alphas[0];
     this.hud.update(
       dt,
       { x: snap.x, z: snap.z, yaw: this.controller.yaw },
@@ -2053,6 +2130,7 @@ export class Game {
       this.world.anchors.landmarks.map((l) => ({ x: l.position.x, z: l.position.z, label: l.label })).concat(this.destination ? [this.destination] : []),
       partner ? { x: partner.x, z: partner.z } : undefined,
       this.gameMinutes,
+      alpha ? { x: alpha.mover.pos.x, z: alpha.mover.pos.z } : undefined,
     );
 
     this.menu.update();

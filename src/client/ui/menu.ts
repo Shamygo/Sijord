@@ -501,7 +501,7 @@ export class GameMenu {
         h(
           'div.mon-main',
           {},
-          h('div.mon-name', {}, displayName(c), h('span.mon-lv', {}, `Lv. ${c.level}`)),
+          h('div.mon-name', {}, displayName(c), c.alpha ? h('span.mon-alpha', {}, 'Alpha') : null, h('span.mon-lv', {}, `Lv. ${c.level}`)),
           h('div.party-hp', {}, h('i', { style: `width:${Math.round(r * 100)}%`, class: r > 0.5 ? '' : r > 0.2 ? 'mid' : 'low' })),
           h('div.mon-sub', {}, `${c.hp}/${maxHp(c)} HP`, c.status ? h('span.status-chip.s-' + c.status, {}, STATUS_LABEL[c.status]) : c.hp <= 0 ? h('span.status-chip.s-fnt', {}, 'FNT') : null, leads.includes(c) ? h('span.lead-tag', {}, 'Leads') : null),
         ),
@@ -566,7 +566,7 @@ export class GameMenu {
         h(
           'div',
           {},
-          h('h3.mon-title', {}, displayName(c), h('small', {}, ` #${String(POKEMON_VISUALS[c.species]?.dex ?? sp.dex).padStart(3, '0')} · ${sp.name}`)),
+          h('h3.mon-title', {}, displayName(c), c.alpha ? h('span.mon-alpha', {}, 'Alpha') : null, h('small', {}, ` #${String(POKEMON_VISUALS[c.species]?.dex ?? sp.dex).padStart(3, '0')} · ${sp.name}`)),
           h('div.mon-types', {}, ...sp.types.map((t) => h('span.type-chip', { style: `background:${TYPE_COLORS[t]}` }, t))),
           h('div.mon-xp', {}, h('span', {}, `Lv. ${c.level}`), h('div.xp-bar', {}, h('i', { style: `width:${Math.round(xpRatio * 100)}%` })), h('small', {}, c.level >= cap ? `At the level cap (${cap})` : `${Math.max(0, to - c.xp)} XP to Lv. ${c.level + 1}`)),
           h('p.mon-desc', {}, sp.description),

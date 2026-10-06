@@ -37,6 +37,8 @@ export interface PlayerSnapshot {
   anim: MoveAnim;
   /** Species of the lead creature walking beside the player, if one is out. */
   lead?: string;
+  /** The lead is an Alpha (bigger, glowing eyes). */
+  leadAlpha?: boolean;
   /** True while the player is in a battle. */
   battle?: boolean;
   battleFrame?: BattleFrame;

@@ -84,6 +84,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .compass-mark { position: absolute; top: 0; transform: translateX(-50%); font-weight: 900; font-size: 15px; }
 .compass-mark.minor { font-size: 11px; opacity: .7; top: 4px; }
 .compass-mark.poi { color: var(--accent); font-size: 14px; top: 2px; }
+.compass-mark.alpha { color: #ff4a3a; font-size: 16px; top: 1px; text-shadow: 0 0 6px rgba(255, 60, 40, .8); }
 .compass-center { position: absolute; left: 50%; top: 20px; width: 9px; height: 9px; margin-left: -4px; background: #fff; transform: rotate(45deg); border: 2px solid #1d2b38; }
 .clock { position: absolute; top: 14px; right: 22px; font-weight: 900; font-size: 15px; display: flex; gap: 6px; align-items: center; }
 .minimap {
@@ -278,6 +279,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .plate-level { font-weight: 800; font-size: 12px; color: var(--muted); margin-left: 8px; }
 .plate-tag { font-size: 11px; font-weight: 800; color: var(--muted); margin-top: -1px; }
 .plate-tag:empty { display: none; }
+.plate.alpha .plate-tag { color: #ff6a52; letter-spacing: .06em; text-transform: uppercase; }
 .hpbar { position: relative; height: 7px; margin-top: 5px; border-radius: 4px; background: rgba(0,0,0,.5); overflow: hidden; }
 .hpbar > b, .hpbar > i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
 .hpbar > b { background: #fff1c2; transition: width .7s ease-in; }
@@ -647,4 +649,5 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .craft-level.tp b { color: #9fe0ff; }
 .craft-go.learn { background: linear-gradient(#9ce3ff, #65badf); box-shadow: 0 3px 0 #317590; color: #173443; }
 @media (max-width: 640px) { .craft-top { flex-direction: column; } }
+.mon-alpha { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 6px; background: #ff4a3a; color: #2a0603; font-size: 10px; font-weight: 900; letter-spacing: .06em; text-transform: uppercase; vertical-align: middle; }
 .bag-worn { position:absolute; left:6px; top:5px; padding:1px 6px; border-radius:6px; background:#8ae6ff; color:#06202b; font-size:10px; font-weight:900; letter-spacing:.04em; text-transform:uppercase; }

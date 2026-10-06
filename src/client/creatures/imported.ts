@@ -8,9 +8,30 @@ export interface ImportedCreatureModel extends CreatureModel {
   setAnimation(name: string | null): void;
 }
 
-/** Keyframed Pokémon skeletons, with generated reactions when a source has no matching clip. */
-export function importedCreature(asset: GLTF, height: number): ImportedCreatureModel {
+/** An Alpha's eyes (DESIGN §4.6): a red glow that reads from across a field. */
+const ALPHA_EYES = new THREE.Color(1, 0.01, 0);
+
+/**
+ * Keyframed Pokémon skeletons, with generated reactions when a source has no matching clip.
+ * `glowEyes` lights up the eye materials red (an Alpha).
+ */
+export function importedCreature(asset: GLTF, height: number, opts: { glowEyes?: boolean } = {}): ImportedCreatureModel {
   const { scene, release } = instantiateAsset(asset);
+  if (opts.glowEyes) {
+    scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+        const p = mat as THREE.MeshStandardMaterial;
+        if (!p.isMeshStandardMaterial || !/eye/i.test(p.name)) continue;
+        // Light of its own over a near-black base. Kept just over the bloom threshold: brighter,
+        // the grade's highlight roll-off washes the red out to pink.
+        p.emissive.copy(ALPHA_EYES);
+        p.emissiveIntensity = 1.15;
+        p.color.setRGB(0.12, 0, 0);
+      }
+    });
+  }
   const root = new THREE.Group(), motion = new THREE.Group(), sized = new THREE.Group();
   root.add(motion); motion.add(sized); sized.add(scene);
   const mixer = new THREE.AnimationMixer(scene);

@@ -205,6 +205,8 @@ export interface Creature {
   item?: string;
   /** Trainer name of the original owner, for caught creatures. */
   ot?: string;
+  /** An Alpha (DESIGN §4.6): bigger, with glowing eyes. Stays one once caught. */
+  alpha?: boolean;
 }
 
 export function emptyBoosts(): Boosts {

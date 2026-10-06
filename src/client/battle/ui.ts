@@ -132,6 +132,7 @@ export class BattleUi {
     (p.el.querySelector('.plate-name') as HTMLElement).textContent = info.name;
     (p.el.querySelector('.plate-level') as HTMLElement).textContent = `Lv. ${info.level}`;
     (p.el.querySelector('.plate-tag') as HTMLElement).textContent = info.tag ?? '';
+    p.el.classList.toggle('alpha', info.tag === 'Alpha');
     this.setHp(k, info.hp, info.maxHp, true);
     this.setStatus(k, info.status ?? null);
   }

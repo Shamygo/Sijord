@@ -26,8 +26,8 @@ export class RemoteBattle {
     const occupied = new Set(frame.slots.map(s => key(s.pos)));
     for (const side of [0,1] as const) for (const slot of [0,1] as const) if (!occupied.has(key({side,slot}))) {this.stage.removeMirror({side,slot}); this.ui.removePlate(key({side,slot}));}
     for (const s of frame.slots) {
-      this.stage.mirror(s.pos, s.species, s.position, s.hp > 0);
-      this.ui.setPlate(key(s.pos), {...s, mine: s.pos.side === 0, portrait: s.pos.side === 0 ? this.portraits.get(s.species) : undefined});
+      this.stage.mirror(s.pos, s.species, s.position, s.hp > 0, !!s.alpha);
+      this.ui.setPlate(key(s.pos), {...s, mine: s.pos.side === 0, tag: s.pos.side === 1 && s.alpha ? 'Alpha' : undefined, portrait: s.pos.side === 0 ? this.portraits.get(s.species) : undefined});
     }
     for (const e of frame.events) if (e.seq > this.sequence) {
       this.sequence = e.seq;

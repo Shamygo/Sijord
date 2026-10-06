@@ -150,7 +150,7 @@ interface EventBase {
 export type BattleEvent = EventBase &
   (
     | { t: 'turn'; turn: number }
-    | { t: 'switch-in'; pos: Pos; uid: string; species: string; name: string; level: number; hp: number; maxHp: number; status?: MajorStatus; owner: string }
+    | { t: 'switch-in'; pos: Pos; uid: string; species: string; name: string; level: number; hp: number; maxHp: number; status?: MajorStatus; owner: string; alpha?: boolean }
     | { t: 'switch-out'; pos: Pos; uid: string }
     | { t: 'move'; pos: Pos; move: string; type: TypeName; category: MoveData['category']; targets: Pos[] }
     | { t: 'damage'; pos: Pos; amount: number; hp: number; maxHp: number; effect?: number; crit?: boolean; cause: 'move' | 'recoil' | 'status' | 'confusion' | 'seed' }
@@ -184,6 +184,9 @@ const STAT_LABEL: Record<BoostName, string> = {
 };
 
 /** Held items that do something in battle. */
+/** Stats a wild Alpha's aura raises by one stage when it comes in. */
+const ALPHA_AURA: BoostName[] = ['atk', 'def', 'spa', 'spd', 'spe'];
+
 const BERRIES: Record<string, (m: BattleMon) => number> = {
   'oran-berry': () => 10,
   'sitrus-berry': (m) => Math.floor(m.maxHp / 4),
@@ -575,6 +578,7 @@ export class Battle {
       cap: setup?.levelCap ?? 100,
       throw: 'battle',
       classMod: setup?.catchMult,
+      alpha: t.creature.alpha,
     });
     const roll = rollCatch(chance, this.rng);
     if (roll.caught) {
@@ -676,8 +680,8 @@ export class Battle {
     const isWild = this.teamSetup(mon.owner)?.ai === 'wild';
     this.emit({
       t: 'switch-in', pos, uid: mon.uid, species: mon.species.id, name: mon.name, level: mon.creature.level,
-      hp: mon.hp, maxHp: mon.maxHp, status: mon.status, owner: mon.owner,
-      text: isWild ? `A wild ${mon.name} appeared!` : announce || trainer ? `${trainer} sent out ${mon.name}!` : `Go, ${mon.name}!`,
+      hp: mon.hp, maxHp: mon.maxHp, status: mon.status, owner: mon.owner, alpha: mon.creature.alpha || undefined,
+      text: isWild && mon.creature.alpha ? `The Alpha ${mon.name} blocks your way!` : isWild ? `A wild ${mon.name} appeared!` : announce || trainer ? `${trainer} sent out ${mon.name}!` : `Go, ${mon.name}!`,
     });
   }
 
@@ -697,6 +701,11 @@ export class Battle {
   private onSwitchIn(pos: Pos): void {
     const mon = this.at(pos);
     if (!mon || mon.fainted) return;
+    // A wild Alpha (DESIGN §4.6) fights alone against two, so it comes in with every stat raised.
+    if (mon.creature.alpha && this.teamSetup(mon.owner)?.ai === 'wild') {
+      for (const stat of ALPHA_AURA) mon.boosts[stat] = Math.min(6, mon.boosts[stat] + 1);
+      this.emit({ t: 'boost', pos, stat: 'atk', amount: 1, text: `${this.label(pos)} is giving off a fearsome aura! Its stats rose!` });
+    }
     if (mon.ability === 'intimidate') {
       this.emit({ t: 'ability', pos, ability: 'intimidate', text: `${mon.name}'s Intimidate!` });
       for (const f of this.foesOf(pos)) {
@@ -1509,7 +1518,7 @@ export class Battle {
     const m = this.at(p);
     if (!m) return '';
     const setup = this.teamSetup(m.owner);
-    if (setup?.ai === 'wild') return `The wild ${m.name}`;
+    if (setup?.ai === 'wild') return m.creature.alpha ? `The Alpha ${m.name}` : `The wild ${m.name}`;
     if (setup?.ai) return `${setup.name}'s ${m.name}`;
     return m.name;
   }

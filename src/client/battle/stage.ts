@@ -189,12 +189,12 @@ export class BattleStage {
   }
 
   /** Remote players see the host's actual positions without owning its combat simulation. */
-  mirror(p: Pos, species: string, position: [number, number, number], visible: boolean): void {
+  mirror(p: Pos, species: string, position: [number, number, number], visible: boolean, alpha = false): void {
     const s = this.slots.get(key(p))!;
-    if (s.root?.userData.species !== species) {
+    if (s.root?.userData.species !== species || !!s.root?.userData.alpha !== alpha) {
       this.clearSlot(p);
-      s.model = createCreatureModel(species);
-      s.root = new THREE.Group(); s.root.add(s.model.root); s.root.userData.species = species;
+      s.model = createCreatureModel(species, { alpha });
+      s.root = new THREE.Group(); s.root.add(s.model.root); s.root.userData.species = species; s.root.userData.alpha = alpha;
       s.root.rotation.y = s.yaw; this.root.add(s.root);
     }
     const now=performance.now(),dx=position[0]-s.spot.x,dz=position[2]-s.spot.z;
@@ -225,10 +225,10 @@ export class BattleStage {
   }
 
   /** Throw a ball from `from` and pop a creature out at the slot. */
-  sendOut(p: Pos, species: string, from: THREE.Vector3): number {
+  sendOut(p: Pos, species: string, from: THREE.Vector3, alpha = false): number {
     const s = this.slots.get(key(p))!;
     this.clearSlot(p);
-    const model = createCreatureModel(species);
+    const model = createCreatureModel(species, { alpha });
     const root = new THREE.Group();
     root.add(model.root);
     root.position.copy(s.spot);

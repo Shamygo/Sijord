@@ -291,6 +291,8 @@ export class Hud {
     landmarks: { x: number; z: number; label: string }[],
     partner: { x: number; z: number } | undefined,
     gameMinutes: number,
+    /** An Alpha that has shown itself nearby, marked on the compass (DESIGN §12.5, "Alpha challenge"). */
+    alpha?: { x: number; z: number },
   ): void {
     this.fpsFrames++;
     this.fpsTime += dt;
@@ -325,10 +327,12 @@ export class Hud {
     if (active?.target) {
       place(deg(Math.atan2(player.x - active.target.x, active.target.z - player.z)), h('div.compass-mark.poi', {}, '◆'));
     }
+    if (alpha) place(deg(Math.atan2(player.x - alpha.x, alpha.z - player.z)), h('div.compass-mark.alpha', { title: 'Alpha' }, '✸'));
     this.compass.replaceChildren(...marks);
 
     const markers = landmarks.map((l) => ({ x: l.x, z: l.z, color: '#ffffff' }));
     if (active?.target) markers.push({ x: active.target.x, z: active.target.z, color: '#ffd34d' });
+    if (alpha) markers.push({ x: alpha.x, z: alpha.z, color: '#ff4a3a' });
     this.minimap.draw(player.x, player.z, player.yaw, camYaw, markers, partner);
   }
 }
