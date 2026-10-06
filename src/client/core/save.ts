@@ -51,6 +51,8 @@ export interface SaveData {
   alphas?: string[];
   /** Roaming trainers beaten: trainer id -> the (UTC) day you last beat them. */
   trainers?: Record<string, number>;
+  /** Sten, the Tether Defector: meals fed and caches he's pointed you to (`src/shared/defector.ts`). */
+  defector?: { fed: number; told: string[] };
 }
 
 export function loadSave(): SaveData | null {

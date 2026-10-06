@@ -121,7 +121,8 @@ export const ROAMING_TRAINERS: readonly RoamingTrainerDef[] = [
     },
   },
   {
-    id: 'ylva', title: 'Herder', name: 'Ylva',
+    // Ids are save keys: never rename one. (Not the Tether admins Ylva and Brann, DESIGN §14: hence the names.)
+    id: 'ylva', title: 'Herder', name: 'Inga',
     path: [[-45, -37.1], [-75, -33.7]],
     team: [
       { species: 'hjordpup', level: 10, moves: ['howl', 'bite', 'ember', 'leer'] },
@@ -173,7 +174,7 @@ export const ROAMING_TRAINERS: readonly RoamingTrainerDef[] = [
     },
   },
   {
-    id: 'brann', title: 'Hiker', name: 'Brann',
+    id: 'brann', title: 'Hiker', name: 'Torvald',
     path: [[150, 202], [178, 214]],
     team: [
       { species: 'geodude', level: 14, moves: ['bulldoze', 'defense-curl', 'rock-polish', 'tackle'] },

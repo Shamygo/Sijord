@@ -39,6 +39,8 @@ import { earnedXp, trainerLevel, TRAINER_XP } from '../../shared/trainer-level';
 import { ALPHA, ALPHA_LAIRS, ALPHA_REWARD, alphaDay, alphaPrize, currentAlphaKeys } from '../../shared/alpha';
 import { patrolAt, ROAMING_TRAINERS, TRAINER_TUNING, trainerById, trainerDay, trainerName, trainerReward, trainersBeaten, trainerSees, trainerStanding, trainerTeam, type RoamingTrainerDef, type TrainerStanding } from '../../shared/trainers';
 import { RoamingTrainer } from '../npc/roaming-trainer';
+import { BALE_NAME, DEFECTOR, DEFECTOR_INTRO, defectorState, nextMeal, pendingTip, tipDirections } from '../../shared/defector';
+import { Defector } from '../npc/defector';
 import type { ResourceNode } from '../world/resources';
 import { TOWN } from '../world/layout';
 import { waterDistance } from '../world/terrain';
@@ -163,6 +165,9 @@ export class Game {
   private alphaToast: [string, string, number] | null = null;
   /** Hearthmeadow's roaming trainers (DESIGN §12.3). */
   private trainers: RoamingTrainer[] = [];
+  /** Sten in his hay bale, and when the bale next rustles at someone walking by. */
+  private defector!: Defector;
+  private baleRustle = 0;
   /** The roaming trainer walking up to or battling this player, if any. */
   private trainerEngaged: RoamingTrainer | null = null;
   /** Seconds after a trainer battle before another trainer will spot you. */
@@ -240,6 +245,9 @@ export class Game {
     if (!save.trainers || typeof save.trainers !== 'object' || Array.isArray(save.trainers)) save.trainers = {};
     this.trainers = ROAMING_TRAINERS.map((d) => new RoamingTrainer(d, this.world));
     for (const t of this.trainers) this.scene.add(t.root);
+    save.defector = defectorState(save.defector);
+    this.defector = new Defector(this.world);
+    this.scene.add(this.defector.root);
     this.updateNpcState();
     this.scene.add(this.follower.root);
     // Herds come from the world's name, so both friends meet the same ones.
@@ -703,6 +711,12 @@ export class Game {
       const n = trainersBeaten(this.save.trainers);
       quests.push({ id: 'trainers', text: `Beat the trainers roaming Hearthmeadow (${n} of ${ROAMING_TRAINERS.length})`, done: n >= ROAMING_TRAINERS.length });
     }
+    if (this.flags.has('met-sten')) {
+      const st = defectorState(this.save.defector), found = this.save.found ?? [];
+      const tip = pendingTip(found, st.told);
+      if (tip) quests.push({ id: 'sten-tip', text: 'Find the supply crate Sten told you about', target: { x: tip.x, z: tip.z } });
+      else if (nextMeal(st, found)) quests.push({ id: 'sten', text: 'Bring Sten a Mushroom Skewer', target: { x: DEFECTOR.x, z: DEFECTOR.z } });
+    }
     this.quests = quests;
     this.hud.setQuests(quests.slice(-3));
   }
@@ -804,6 +818,8 @@ export class Game {
         return n > 1 ? `${n} ${name}s` : `a ${name}`;
       });
       this.hud.showToast(`Found ${got.join(' and ')}`, tally, 3);
+      // It may be the one Sten told you about.
+      this.refreshQuests();
     } else {
       this.beginScene();
       const speaker = DISCOVERY_LABEL[d.kind].one;
@@ -1828,6 +1844,69 @@ export class Game {
     return prize;
   }
 
+  /**
+   * Sten, the Tether Defector (DESIGN §12.4): a Mushroom Skewer buys a piece of what Team Tether
+   * is up to and the way to one of their runners' supply caches, marked on your map.
+   */
+  private async talkToDefector(): Promise<void> {
+    this.beginScene();
+    const sten = this.defector;
+    sten.lookAt(this.controller.position);
+    sten.shake();
+    sten.setPeeking(true);
+    await sleep(450);
+    const say = (text: string, speaker = DEFECTOR.name) => ({ speaker, text });
+    const st = (this.save.defector = defectorState(this.save.defector));
+    const found = this.save.found ?? [];
+    if (!this.flags.has('met-sten')) {
+      const [first, ...rest] = DEFECTOR_INTRO;
+      await this.hud.dialogue.play([say(first, BALE_NAME), ...rest.map((t) => say(t))]);
+      this.setFlag('met-sten');
+    } else {
+      const pending = pendingTip(found, st.told);
+      if (pending) {
+        this.destination = { x: pending.x, z: pending.z, label: "Sten's tip" };
+        await this.hud.dialogue.play([say(`Still haven't found that crate? It's ${tipDirections(pending)}. It's on your map.`)]);
+      } else await this.hud.dialogue.play([say('Psst. Over here. No, keep looking at the grass.')]);
+    }
+    const meal = nextMeal(st, found);
+    const bag = (this.save.bag ??= {});
+    if (!meal) await this.hud.dialogue.play([say("I've told you everything I know. Go on, before someone sees you talking to a hay bale.")]);
+    else if (bag[DEFECTOR.fee]) {
+      const n = bag[DEFECTOR.fee];
+      const [pick] = await this.hud.dialogue.play([{ ...say(`Is that... a Mushroom Skewer? For me? (You have ${n}.)`), choices: ['Give it to him', 'Not now'] }]);
+      if (pick === 0) {
+        if (!--bag[DEFECTOR.fee]) delete bag[DEFECTOR.fee];
+        st.fed++;
+        const lines = [say('*munch munch* Oh, that is the good stuff. All right. A deal is a deal.')];
+        if (meal.lore) lines.push(say(meal.lore));
+        if (meal.tip) {
+          st.told.push(meal.tip.id);
+          this.destination = { x: meal.tip.x, z: meal.tip.z, label: "Sten's tip" };
+          lines.push(say(`Tether had us map every supply crate in the vale. There's one we never got to ${tipDirections(meal.tip)}. I've marked it on your map.`));
+        }
+        await this.hud.dialogue.play(lines);
+        writeSave(this.save);
+        this.refreshQuests();
+        if (meal.tip) this.hud.showToast('Sten marked a supply cache on your map', 'Open the map (M) to see it', 3);
+      } else await this.hud.dialogue.play([say("Fine. I'll just sit here. Smelling it.")]);
+    } else if (bag['wild-mushroom']) await this.hud.dialogue.play([say("Raw mushrooms? I've eaten nothing but raw mushrooms for a week. Grill them! Three on a stick, over a campfire.")]);
+    else await this.hud.dialogue.play([say('No food? Then you never saw me. A Mushroom Skewer. Cooked. Please.')]);
+    sten.setPeeking(false);
+    this.endScene();
+  }
+
+  /** The bale rustles when someone walks close and Sten hasn't come out to talk. */
+  private updateDefector(dt: number): void {
+    const p = this.controller.position;
+    const near = [p, ...[...this.partners.values()].map((f) => f.remote.root.position)].some((q) => Math.hypot(q.x - DEFECTOR.x, q.z - DEFECTOR.z) < DEFECTOR.notice);
+    if (near && !this.talking && (this.baleRustle -= dt) <= 0) {
+      this.defector.shake();
+      this.baleRustle = 2.2 + Math.random() * 2.5;
+    }
+    this.defector.update(dt, p);
+  }
+
   /** Trainers on their beats, and the ones walking up to or battling a friend. */
   private updateTrainers(dt: number): void {
     this.trainerGrace = Math.max(0, this.trainerGrace - dt);
@@ -2076,7 +2155,7 @@ export class Game {
       money: this.save.money ?? 0,
       meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },
       throwing: { aiming: this.aiming, ball: this.aimBall, balls: Object.fromEntries(this.throwKinds().map((b) => [b, this.save.bag?.[b] ?? 0])), treats: this.wild.treats.length, intercept: this.intercept ? displayName(this.intercept.m.creature) : null, inFlight: this.throws.busy, dropped: this.throws.droppedCount, lastCatch: this.lastCatch },
-      trainers: this.trainers.filter((t) => t.visible).map((t) => ({ id: t.def.id, position: [t.position.x, t.position.z].map((v) => Math.round(v * 10) / 10), patrolling: t.patrolling, standing: trainerStanding(this.save.trainers, t.def.id, trainerDay(Date.now())) })), trainerEngaged: this.trainerEngaged?.def.id ?? null,
+      trainers: this.trainers.filter((t) => t.visible).map((t) => ({ id: t.def.id, position: [t.position.x, t.position.z].map((v) => Math.round(v * 10) / 10), patrolling: t.patrolling, standing: trainerStanding(this.save.trainers, t.def.id, trainerDay(Date.now())) })), trainerEngaged: this.trainerEngaged?.def.id ?? null, defector: { met: this.flags.has('met-sten'), ...defectorState(this.save.defector) }, destination: this.destination,
       wildCreatures: this.wild.creatures.map((m) => ({ species: m.creature.species, level: m.creature.level, alpha: m.alpha ? true : undefined, state: m.state, alert: Math.round(m.alert), attack: m.attack?.phase, position: [m.mover.pos.x, m.mover.pos.z].map((v) => Math.round(v * 10) / 10) })) });
   }
 
@@ -2178,13 +2257,14 @@ export class Game {
       const nearProf = pos.distanceTo(this.professor.position) < TALK_RADIUS;
       const nearRival = this.rival.visible && pos.distanceTo(this.rival.position) < TALK_RADIUS;
       const nearTrainer = !nearProf && !nearRival ? this.trainers.find((t) => t.visible && t.patrolling && pos.distanceTo(t.position) < TALK_RADIUS) ?? null : null;
-      const pickup = !nearProf && !nearRival && !nearTrainer && !this.aiming ? this.throws.nearestPickup(pos) : null;
-      const find = !nearProf && !nearRival && !nearTrainer && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
-      const home = !nearProf && !nearRival && !nearTrainer && !pickup && !find ? this.nearHome(pos) : null;
-      const shop = !nearProf && !nearRival && !nearTrainer && !pickup && !find && !home ? this.shopNear(pos) : null;
-      const station = !nearProf && !nearRival && !nearTrainer && !pickup && !find && !home && !shop ? this.stationsNear(pos)[0] ?? null : null;
-      const wildMon = !nearProf && !nearRival && !nearTrainer ? this.wild.nearestEngageable(pos) : null;
-      const free = !nearProf && !nearRival && !nearTrainer && !pickup && !find && !home && !shop && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
+      const nearBale = !nearProf && !nearRival && !nearTrainer && Math.hypot(pos.x - DEFECTOR.x, pos.z - DEFECTOR.z) < TALK_RADIUS + 0.9;
+      const pickup = !nearProf && !nearRival && !nearTrainer && !nearBale && !this.aiming ? this.throws.nearestPickup(pos) : null;
+      const find = !nearProf && !nearRival && !nearTrainer && !nearBale && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
+      const home = !nearProf && !nearRival && !nearTrainer && !nearBale && !pickup && !find ? this.nearHome(pos) : null;
+      const shop = !nearProf && !nearRival && !nearTrainer && !nearBale && !pickup && !find && !home ? this.shopNear(pos) : null;
+      const station = !nearProf && !nearRival && !nearTrainer && !nearBale && !pickup && !find && !home && !shop ? this.stationsNear(pos)[0] ?? null : null;
+      const wildMon = !nearProf && !nearRival && !nearTrainer && !nearBale ? this.wild.nearestEngageable(pos) : null;
+      const free = !nearProf && !nearRival && !nearTrainer && !nearBale && !pickup && !find && !home && !shop && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
       let gather = free ? this.nearestGather(pos) : null;
       const waterAt = free ? this.nearWater(pos) : null;
       let water = waterAt && this.waterPrompt(waterAt) ? waterAt : null;
@@ -2204,6 +2284,7 @@ export class Game {
       else if (nearProf) this.hud.setPrompt(`Talk to ${this.professor.name}`);
       else if (nearRival) this.hud.setPrompt(`Talk to ${this.rival.name}`);
       else if (nearTrainer) this.hud.setPrompt(`Talk to ${nearTrainer.name}`);
+      else if (nearBale) this.hud.setPrompt(this.flags.has('met-sten') ? `Talk to ${DEFECTOR.name}` : `Look at the ${BALE_NAME.toLowerCase()}`);
       else if (pickup) this.hud.setPrompt(`Pick up the ${ITEMS[pickup.ball]?.name ?? 'ball'}`);
       else if (find) this.hud.setPrompt(DISCOVERY_LABEL[find.def.kind].prompt);
       else if (home) this.hud.setPrompt(`Rest at ${home.id === 'p1-house' ? 'home' : 'your friend’s house'}`);
@@ -2226,6 +2307,7 @@ export class Game {
         else if (nearProf) void this.talkToProfessor();
         else if (nearRival) void this.talkToRival();
         else if (nearTrainer) void this.talkToTrainer(nearTrainer);
+        else if (nearBale) void this.talkToDefector();
         else if (pickup) this.pickupBall(pickup.id);
         else if (find) void this.openDiscovery(find);
         else if (home) void this.restAtHome();
@@ -2279,6 +2361,7 @@ export class Game {
     this.professor.update(dt);
     this.rival.update(dt);
     this.updateTrainers(dt);
+    this.updateDefector(dt);
     const friends = [...this.partnerWild.values()];
     this.wild.setRemoteBusy(new Set(friends.flatMap((f) => f.busy)));
     this.wild.setFriendCells(friends.flatMap((f) => f.cells));
