@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { CatchRoll } from '../../shared/battle/catch';
 import { resolveCircle } from '../core/collision';
-import { disposeBall, makeBall, Particles } from '../battle/fx';
+import { disposeBall, makeBall, makeTreat, Particles } from '../battle/fx';
 import type { World } from '../world/types';
 import { BALL_FLIGHT, canCatch, groundNormal, newBall, predictArc, stepBall, type BallState, type StepEnv, type Vec3 } from './ball-flight';
 import type { WildCreature } from './wild';
@@ -12,6 +12,10 @@ import type { WildCreature } from './wild';
  * shrinks into the ball, it drops and shakes, then a sparkle or a burst), missed balls lying in
  * the grass until picked up, and replicas of the partner's throws.
  */
+
+/** Thrown like a ball, but it feeds instead of catching (DESIGN §5.3). */
+export const TREAT_ITEM = 'treat';
+export const isTreat = (item: string) => item === TREAT_ITEM;
 
 /** Seconds a missed ball stays on the ground before it's lost. */
 export const DROPPED_BALL_LIFE = 150;
@@ -36,6 +40,8 @@ export interface ThrowDeps {
   onRest(ball: string, at: Vec3): void;
   /** A local ball was lost in deep water. */
   onSink(ball: string): void;
+  /** A local Treat hit a creature or came to rest (`m` null): someone may come and eat it. */
+  onTreat(m: WildCreature | null, at: Vec3): void;
 }
 
 interface Flight {
@@ -255,7 +261,7 @@ export class OverworldThrows {
 
   /** Throw a ball. `delay` waits for the arm to come over; `local` balls can catch and be picked up. */
   launch(o: { id: number; ball: string; from: Vec3; vel: Vec3; delay: number; local: boolean; key?: string }): void {
-    const mesh = makeBall(o.ball);
+    const mesh = isTreat(o.ball) ? makeTreat() : makeBall(o.ball);
     mesh.visible = false;
     mesh.position.set(o.from.x, o.from.y, o.from.z);
     this.root.add(mesh);
@@ -346,6 +352,14 @@ export class OverworldThrows {
           if (i >= 0) {
             const m = targets[i];
             const at = { x: f.state.x, y: f.state.y, z: f.state.z };
+            if (isTreat(f.ball)) {
+              // A Treat bounces off its nose and drops at its feet.
+              this.particles.emit(new THREE.Vector3(at.x, at.y, at.z), 10, '#e8a548', { speed: 1.4, life: 0.45, size: 0.14, up: 1 });
+              this.removeFlight(f);
+              this.deps.onTreat(m, at);
+              ended = true;
+              break;
+            }
             const roll = this.deps.onHit(m, f.ball, f.id, at);
             this.removeFlight(f);
             this.startSequence(m, f.ball, roll, new THREE.Vector3(at.x, at.y, at.z), f.id);
@@ -360,7 +374,11 @@ export class OverworldThrows {
           if (f.local) this.deps.onSink(f.ball);
           ended = true;
         } else if (r === 'rest') {
-          if (f.local) {
+          if (f.local && isTreat(f.ball)) {
+            // Lies where it landed as bait (the wild manager draws it from here on).
+            this.removeFlight(f);
+            this.deps.onTreat(null, { x: f.state.x, y: f.state.y, z: f.state.z });
+          } else if (f.local) {
             this.flights = this.flights.filter((x) => x !== f);
             f.mesh.position.set(f.state.x, f.state.y, f.state.z);
             this.starMat ??= new THREE.SpriteMaterial({ map: starTexture(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });

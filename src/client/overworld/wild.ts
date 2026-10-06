@@ -4,6 +4,7 @@ import { Rng } from '../../shared/battle/rng';
 import type { Creature } from '../../shared/battle/types';
 import { MOVES } from '../../shared/data/moves';
 import { SPECIES } from '../../shared/data/species';
+import { disposeBall, makeTreat } from '../battle/fx';
 import { createCreatureModel, creatureModelReady, type CreatureModel } from '../creatures';
 import { MESAS, POND, RIVER_IN, RIVER_OUT, TOWN, distToPolyline, lakeDist } from '../world/layout';
 import type { World } from '../world/types';
@@ -22,7 +23,9 @@ export type WildState = 'graze' | 'wander' | 'flee' | 'watch' | 'charge' | 'batt
   /** Broke out of a ball and is backing away, wary. */
   | 'startle'
   /** Furious after a failed catch: charges the trainer directly with telegraphed lunges. */
-  | 'attack';
+  | 'attack'
+  /** Going to, or eating, a thrown Treat. */
+  | 'eat';
 
 /** A charge at the trainer (DESIGN §5.3): close in, wind up, lunge in a straight line, recover. */
 export interface WildAttack {
@@ -38,6 +41,33 @@ export interface WildAttack {
   dx: number;
   dz: number;
   hit: boolean;
+}
+
+/** Thrown Treats (DESIGN §5.3): bait that calms a furious creature or keeps a calm one busy. */
+export const TREAT = {
+  /** A creature this close to where it lands comes to eat it. */
+  lure: 7,
+  /** Seconds spent eating once it's there. */
+  eat: 8,
+  /** Seconds an untouched Treat lies there before it's lost. */
+  life: 25,
+  /** Calm afterwards: it won't turn on the trainer again for this long. */
+  calm: 30,
+};
+
+/** A Treat lying on the ground. */
+export interface Bait {
+  x: number;
+  y: number;
+  z: number;
+  life: number;
+  /** Seconds of eating left. */
+  left: number;
+  eater: WildCreature | null;
+  /** The eater has reached it (and how long it has been trotting over). */
+  at: boolean;
+  trot: number;
+  mesh: THREE.Group;
 }
 
 /** Tunables for a creature charging the trainer. */
@@ -81,6 +111,8 @@ export interface WildCreature {
   key?: string;
   /** A friend is battling or catching this one: hidden here until they're done. */
   remoteBusy?: boolean;
+  /** The Treat it's going to or eating. */
+  food?: Bait;
 }
 
 interface Herd {
@@ -278,6 +310,8 @@ export class WildManager {
   private emptied = new Set<string>();
   /** Cells a friend has a herd out in, with the time window it was rolled in. */
   private friendCells = new Map<string, number>();
+  /** Treats lying on the ground. */
+  private baits: Bait[] = [];
 
   private clock: () => number;
   private modelReady: (species: string) => boolean;
@@ -301,6 +335,7 @@ export class WildManager {
   clear(): void {
     for (const h of this.herds) for (const m of [...h.members]) this.removeMember(m);
     this.herds = [];
+    for (const b of [...this.baits]) this.removeBait(b);
   }
 
   update(dt: number, player: THREE.Vector3, playerSpeed: number, sprinting: boolean, paused: boolean): void {
@@ -312,6 +347,7 @@ export class WildManager {
       const cut = this.clock() - SHARED_SPAWN.shareMs;
       this.recentTaken = this.recentTaken.filter((t) => t.at >= cut);
     }
+    this.updateBaits(dt, paused);
     for (const h of this.herds) {
       // The herd's centre drifts slowly so the group roams.
       h.cx += (this.rng.next() - 0.5) * dt * 0.6;
@@ -357,7 +393,7 @@ export class WildManager {
       if (temperament === 'skittish' && sprinting && dist < 12 && m.state !== 'flee') {
         m.state = 'flee';
         m.timer = 2.5 + this.rng.next() * 1.5;
-      } else if ((temperament === 'territorial' || temperament === 'aggressive') && dist < 9 && m.calm <= 0 && m.state !== 'charge') {
+      } else if ((temperament === 'territorial' || temperament === 'aggressive') && dist < 9 && m.calm <= 0 && m.state !== 'charge' && m.state !== 'eat') {
         m.state = 'watch';
         m.tension += dt * (temperament === 'aggressive' ? 2 : 1);
         if (m.tension > 2.2 && dist < 6.5) m.state = 'charge';
@@ -409,6 +445,9 @@ export class WildManager {
         if (paused) m.mover.idle(dt, world);
         else m.mover.steer(dt, player.x, player.z, run * 1.1, world, 1.0);
         break;
+      case 'eat':
+        this.eat(m, dt, walk, paused);
+        break;
       case 'wander': {
         const rem = m.mover.steer(dt, m.tx, m.tz, walk, world, 0.3);
         m.timer -= dt;
@@ -433,8 +472,128 @@ export class WildManager {
     }
     m.root.position.copy(m.mover.pos);
     m.root.rotation.y = m.mover.yaw;
+    // Nibbling: dips its head to the Treat and back up.
+    const food = m.state === 'eat' ? m.food : undefined;
+    m.root.rotation.x = food && food.eater === m && food.at ? 0.1 * (1 - Math.cos(food.left * 9)) : 0;
     m.model.update(dt, m.mover.speed);
     void playerSpeed;
+  }
+
+  /**
+   * A Treat landed at `at`, or bounced off `hit`. The creature it hit, else a furious one nearby,
+   * else the nearest within reach, comes to eat it: an angry one calms down first (but stays
+   * wary), a calm one is too busy to notice the trainer. Returns the eater, if any yet, and
+   * whether it was furious (charging the trainer) a moment ago.
+   */
+  treat(at: { x: number; y: number; z: number }, hit: WildCreature | null): { eater: WildCreature | null; calmed: boolean } {
+    const x = hit ? hit.mover.pos.x : at.x;
+    const z = hit ? hit.mover.pos.z : at.z;
+    const mesh = makeTreat();
+    mesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
+    const y = Math.max(this.world.heightAt(x, z), this.world.waterLevel) + 0.02;
+    mesh.position.set(x, y, z);
+    this.root.add(mesh);
+    const bait: Bait = { x, y, z, life: TREAT.life, left: TREAT.eat, eater: null, at: false, trot: 0, mesh };
+    this.baits.push(bait);
+    const eater = hit && this.canEat(hit) ? hit : this.pickEater(bait);
+    const calmed = !!eater && (eater.state === 'attack' || eater.state === 'charge');
+    if (eater) this.startEating(eater, bait);
+    return { eater, calmed };
+  }
+
+  /** Treats on the ground (tests and the text view). */
+  get treats(): readonly Bait[] {
+    return this.baits;
+  }
+
+  private canEat(m: WildCreature): boolean {
+    return m.state !== 'battle' && m.state !== 'ball' && m.state !== 'gone' && m.state !== 'flee' && m.state !== 'eat' && !m.remoteBusy;
+  }
+
+  private pickEater(b: Bait): WildCreature | null {
+    let best: WildCreature | null = null;
+    let score = Infinity;
+    for (const m of this.creatures) {
+      if (!this.canEat(m)) continue;
+      const d = Math.hypot(m.mover.pos.x - b.x, m.mover.pos.z - b.z);
+      if (d > TREAT.lure) continue;
+      // Something furious goes for it first: that's what the Treat was thrown for.
+      const s = d - (m.state === 'attack' || m.state === 'charge' ? 100 : 0);
+      if (s < score) {
+        score = s;
+        best = m;
+      }
+    }
+    return best;
+  }
+
+  private startEating(m: WildCreature, b: Bait): void {
+    if (m.state === 'attack' || m.state === 'charge' || m.state === 'watch') this.calmDown(m);
+    m.state = 'eat';
+    m.food = b;
+    m.tension = 0;
+    b.eater = m;
+    b.at = false;
+    b.trot = 0;
+  }
+
+  private eat(m: WildCreature, dt: number, walk: number, paused: boolean): void {
+    const b = m.food;
+    if (!b || b.eater !== m || !this.baits.includes(b)) {
+      m.food = undefined;
+      m.state = 'graze';
+      m.timer = 2;
+      return;
+    }
+    const reach = m.model.radius + 0.3;
+    const d = Math.hypot(b.x - m.mover.pos.x, b.z - m.mover.pos.z);
+    if (paused) m.mover.idle(dt, this.world);
+    else if (!b.at && d > reach && b.trot < 6) {
+      // Trots over to it (and gives up on a straight line if something is in the way).
+      b.trot += dt;
+      m.mover.steer(dt, b.x, b.z, walk * 1.8, this.world, reach * 0.8);
+    } else {
+      b.at = true;
+      m.mover.idle(dt, this.world);
+      m.mover.face(dt * 3, Math.atan2(b.x - m.mover.pos.x, b.z - m.mover.pos.z));
+      b.left -= dt;
+      const k = Math.max(0, b.left / TREAT.eat);
+      b.mesh.scale.setScalar(Math.max(0.001, 0.35 + 0.65 * k));
+    }
+    if (b.left <= 0) {
+      this.removeBait(b);
+      m.food = undefined;
+      m.state = 'graze';
+      m.timer = 3;
+      m.calm = Math.max(m.calm, TREAT.calm);
+      m.herd.cx = m.mover.pos.x;
+      m.herd.cz = m.mover.pos.z;
+      m.model.play('happy');
+    }
+  }
+
+  /** Untouched Treats draw in whoever wanders close, and are lost after a while. */
+  private updateBaits(dt: number, paused: boolean): void {
+    for (const b of [...this.baits]) {
+      // Its eater ran off, got caught or was pulled into a battle: it's up for grabs again.
+      if (b.eater && (b.eater.state !== 'eat' || b.eater.food !== b)) b.eater = null;
+      if (b.eater) continue;
+      if (!paused) b.life -= dt;
+      if (b.life <= 0) {
+        this.removeBait(b);
+        continue;
+      }
+      if (b.life < 1) b.mesh.scale.setScalar(Math.max(0.001, b.life));
+      const m = paused ? null : this.pickEater(b);
+      if (m) this.startEating(m, b);
+    }
+  }
+
+  private removeBait(b: Bait): void {
+    this.baits = this.baits.filter((x) => x !== b);
+    if (b.eater?.food === b) b.eater.food = undefined;
+    b.mesh.removeFromParent();
+    disposeBall(b.mesh);
   }
 
   private attack(m: WildCreature, dt: number, player: THREE.Vector3, dist: number, toPlayer: number, run: number, paused: boolean): void {
@@ -847,6 +1006,9 @@ export class WildManager {
   }
 
   private removeMember(m: WildCreature): void {
+    // Despawned mid-meal: the Treat is up for grabs again.
+    if (m.food?.eater === m) m.food.eater = null;
+    m.food = undefined;
     this.root.remove(m.root);
     m.model.dispose();
     m.herd.members = m.herd.members.filter((x) => x !== m);

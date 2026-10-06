@@ -74,6 +74,14 @@ Things about the code and testing that aren't obvious from reading it. Most of t
 - Menu checks: read `document.querySelector('.menu').classList.contains('show')` and the `.menu-tab.on` text. At swiftshader speeds, wait at least 3 s after key presses.
 - Compare screenshots against `docs/reference/art-reference.png` for any visual change.
 
+### Faster probes (2026-10-06)
+
+- In the cloud container Playwright is at `/opt/node22/lib/node_modules/playwright/index.mjs` (import it by that path from a scratch script) and Chromium at `/opt/pw-browsers/chromium-1194/chrome-linux/chrome`.
+- Skip the creator by injecting a save before loading: `localStorage.setItem('sijord.save.v1', JSON.stringify({ room, flags: ['met-professor', 'got-starter', 'got-balls'], bag: {...}, profile: { name, playerClass: 'ranger', appearance: {...} } }))`, then click **Continue** and wait for `window.sijord?.avatar?.root`. With saves injected, two contexts in one browser worked for a two-player check (host and guest in the same `room`, both on `?relay=ws://127.0.0.1:8090`).
+- Frames come at 0.2-1 fps, so poll with `page.waitForFunction` (for example until `window.sijord.aiming` or `window.sijord.battle`) instead of fixed waits, and set `window.sijord.debugTimeScale` to 4-5 while a ball or animation plays out.
+- Useful hooks: `debugTeleport(x, z, yaw)`, `debugGiveParty([[species, level], ...])`, `debugSpawnWild(species, level, dist)`, `debugWildBattle`, `debugAimAt(x, y, z)` (puts the crosshair on a point), `debugCatch = { caught, reaction }` (forces overworld catch outcomes), and `wild`, `controller`, `vitals`, `aiming`. A good open-field spot just north of the gate is (1.2, -232).
+- `pkill -f "<pattern>"` kills its own shell when the pattern appears in the same command line. Use a bracket, for example `pkill -f "probe[.]mjs"`.
+
 ## Smaller known issues (as of PR #3)
 
 - On the minimap and full map, the river and lake render as blocky dark blue.

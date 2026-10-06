@@ -33,10 +33,13 @@ function wrapAngle(a: number): number {
 
 /**
  * True when the creature hasn't noticed the trainer: it is calmly grazing or wandering, isn't
- * still alert from an earlier scare, and the trainer is behind it (or sneaking).
+ * still alert from an earlier scare, and the trainer is behind it (or sneaking). One eating a
+ * Treat counts as unaware from any side, unless it is still alert.
  */
 export function isUnaware(i: AwarenessInput): boolean {
   if (i.alert > 0) return false;
+  // Busy with a Treat: it doesn't look up, whichever way it faces.
+  if (i.state === 'eat') return true;
   if (i.state !== 'graze' && i.state !== 'wander') return false;
   if (i.crouched) return true;
   const toTrainer = Math.atan2(i.px - i.x, i.pz - i.z);

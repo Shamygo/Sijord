@@ -18,6 +18,14 @@ export class Follower {
   private idleTime = 0;
   /** Showing a stand-in while the species' real model is still downloading. */
   private provisional = false;
+  /** Where it's rushing to intercept a charging wild creature, instead of following. */
+  private rush: THREE.Vector3 | null = null;
+
+  /** Sprint at a charging wild creature (DESIGN §5.3 interception); null goes back to following. */
+  rushAt(target: THREE.Vector3 | null): void {
+    if (!target) this.rush = null;
+    else (this.rush ??= new THREE.Vector3()).copy(target);
+  }
 
   setSpecies(id: string | null): void {
     if (id === this.species) return;
@@ -64,9 +72,16 @@ export class Follower {
     if (!this.model || !this.visible) return;
     const size = this.model.radius;
     const [tx, tz] = this.slot(leader, leaderYaw, size);
-    if (!this.placed || this.mover.pos.distanceTo(leader) > 26) {
+    if (!this.placed || (!this.rush && this.mover.pos.distanceTo(leader) > 26)) {
       this.mover.place(tx, tz, world, leaderYaw);
       this.placed = true;
+    }
+    if (this.rush) {
+      this.mover.steer(dt, this.rush.x, this.rush.z, 13, world, 0.2);
+      this.root.position.copy(this.mover.pos);
+      this.root.rotation.y = this.mover.yaw;
+      this.model.update(dt, this.mover.speed);
+      return;
     }
     const far = this.mover.pos.distanceTo(leader);
     // Keep up with a sprint, and hurry when it falls behind.

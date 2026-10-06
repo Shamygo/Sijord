@@ -32,6 +32,10 @@ export const ITEMS: Record<string, ItemInfo> = {
     id: 'bandage', name: 'Potion', category: 'items', icon: '🩹', sprite:'potion', heal:20,
     description: 'A spray medicine that restores 20 HP to one Pokémon. In a pinch it also patches up a trainer (30 HP).',
   },
+  'treat': {
+    id: 'treat', name: 'Treat', category: 'items', icon: '🍪', sprite: 'lava-cookie',
+    description: 'A crumbly honey biscuit Pokémon can\'t resist. Throw it while aiming: an angry Pokémon calms down to eat it, and a calm one is too busy eating to notice you.',
+  },
   'poke-ball': {
     id: 'poke-ball', name: 'Poke Ball', category: 'balls', icon: '◓', sprite:'poke-ball',
     description: 'A standard ball. Works best on Pokemon weakened in battle and close to your level.',

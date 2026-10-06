@@ -1,22 +1,36 @@
 # Sijord
 
-A two-player co-op, Palworld-style, third-person 3D open world Pokemon game in the browser (TypeScript + Three.js). Owner: Simon (GitHub `Shamygo`), who plays it with a friend at https://shamygo.github.io/Sijord/.
+A two-player co-op, Palworld-style, third-person 3D open world Pokémon game in the browser (TypeScript + Three.js). Live at https://shamygo.github.io/Sijord/, where the two friends play it together.
 
-## Latest user feedback and completed polish — read first
+## Read this first (updated 2026-10-06)
 
-**Read [docs/POLISH_HANDOFF.md](docs/POLISH_HANDOFF.md) before changing this build.** It records the latest direct user requests, why each change was made, exact implementation paths, validation, controls and remaining gaps. It supplements the older vision and supersedes older procedural-character/default-Red/boss-only-co-op assumptions where the user explicitly changed those requests. The user specifically asked that returning Claude see these notes and know exactly what changed and why.
+You are probably a fresh session with none of the earlier context. Everything you need is in this repo:
 
-**Newest feedback:** the trainer moonwalked, repeated jumping felt like a slippery car/bhop, and WASD snapped the controlled Pokémon body to its new direction. Distance-driven, rig-calibrated strides with support-foot stabilization, short landing recovery/air braking, and smooth local/remote action-battle movement/facing address these requests. Details and reproduction are in the movement addendum of POLISH_HANDOFF.
+1. **This file**: who's who, the direction you've been given, how to work and ship.
+2. **[docs/HANDOFF.md](docs/HANDOFF.md)**: start with its "Start here" section. Then read "Current state" for what's built (with file paths) and "Next up" for where to pick up.
+3. **[docs/VISION.md](docs/VISION.md)**: Simon's own spec and feedback, verbatim. It outranks every other doc.
+4. **[docs/DEV_NOTES.md](docs/DEV_NOTES.md)** before touching rendering, collisions, input, the rig or co-op. It also covers how to play-test in a cloud container.
+5. **[docs/POLISH_HANDOFF.md](docs/POLISH_HANDOFF.md)**: ChatGPT's notes from its 2026-10-05 polish pass (Rei, imported Pokémon models, menus, climbing, movement, both battle modes). Read it before changing any of those areas.
 
-The current build uses Rei from Legends: Arceus by default, with eight **Quaternius CC0 clips retargeted to Rei**, not original Arceus motion files. Red and custom trainers remain selectable. Imported Pokémon/material lighting, polished/animated menus, the rebuilt explorer, empty-party onboarding, slope/ladder climbing and a substantially expanded Bramblewick are implemented. Both tactical free-roam and action/dodge co-op battle modes remain available so the user and friend can compare them. Keep the public game playable and preserve existing save IDs/progression.
+Always `git fetch origin main` and start from a fresh `main`. Other people push to it, ChatGPT included.
 
-The user-supplied latest reference images are now in [docs/reference/2026-10-05](docs/reference/2026-10-05). Compare the Arceus trainer/landscape/town references and the supplied dark/cyan UI references directly; screenshots of the implemented polish are in [docs/screenshots/2026-10-05-polish](docs/screenshots/2026-10-05-polish). This is a meaningful improvement, not a finished match for Arceus town/animation detail. Do not mistake the model catalogue for implemented encounters, decorative shops for functioning commerce, or retargeted clips for original game clips.
+## People and permissions
 
-**The visual target:** [docs/reference/art-reference.png](docs/reference/art-reference.png) is Simon's art reference. Open it and look at it before any graphics, animation, HUD or world work, and compare your screenshots against it. The game should look like that image. A written breakdown is in [HANDOFF.md](docs/HANDOFF.md#the-art-reference).
+- **Simon** (GitHub `Shamygo`) owns the game and the repo, plays it with a friend, and sends feedback as short messages.
+- **Jordan** (GitHub `jiweep`) works on the game with Simon and runs the Claude project that does most of the building. Jordan asked Claude to treat Sijord as its own project.
+- **Merging:** Jordan said "always merge". Merge your own PRs into `main` once typecheck, tests and build pass, without asking. Every push to `main` redeploys the live site, so keep `main` playable.
+- **Ask first** before closing or merging a PR someone else opened. PR #1, an obsolete 2D prototype, is still open: closing it needs Jordan's or Simon's OK.
+- **ChatGPT** also ships to `main` when Claude's usage runs out (PRs #8-#10). Jordan trusts Claude's judgement more: rework ChatGPT's choices on merit, as long as the result still follows the direction below.
 
-**Start here:** [docs/HANDOFF.md](docs/HANDOFF.md) has the current state, known gaps, open questions and what's next. Simon's own spec and feedback are in [docs/VISION.md](docs/VISION.md), and they outrank every other doc.
+## Direction (Simon's and Jordan's requests, newest last)
 
-How the project got here (every thread and decision) is in [HANDOFF.md](docs/HANDOFF.md#project-history). Other docs: [DESIGN.md](docs/DESIGN.md) (all systems), [ROADMAP.md](docs/ROADMAP.md) (milestones M1 to M14), [DEX_PLAN.md](docs/DEX_PLAN.md) (species), [DEV_NOTES.md](docs/DEV_NOTES.md) (code gotchas and how to play-test). Read DEV_NOTES before touching rendering, collisions, input, the rig or co-op.
+- **Hard game.** Doable but difficult. Don't hand the player power: strong abilities come from skill trees and effort, supplies are scarce, prices are stingy.
+- **Looks:** match the reference images closely and look polished, "non amateur". The targets are [docs/reference/art-reference.png](docs/reference/art-reference.png) and the Legends: Arceus references in [docs/reference/2026-10-05](docs/reference/2026-10-05). Jordan also shared a close-up of an anime trainer in chat (not in the repo) and asked for that level of polish up close. Screenshot the game, compare side by side, and say honestly what still doesn't match.
+- **Movement:** fluid like Breath of the Wild, with varied movement and climbing. The earlier running felt stiff.
+- **Models:** official Pokémon models and Rei from Legends: Arceus, self-hosted, were explicitly requested (see [docs/MODEL_ASSETS.md](docs/MODEL_ASSETS.md)). The 1,322-model catalogue is a library, not implemented encounters. New species map to existing models. Environment art stays procedural.
+- **Both battle modes** (tactical turn-based and action/dodge) stay available so the two friends can compare them. Don't collapse them into one without new feedback.
+- **Co-op is the core.** Every feature should work with two players in one world.
+- Keep existing save IDs and progression working: old saves must load.
 
 ## Commands
 
@@ -27,15 +41,23 @@ npm run typecheck
 npm test
 npm run build         # dist/, deployed to GitHub Pages
 npm run build:single  # dist-single/sijord.html, one-file code build (imported art requires internet)
+npm run relay         # local co-op relay on :8090; open pages with ?relay=ws://127.0.0.1:8090
 ```
 
-Run `npm run typecheck && npm test && npm run build` before pushing. CI runs the tests before every deploy.
+Run `npm run typecheck && npm test && npm run build` before pushing.
+
+## How to ship
+
+- Work on a `claude/<topic>` branch, then open a PR into `main` and merge it. `gh pr create` fails here (GraphQL 403). Use the REST API instead:
+  - Open: `gh api repos/Shamygo/Sijord/pulls -f title=... -f head=<branch> -f base=main -F body=@body.md`
+  - Merge: `gh api -X PUT repos/Shamygo/Sijord/pulls/N/merge -f merge_method=merge`
+- **No CI runs on PRs.** Only a push to `main` runs `.github/workflows/pages.yml` (asset check, tests, build, deploy), so validate locally first. After merging, check that the "Deploy to GitHub Pages" run for the merge commit succeeds and the site returns 200.
+- Verify in a real browser, not just in tests. Headless Chromium in the cloud container renders at 0.2-1 fps. Scripted probes must poll for state (`page.waitForFunction`) rather than wait fixed times, and raise `window.sijord.debugTimeScale`. Dev builds expose `window.sijord` with `debugTeleport`, `debugGiveParty`, `debugSpawnWild`, `debugWildBattle`, `debugAimAt`, `debugCatch` and more. `render_game_to_text()` dumps state in every build. See DEV_NOTES.
+- When something lands, update "Current state" and "Next up" in docs/HANDOFF.md and the milestone status in docs/ROADMAP.md. The next session only knows what the repo says.
+- Never put model names or IDs in commits, PRs or code.
 
 ## Rules
 
-- Every push to `main` redeploys the live site that Simon and his friend play. Simon is fine with Claude merging PRs to `main`. Keep `main` playable.
-- The game must be **hard**. Don't hand the player power; strong abilities come from skill trees and effort.
-- Visual and animation quality is judged against the reference image (`docs/reference/art-reference.png`) and Legends Arceus. Every graphics change should be checked by screenshotting the game and comparing it side by side with the reference. Say honestly what still doesn't match.
-- Environment art remains procedural. The user explicitly requested Pokémon model assets, Red from Pokémon Masters, and then Rei from Legends: Arceus on 2026-10-05, including public hosting. See docs/MODEL_ASSETS.md for sources, animation gaps, save compatibility and model loading.
-- Keep canon names consistent (see HANDOFF.md). World axes: north = +Z, east = -X.
-- When a milestone lands, update the "Current state" and "Next up" sections of docs/HANDOFF.md and the milestone status in docs/ROADMAP.md.
+- World axes: north = +Z, east = -X. Keep canon names consistent (HANDOFF "Canon").
+- Visual and animation work is judged against the reference images and Legends: Arceus. Check every graphics change with a screenshot.
+- Keep replies to Simon and Jordan short and plain: what changed, how to try it, what's still off, and any decision only they can make.
