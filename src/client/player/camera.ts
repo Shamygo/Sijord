@@ -180,6 +180,12 @@ export class ThirdPersonCamera {
     this.pitch = this.targetPitch = clamp(pitch, this.tuning.minPitch, this.tuning.maxPitch);
   }
 
+  /** Ease round to look along `yaw` (scripted scenes, e.g. a trainer walking up to challenge you). */
+  turnTo(yaw: number): void {
+    this.targetYaw = this.yaw + wrapAngle(yaw - this.yaw);
+    this.idleMouse = 0;
+  }
+
   /** Over-the-shoulder aiming view for throws (eased in and out). */
   setAim(on: boolean): void {
     this.aimTarget = on ? 1 : 0;

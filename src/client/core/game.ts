@@ -6,7 +6,7 @@ import { levelCap } from '../../shared/battle/stats';
 import type { Creature } from '../../shared/battle/types';
 import { moveData } from '../../shared/data/moves';
 import { SPECIES, species, STARTERS } from '../../shared/data/species';
-import { BattleDirector, arenaSpots, type BattleOutcome, type BattleStart } from '../battle/director';
+import { BattleDirector, arenaSpots, foeTrainerSpot, type BattleOutcome, type BattleStart } from '../battle/director';
 import { classInfo } from '../../shared/classes';
 import { ITEMS, PARTY_MAX, STARTING_BAG, type ArmourSlot } from '../../shared/items';
 import type { BattleControl, BattleFrame } from '../../shared/battle/session';
@@ -37,6 +37,8 @@ import { applyCraft, canLearn, craftBlock, craftSpend, RECIPES, recipeById, tech
 import { CLEAN_WATER_TYPE, FIRE_COOK_TIME, gatherWay, NODE_RULES, partnerHelp, pruneDepleted, rollPartner, rollYield, wearTool, type GatherWay, type PartnerHelp, type ToolId } from '../../shared/gathering';
 import { earnedXp, trainerLevel, TRAINER_XP } from '../../shared/trainer-level';
 import { ALPHA, ALPHA_LAIRS, ALPHA_REWARD, alphaDay, alphaPrize, currentAlphaKeys } from '../../shared/alpha';
+import { patrolAt, ROAMING_TRAINERS, TRAINER_TUNING, trainerById, trainerDay, trainerName, trainerReward, trainersBeaten, trainerSees, trainerStanding, trainerTeam, type RoamingTrainerDef, type TrainerStanding } from '../../shared/trainers';
+import { RoamingTrainer } from '../npc/roaming-trainer';
 import type { ResourceNode } from '../world/resources';
 import { TOWN } from '../world/layout';
 import { waterDistance } from '../world/terrain';
@@ -159,6 +161,14 @@ export class Game {
   private alphasHeard = new Set<string>();
   /** Shown once the battle that beat an Alpha has closed. */
   private alphaToast: [string, string, number] | null = null;
+  /** Hearthmeadow's roaming trainers (DESIGN §12.3). */
+  private trainers: RoamingTrainer[] = [];
+  /** The roaming trainer walking up to or battling this player, if any. */
+  private trainerEngaged: RoamingTrainer | null = null;
+  /** Seconds after a trainer battle before another trainer will spot you. */
+  private trainerGrace = 0;
+  /** Per friend: the roaming trainer walking up to or battling them. */
+  private partnerTrainer = new Map<string, string>();
   /** The partner rushing a charging wild Pokemon; the battle starts when it gets there. */
   private intercept: { m: WildCreature; t: number } | null = null;
   /** Per friend: shared wild creatures they're battling or catching (hidden here meanwhile), and their herds' cells. */
@@ -226,6 +236,10 @@ export class Game {
     // Sunniva waits beside her aunt once the player has a partner.
     this.rival = new Rival(this.world, a.professor.clone().add(new THREE.Vector3(2.8, 0, 1.4)), a.professorYaw - 0.5);
     this.scene.add(this.rival.root);
+    // Roaming trainers walk their beats out on the meadow.
+    if (!save.trainers || typeof save.trainers !== 'object' || Array.isArray(save.trainers)) save.trainers = {};
+    this.trainers = ROAMING_TRAINERS.map((d) => new RoamingTrainer(d, this.world));
+    for (const t of this.trainers) this.scene.add(t.root);
     this.updateNpcState();
     this.scene.add(this.follower.root);
     // Herds come from the world's name, so both friends meet the same ones.
@@ -362,6 +376,8 @@ export class Game {
         if (this.remoteBattleHost === id) this.receiveRemoteBattle(s.battleFrame);
         if (pf) pf.lead = s.lead && !s.battle && SPECIES[s.lead] ? s.lead : null;
         if (pf) pf.leadAlpha = !!pf.lead && s.leadAlpha === true;
+        const engaged = trainerById(s.trainer);
+        if (engaged) this.partnerTrainer.set(id, engaged.id); else this.partnerTrainer.delete(id);
         if (pf) pf.work = Array.isArray(s.work) && s.work.length === 3 && s.work.every(Number.isFinite) ? s.work : null;
         // The partner's throws replay here (catching itself is decided on their side).
         if (s.ballThrow && ITEMS[s.ballThrow.ball] && this.throws.remoteThrow(id, s.ballThrow, THROW_CLIP.release)) this.partners.get(id)?.remote.avatar.gesture('throw');
@@ -375,6 +391,7 @@ export class Game {
       onPeerLeft: (id) => {
         this.partnerBattles.delete(id); this.battle?.director.partnerLeft(id);
         this.partnerWild.delete(id);
+        this.partnerTrainer.delete(id);
         if (this.remoteBattleHost === id) { this.finishRemoteBattle(); this.hud.showToast('Partner disconnected', 'The shared battle ended on this device.'); }
         const p = this.partners.get(id);
         if (!p) return;
@@ -432,6 +449,17 @@ export class Game {
     const yaw = this.controller.yaw;
     const herd = this.wild.spawnHerd(p.x + Math.sin(yaw) * 5, p.z + Math.cos(yaw) * 5, speciesId, level);
     void this.startWildBattle(herd.members[0], false);
+  }
+
+  /** Dev only: stand `dist` metres in front of a roaming trainer (in their sight), facing them. */
+  debugTrainer(id: string, dist = 9): { x: number; z: number; yaw: number } | null {
+    const t = this.trainers.find((x) => x.def.id === id);
+    if (!t) return null;
+    this.trainerGrace = 0;
+    // Where they are on their beat right now (they may not be drawn yet).
+    const at = t.visible ? { x: t.position.x, z: t.position.z, yaw: t.yaw } : patrolAt(t.def, Date.now() / 1000);
+    this.debugTeleport(at.x + Math.sin(at.yaw) * dist, at.z + Math.cos(at.yaw) * dist, at.yaw + Math.PI);
+    return { x: at.x, z: at.z, yaw: at.yaw };
   }
 
   /** Dev only: stand `dist` metres south of today's Alpha lair, facing it. */
@@ -562,6 +590,12 @@ export class Game {
         // Both friends who brought down an Alpha get its reward.
         for (const [uid, name] of foes.alphas) if (foes.fainted.has(uid)) this.alphaBeaten(foes.levels.get(uid) ?? 1, name);
       }
+      const beatTrainer = frame.winner === 0 && frame.kind === 'trainer' ? trainerById(frame.trainer) : undefined;
+      if (beatTrainer) {
+        const standing = trainerStanding(this.save.trainers, beatTrainer.id, trainerDay(Date.now()));
+        const prize = this.trainerBeaten(beatTrainer, standing, false);
+        if (prize) this.guestPrize = prize;
+      }
       this.guestProgression = {winner:frame.winner,escaped:frame.escaped,fainted:new Set(),pendingMoves:new Map(frame.result.pendingMoves),caught:[],ballsUsed:{},partnerCaught:[]};
     }
   }
@@ -665,6 +699,10 @@ export class Game {
     if (starter) quests.push({ id: 'rival', text: 'Beat Sunniva', main: true, done: beat, target: { x: this.rival.homeSpot.x, z: this.rival.homeSpot.z } });
     if (beat) quests.push({ id: 'route1', text: 'Head out onto Route 1', main: true, done: left, target: { x: gate.x, z: gate.z } });
     if (beat && left) quests.push({ id: 'train', text: `Train your team on the meadow (cap Lv. ${this.levelCap})` });
+    if (beat && left) {
+      const n = trainersBeaten(this.save.trainers);
+      quests.push({ id: 'trainers', text: `Beat the trainers roaming Hearthmeadow (${n} of ${ROAMING_TRAINERS.length})`, done: n >= ROAMING_TRAINERS.length });
+    }
     this.quests = quests;
     this.hud.setQuests(quests.slice(-3));
   }
@@ -1679,6 +1717,157 @@ export class Game {
   }
 
   /**
+   * A roaming trainer challenges the player (DESIGN §12.3). One who `spotted` them shouts, a "!"
+   * pops up, and they walk over; otherwise the player walked up and talked to them.
+   */
+  private async trainerChallenge(t: RoamingTrainer, spotted: boolean): Promise<void> {
+    this.beginScene();
+    this.scripted = true;
+    this.cancelAim();
+    this.gathering = null;
+    this.trainerEngaged = t;
+    t.setScripted(true);
+    const p = this.controller.position.clone();
+    t.lookAt(p);
+    // Look round at whoever called out, a little off to one side so the trainer isn't hidden behind you.
+    this.cam.turnTo(Math.atan2(t.position.x - p.x, t.position.z - p.z) + 0.4);
+    if (spotted) {
+      t.exclaim();
+      await sleep(1000);
+      const away = new THREE.Vector3(t.position.x - p.x, 0, t.position.z - p.z);
+      const dist = away.length();
+      // Further off, they jog over.
+      if (dist > 2.6) await Promise.race([t.walkTo(p.clone().addScaledVector(away.normalize(), 2.2), dist > 7), sleep(6000)]);
+      t.lookAt(this.controller.position);
+    }
+    // Face each other.
+    const facing = Math.atan2(t.position.x - p.x, t.position.z - p.z);
+    this.controller.teleport(this.controller.position.clone(), facing);
+    this.cam.turnTo(facing + 0.4);
+    await this.hud.dialogue.play(t.def.lines.challenge.map((text) => ({ speaker: t.name, text })));
+    await this.trainerBattle(t);
+  }
+
+  private async talkToTrainer(t: RoamingTrainer): Promise<void> {
+    const def = t.def;
+    const standing = trainerStanding(this.save.trainers, def.id, trainerDay(Date.now()));
+    const canFight = this.party.some(isUsable);
+    if (standing === 'unbeaten' && canFight) return this.trainerChallenge(t, false);
+    this.beginScene();
+    this.trainerEngaged = t;
+    t.setScripted(true);
+    t.lookAt(this.controller.position);
+    let battle = false;
+    if (standing === 'unbeaten') await this.hud.dialogue.play([{ speaker: t.name, text: "Your Pokémon can't battle like that. Rest them up and come back!" }]);
+    else if (standing === 'beaten-today') await this.hud.dialogue.play([{ speaker: t.name, text: def.lines.after }]);
+    else {
+      const [pick] = await this.hud.dialogue.play([{ speaker: t.name, text: def.lines.rematch, choices: ['Battle!', 'Not now'] }]);
+      if (pick === 0 && !canFight) await this.hud.dialogue.play([{ speaker: t.name, text: "Your Pokémon can't battle like that. Rest them up and come back!" }]);
+      battle = pick === 0 && canFight;
+    }
+    if (battle) {
+      this.scripted = true;
+      await this.trainerBattle(t);
+      return;
+    }
+    t.setScripted(false);
+    this.trainerEngaged = null;
+    this.endScene();
+  }
+
+  private async trainerBattle(t: RoamingTrainer): Promise<void> {
+    const def = t.def;
+    const p = this.controller.position.clone();
+    const facing = Math.atan2(t.position.x - p.x, t.position.z - p.z);
+    const spot = arenaSpots(p, facing).foeTrainer;
+    t.lookAt(null);
+    await Promise.race([t.walkTo(spot, true), sleep(3500)]);
+    t.place(spot, facing + Math.PI);
+    t.lookAt(p);
+    this.talking = false;
+    const standing = trainerStanding(this.save.trainers, def.id, trainerDay(Date.now()));
+    const outcome = await this.runBattle({
+      kind: 'trainer',
+      trainer: def.id,
+      foes: trainerTeam(def),
+      foeName: t.name,
+      foeAi: def.ai,
+      playerPos: p,
+      facing,
+      intro: `${t.name} wants to battle!`,
+    });
+    this.beginScene();
+    this.scripted = true;
+    const won = outcome.winner === 0;
+    t.lookAt(this.controller.position);
+    await this.hud.dialogue.play((won ? def.lines.beaten : def.lines.won).map((text) => ({ speaker: t.name, text })));
+    if (won) this.trainerBeaten(def, standing);
+    t.setScripted(false);
+    this.trainerEngaged = null;
+    this.trainerGrace = TRAINER_TUNING.grace;
+    this.endScene();
+    if (outcome.winner === 1) await this.blackout();
+  }
+
+  /**
+   * The reward for beating a roaming trainer: full prize money and trainer XP the first time,
+   * a smaller prize for a rematch on a later day, nothing more on the same day. Returns the prize.
+   */
+  private trainerBeaten(def: RoamingTrainerDef, standing: TrainerStanding, toast = true): number {
+    if (standing === 'beaten-today') return 0;
+    const first = standing === 'unbeaten';
+    const prize = trainerReward(def, !first);
+    if (first) this.gainXp(TRAINER_XP.trainerWin);
+    this.save.trainers![def.id] = trainerDay(Date.now());
+    this.earn(prize, `You got prize money from ${trainerName(def)}`, false);
+    if (toast) {
+      const n = trainersBeaten(this.save.trainers);
+      this.hud.showToast(`You got ${formatMoney(prize)} from ${trainerName(def)}`, first ? `Hearthmeadow trainers beaten: ${n} of ${ROAMING_TRAINERS.length}` : 'Rematch prize · back tomorrow for another', 3);
+    }
+    this.refreshQuests();
+    return prize;
+  }
+
+  /** Trainers on their beats, and the ones walking up to or battling a friend. */
+  private updateTrainers(dt: number): void {
+    this.trainerGrace = Math.max(0, this.trainerGrace - dt);
+    const seconds = Date.now() / 1000;
+    const busy = new Map<string, { p: THREE.Vector3; yaw: number }>();
+    for (const f of this.partnerBattles.values()) {
+      const def = trainerById(f.trainer);
+      if (!def || f.ended || !Array.isArray(f.center) || !f.center.every(Number.isFinite) || !Number.isFinite(f.yaw)) continue;
+      const spot = foeTrainerSpot(new THREE.Vector3(f.center[0], f.center[1], f.center[2]), f.yaw);
+      busy.set(def.id, { p: new THREE.Vector3(spot.x, this.world.heightAt(spot.x, spot.z), spot.z), yaw: f.yaw + Math.PI });
+    }
+    for (const [id, trainer] of this.partnerTrainer) {
+      if (busy.has(trainer)) continue;
+      // Walking up to a friend: they stop a couple of metres in front of them.
+      const friend = this.partners.get(id)?.remote.root.position;
+      const t = this.trainers.find((x) => x.def.id === trainer);
+      if (!friend || !t) continue;
+      const away = new THREE.Vector3(t.position.x - friend.x, 0, t.position.z - friend.z);
+      const p = away.length() > 2.4 ? friend.clone().addScaledVector(away.normalize(), 2.2) : t.position.clone();
+      busy.set(trainer, { p, yaw: Math.atan2(friend.x - p.x, friend.z - p.z) });
+    }
+    for (const t of this.trainers) {
+      if (t !== this.trainerEngaged) t.standAt(busy.get(t.def.id) ?? null);
+      t.update(dt, seconds, this.controller.position);
+    }
+  }
+
+  /** An unbeaten trainer on their beat who can see the player, if any. */
+  private trainerSpotting(pos: THREE.Vector3): RoamingTrainer | null {
+    if (this.trainerGrace > 0) return null;
+    const day = trainerDay(Date.now());
+    for (const t of this.trainers) {
+      if (!t.visible || !t.patrolling) continue;
+      if (trainerStanding(this.save.trainers, t.def.id, day) !== 'unbeaten') continue;
+      if (trainerSees(t.position.x, t.position.z, t.yaw, pos.x, pos.z) && Math.abs(t.position.y - pos.y) < 4) return t;
+    }
+    return null;
+  }
+
+  /**
    * Walk up to a wild Pokemon and press interact, or get charged by one. A partner that
    * `intercepted` a charge takes it on alone: its herd-mate doesn't get the chance to join in.
    */
@@ -1732,7 +1921,7 @@ export class Game {
         trainerPosition: () => this.controller.position,
         soloMode: this.settings.battleMode === 'ask' ? undefined : this.settings.battleMode,
         project: (v) => this.project(v),
-        onThrow: (side) => (side === 0 ? this.avatar.gesture('throw') : start.kind === 'trainer' && this.rival.gesture('throw')),
+        onThrow: (side) => (side === 0 ? this.avatar.gesture('throw') : start.kind === 'trainer' && (this.trainerEngaged ?? this.rival).gesture('throw')),
       },
       {
         ...start,
@@ -1887,6 +2076,7 @@ export class Game {
       money: this.save.money ?? 0,
       meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },
       throwing: { aiming: this.aiming, ball: this.aimBall, balls: Object.fromEntries(this.throwKinds().map((b) => [b, this.save.bag?.[b] ?? 0])), treats: this.wild.treats.length, intercept: this.intercept ? displayName(this.intercept.m.creature) : null, inFlight: this.throws.busy, dropped: this.throws.droppedCount, lastCatch: this.lastCatch },
+      trainers: this.trainers.filter((t) => t.visible).map((t) => ({ id: t.def.id, position: [t.position.x, t.position.z].map((v) => Math.round(v * 10) / 10), patrolling: t.patrolling, standing: trainerStanding(this.save.trainers, t.def.id, trainerDay(Date.now())) })), trainerEngaged: this.trainerEngaged?.def.id ?? null,
       wildCreatures: this.wild.creatures.map((m) => ({ species: m.creature.species, level: m.creature.level, alpha: m.alpha ? true : undefined, state: m.state, alert: Math.round(m.alert), attack: m.attack?.phase, position: [m.mover.pos.x, m.mover.pos.z].map((v) => Math.round(v * 10) / 10) })) });
   }
 
@@ -1987,13 +2177,14 @@ export class Game {
       const pos = this.controller.position;
       const nearProf = pos.distanceTo(this.professor.position) < TALK_RADIUS;
       const nearRival = this.rival.visible && pos.distanceTo(this.rival.position) < TALK_RADIUS;
-      const pickup = !nearProf && !nearRival && !this.aiming ? this.throws.nearestPickup(pos) : null;
-      const find = !nearProf && !nearRival && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
-      const home = !nearProf && !nearRival && !pickup && !find ? this.nearHome(pos) : null;
-      const shop = !nearProf && !nearRival && !pickup && !find && !home ? this.shopNear(pos) : null;
-      const station = !nearProf && !nearRival && !pickup && !find && !home && !shop ? this.stationsNear(pos)[0] ?? null : null;
-      const wildMon = !nearProf && !nearRival ? this.wild.nearestEngageable(pos) : null;
-      const free = !nearProf && !nearRival && !pickup && !find && !home && !shop && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
+      const nearTrainer = !nearProf && !nearRival ? this.trainers.find((t) => t.visible && t.patrolling && pos.distanceTo(t.position) < TALK_RADIUS) ?? null : null;
+      const pickup = !nearProf && !nearRival && !nearTrainer && !this.aiming ? this.throws.nearestPickup(pos) : null;
+      const find = !nearProf && !nearRival && !nearTrainer && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
+      const home = !nearProf && !nearRival && !nearTrainer && !pickup && !find ? this.nearHome(pos) : null;
+      const shop = !nearProf && !nearRival && !nearTrainer && !pickup && !find && !home ? this.shopNear(pos) : null;
+      const station = !nearProf && !nearRival && !nearTrainer && !pickup && !find && !home && !shop ? this.stationsNear(pos)[0] ?? null : null;
+      const wildMon = !nearProf && !nearRival && !nearTrainer ? this.wild.nearestEngageable(pos) : null;
+      const free = !nearProf && !nearRival && !nearTrainer && !pickup && !find && !home && !shop && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
       let gather = free ? this.nearestGather(pos) : null;
       const waterAt = free ? this.nearWater(pos) : null;
       let water = waterAt && this.waterPrompt(waterAt) ? waterAt : null;
@@ -2012,6 +2203,7 @@ export class Game {
       else if (invite && canFight) this.hud.setPrompt('Join your friend’s battle');
       else if (nearProf) this.hud.setPrompt(`Talk to ${this.professor.name}`);
       else if (nearRival) this.hud.setPrompt(`Talk to ${this.rival.name}`);
+      else if (nearTrainer) this.hud.setPrompt(`Talk to ${nearTrainer.name}`);
       else if (pickup) this.hud.setPrompt(`Pick up the ${ITEMS[pickup.ball]?.name ?? 'ball'}`);
       else if (find) this.hud.setPrompt(DISCOVERY_LABEL[find.def.kind].prompt);
       else if (home) this.hud.setPrompt(`Rest at ${home.id === 'p1-house' ? 'home' : 'your friend’s house'}`);
@@ -2033,6 +2225,7 @@ export class Game {
         if (invite && canFight) this.joinRemoteBattle(invite[0],invite[1]);
         else if (nearProf) void this.talkToProfessor();
         else if (nearRival) void this.talkToRival();
+        else if (nearTrainer) void this.talkToTrainer(nearTrainer);
         else if (pickup) this.pickupBall(pickup.id);
         else if (find) void this.openDiscovery(find);
         else if (home) void this.restAtHome();
@@ -2055,8 +2248,12 @@ export class Game {
 
       this.updateIntercept(dt);
 
+      // An unbeaten roaming trainer who sees you walks over and challenges you.
+      const spotter = !knocked && canFight && !this.battle && !this.talking && !this.scripted && !this.wild.attacking && !this.controller.climbing ? this.trainerSpotting(pos) : null;
+      if (spotter) void this.trainerChallenge(spotter, true);
+
       // A territorial Pokemon that reaches you starts the fight itself.
-      const charger = this.battle ? null : this.wild.charger(pos);
+      const charger = this.battle || spotter ? null : this.wild.charger(pos);
       if (charger) {
         if (canFight) void this.startWildBattle(charger, true);
         else {
@@ -2081,6 +2278,7 @@ export class Game {
 
     this.professor.update(dt);
     this.rival.update(dt);
+    this.updateTrainers(dt);
     const friends = [...this.partnerWild.values()];
     this.wild.setRemoteBusy(new Set(friends.flatMap((f) => f.busy)));
     this.wild.setFriendCells(friends.flatMap((f) => f.cells));
@@ -2113,7 +2311,7 @@ export class Game {
     const wildBusy = this.wild.sharedBusy;
     const wildCells = this.wild.liveCells;
     const work: [number, number, number] | undefined = partnerWork ? [partnerWork.x, partnerWork.z, partnerWork.r].map((v) => Math.round(v * 100) / 100) as [number, number, number] : undefined;
-    this.net.send({ ...snap, lead, leadAlpha, work, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl, ballThrow, ballCatch, down: down > 0 ? Math.round(down * 100) / 100 : undefined, wildTaken: wildTaken.length ? wildTaken : undefined, wildBusy: wildBusy.length ? wildBusy : undefined, wildCells: wildCells.length ? wildCells : undefined }, now);
+    this.net.send({ ...snap, lead, leadAlpha, trainer: this.trainerEngaged?.def.id, work, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl, ballThrow, ballCatch, down: down > 0 ? Math.round(down * 100) / 100 : undefined, wildTaken: wildTaken.length ? wildTaken : undefined, wildBusy: wildBusy.length ? wildBusy : undefined, wildCells: wildCells.length ? wildCells : undefined }, now);
 
     // Also keeps the sun's shadow camera centred on the player.
     this.world.update(dt, this.elapsed, this.controller.position);

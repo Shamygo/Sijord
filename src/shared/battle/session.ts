@@ -7,6 +7,8 @@ export interface BattleFrame {
   id: string;
   kind: 'wild' | 'trainer';
   progressionFlag?: 'beat-rival';
+  /** A roaming trainer's id (trainer battles against one). */
+  trainer?: string;
   center: [number, number, number];
   yaw: number;
   mode: 'tactical' | 'action';
