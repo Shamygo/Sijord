@@ -232,7 +232,9 @@ export class Game {
           const c = s.battleControl;
           if (c.id === hosted.id && c.join && hosted.lobby) {
             const party = c.join.party.filter(m => SPECIES[m.species] && isUsable(m)).slice(0,6);
-            if (party.length && hosted.acceptPartner(id, {owner:'partner', name:this.partners.get(id)?.profile.name ?? 'Partner', creatures:structuredClone(c.join.party.filter(m => SPECIES[m.species]).slice(0,6)), levelCap:Math.min(100,Math.max(1,c.join.levelCap)), xpMult:1})) this.hud.showToast('Partner joined the battle');
+            const balls = Object.fromEntries(Object.entries(c.join.balls ?? {}).filter(([b, n]) => ITEMS[b]?.category === 'balls' && Number.isFinite(n) && n > 0).map(([b, n]) => [b, Math.min(999, Math.floor(n))]));
+            const catchMult = Math.min(1.2, Math.max(0.8, c.join.catchMult ?? 1));
+            if (party.length && hosted.acceptPartner(id, {owner:'partner', name:this.partners.get(id)?.profile.name ?? 'Partner', creatures:structuredClone(c.join.party.filter(m => SPECIES[m.species]).slice(0,6)), levelCap:Math.min(100,Math.max(1,c.join.levelCap)), xpMult:1, catchMult}, balls)) this.hud.showToast('Partner joined the battle');
           }
           hosted.partnerControl(id,c);
         }
@@ -339,7 +341,8 @@ export class Game {
 
   private joinRemoteBattle(id: string, frame: BattleFrame): void {
     this.remoteBattleHost = id; this.remoteFrame = frame;
-    this.battleControl = {id:frame.id, join:{party:structuredClone(this.party),levelCap:this.levelCap}};
+    const balls = Object.fromEntries(Object.entries(this.save.bag ?? {}).filter(([b, n]) => ITEMS[b]?.category === 'balls' && n > 0));
+    this.battleControl = {id:frame.id, join:{party:structuredClone(this.party),levelCap:this.levelCap,balls,catchMult:classInfo(this.save.profile.playerClass).modifiers.catchRate}};
     this.releaseMouse(); this.hud.setBattleMode(true); this.refreshFollower();
     this.hud.showToast('Joining your friend’s battle');
   }
@@ -352,6 +355,7 @@ export class Game {
       this.remoteBattle = new RemoteBattle(frame,this.world,this.scene,this.hud.el,this.portraits,c => {this.battleControl = {...this.battleControl,...c,join:undefined};},v => this.project(v));
     }
     this.remoteBattle?.receive(frame);
+    for (const slot of frame.slots) if (slot.pos.side === 1) this.markDex(slot.species, false);
     if (frame.result) {
       const signature=JSON.stringify(frame.result.party);
       if(signature!==this.guestSaveSignature){
@@ -364,8 +368,12 @@ export class Game {
       this.appliedBattleResults.add(frame.id);
       if(frame.winner === 0 && frame.progressionFlag) {this.setFlag(frame.progressionFlag);this.updateNpcState();}
       for (const updated of frame.result.party) {const c = this.party.find(c => c.uid === updated.uid); if(c) Object.assign(c,updated);}
+      // Balls this trainer threw come out of their own bag; their catches join their own party.
+      const bag = (this.save.bag ??= {});
+      for (const [b, n] of Object.entries(frame.result.ballsUsed ?? {})) { bag[b] = Math.max(0, (bag[b] ?? 0) - n); if (!bag[b]) delete bag[b]; }
+      void this.storeCaught(structuredClone(frame.result.caught ?? []));
       this.battleControl = {id:frame.id,ack:true}; this.onPartyChanged();
-      this.guestProgression = {winner:frame.winner,escaped:frame.escaped,fainted:new Set(),pendingMoves:new Map(frame.result.pendingMoves),caught:[],ballsUsed:{}};
+      this.guestProgression = {winner:frame.winner,escaped:frame.escaped,fainted:new Set(),pendingMoves:new Map(frame.result.pendingMoves),caught:[],ballsUsed:{},partnerCaught:[]};
     }
   }
 
@@ -719,7 +727,7 @@ export class Game {
       facing,
       intro,
     });
-    this.wild.leaveBattle(list, outcome.fainted, new Set(outcome.caught.map((c) => c.uid)));
+    this.wild.leaveBattle(list, outcome.fainted, new Set([...outcome.caught, ...outcome.partnerCaught].map((c) => c.uid)));
     if (outcome.winner === 1) await this.blackout();
   }
 

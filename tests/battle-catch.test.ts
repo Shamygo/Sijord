@@ -133,6 +133,30 @@ describe('catching in battle', () => {
     expect(b.at(F0)!.boosts.atk).toBeGreaterThan(0);
   });
 
+  it('a joined partner throws with their own team and the catch is marked as theirs', () => {
+    const b = new Battle({
+      seed: 4,
+      kind: 'wild',
+      sides: [
+        { teams: [{ owner: 'p1', name: 'Robin', creatures: [mon('cindlet', 5, ['scratch'])], levelCap: 15 }], slots: ['p1', 'p1'] },
+        { teams: [{ owner: 'wild', name: 'Wild', creatures: [mon('nibblet', 2, ['tackle']), mon('dewmite', 2, ['tackle'])], ai: 'wild' }], slots: ['wild', 'wild'] },
+      ],
+    });
+    expect(b.invitePartner({ owner: 'partner', name: 'Kai', creatures: [mon('hjordpup', 5, ['tackle'])], levelCap: 15, catchMult: 1.05 })).toBe(true);
+    b.start();
+    b.at(F1)!.hp = 1;
+    let caught: Extract<BattleEvent, { t: 'catch' }> | undefined;
+    for (let i = 0; i < 20 && !caught; i++) {
+      b.choose(P0, { kind: 'pass' });
+      b.choose(P1, { kind: 'ball', ball: 'poke-ball', target: F1 });
+      const ev = b.resolve(idle);
+      for (const c of of(ev, 'catch')) expect(c.owner).toBe('partner');
+      caught = of(ev, 'catch').find((c) => c.caught);
+    }
+    expect(caught?.owner).toBe('partner');
+    expect(b.caught.map((c) => c.species)).toEqual(['dewmite']);
+  });
+
   it("refuses balls in trainer battles and at your own side", () => {
     const t = wild([mon('cindlet', 5, ['scratch'])], [mon('nibblet', 2, ['tackle'])], 3, 'trainer');
     t.choose(P0, { kind: 'ball', ball: 'poke-ball', target: F0 });

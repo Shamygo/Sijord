@@ -55,10 +55,12 @@ export interface BattleOutcome {
   fainted: Set<string>;
   /** Moves creatures want to learn but have no room for (uid -> moves). */
   pendingMoves: Map<string, string[]>;
-  /** Wild creatures caught, in order. */
+  /** Wild creatures this player caught, in order. */
   caught: Creature[];
-  /** Balls thrown (id -> count), to take out of the bag. */
+  /** Balls this player threw (id -> count), to take out of the bag. */
   ballsUsed: Record<string, number>;
+  /** Wild creatures a joined friend caught (they leave the world too). */
+  partnerCaught: Creature[];
 }
 
 export interface DirectorDeps {
@@ -123,8 +125,12 @@ export class BattleDirector {
   private fainted = new Set<string>();
   /** Wild creatures standing in the world, by uid, until they step into the ring. */
   private wildActors = new Map<string, WildActor>();
-  /** Balls thrown so far (id -> count). */
-  private ballsUsed: Record<string, number> = {};
+  /** Balls thrown so far (id -> count), per trainer. */
+  private ballsUsed: Record<string, Record<string, number>> = {};
+  /** Balls a joined friend carries. */
+  private partnerBalls: Record<string, number> = {};
+  /** Caught creature uid -> who caught it. */
+  private catchers = new Map<string, string>();
   private keyDown = (e: KeyboardEvent) => {
     if (e.code === 'Enter') this.hurry = true;
   };
@@ -222,15 +228,16 @@ export class BattleDirector {
       escaped: this.battle.escaped,
       fainted: this.fainted,
       pendingMoves: new Map(this.battle.pendingMoves),
-      caught: [...this.battle.caught],
-      ballsUsed: this.ballsUsed,
+      caught: this.caughtBy(PLAYER_ID),
+      ballsUsed: this.ballsUsed[PLAYER_ID] ?? {},
+      partnerCaught: this.caughtBy('partner'),
     };
   }
 
-  acceptPartner(id: string, team: TeamSetup): boolean {
+  acceptPartner(id: string, team: TeamSetup, balls: Record<string, number> = {}): boolean {
     if (!this.lobby || this.guest) return false;
     const ok = this.battle.invitePartner({...team, owner: 'partner'});
-    if (ok) { this.guest = id; this.ui.caption(`${team.name} joined. Each player commands their own Pokémon.`); }
+    if (ok) { this.guest = id; this.partnerBalls = balls; this.ui.caption(`${team.name} joined. Each player commands their own Pokémon.`); }
     return ok;
   }
 
@@ -243,6 +250,7 @@ export class BattleDirector {
       const p = this.remotePrompt;
       const choice = c.choice;
       const valid = choice.kind === 'pass' || (choice.kind === 'run' && p.move?.canRun) ||
+        (choice.kind === 'ball' && !!p.move?.balls?.some(b => b.id === choice.ball && b.count > 0) && !!p.move.ballTargets?.some(t => t.pos.side === choice.target.side && t.pos.slot === choice.target.slot)) ||
         (choice.kind === 'switch' && (p.bench ?? p.move?.bench)?.some(b => b.index === choice.team)) ||
         (choice.kind === 'move' && p.move && p.move.moves[choice.move]?.pp! > 0 && (!p.move.moves[choice.move].targets.length || p.move.moves[choice.move].targets.some(t => t.pos.side === choice.target?.side && t.pos.slot === choice.target?.slot)));
       if (valid) this.remoteChoice = choice;
@@ -257,7 +265,7 @@ export class BattleDirector {
       winner:this.battle.winner, escaped:this.battle.escaped, windup: this.windup, ended: this.readyResult, caption: this.captionText,
       slots: [...this.displayed.values()].map(s => ({...s,position:this.stage.snapshotPosition(s.pos)})),
       events: this.recentEvents, prompt: this.remotePrompt ? {...this.remotePrompt, move:this.remotePrompt.move ? {...this.remotePrompt.move,portrait:undefined,bench:this.remotePrompt.move.bench.map(b => ({...b,portrait:undefined}))} : undefined, bench:this.remotePrompt.bench?.map(b => ({...b,portrait:undefined}))} : undefined,
-      result: this.guest ? {party: this.battle.team('partner').map(m => ({...m.creature,hp:m.hp,status:m.fainted ? undefined : m.status,item:m.item,moves:m.moves.map(s => ({id:s.id,pp:s.pp}))})), pendingMoves: [...this.battle.pendingMoves].filter(([uid]) => this.battle.team('partner').some(m => m.uid === uid))} : undefined,
+      result: this.guest ? {party: this.battle.team('partner').map(m => ({...m.creature,hp:m.hp,status:m.fainted ? undefined : m.status,item:m.item,moves:m.moves.map(s => ({id:s.id,pp:s.pp}))})), pendingMoves: [...this.battle.pendingMoves].filter(([uid]) => this.battle.team('partner').some(m => m.uid === uid)), caught: this.caughtBy('partner'), ballsUsed: this.ballsUsed.partner ?? {}} : undefined,
     };
   }
 
@@ -280,12 +288,17 @@ export class BattleDirector {
     return kind === 'replace' || this.guestGone ? chooseAction(this.battle, pos, kind) : {kind: 'pass'};
   }
 
-  /** Balls still in the bag, less those already thrown and those picked earlier this round. */
-  private ballsLeft(pending: Choice[]): { id: string; name: string; count: number }[] {
+  private caughtBy(owner: string): Creature[] {
+    return this.battle.caught.filter((c) => this.catchers.get(c.uid) === owner);
+  }
+
+  /** Balls still in a trainer's bag, less those already thrown and those picked earlier this round. */
+  private ballsLeft(owner: string, pending: Choice[]): { id: string; name: string; count: number }[] {
     const out: { id: string; name: string; count: number }[] = [];
-    for (const [id, n] of Object.entries(this.start.balls ?? {})) {
+    const bag = owner === PLAYER_ID ? this.start.balls ?? {} : this.partnerBalls;
+    for (const [id, n] of Object.entries(bag)) {
       const reserved = pending.filter((c) => c.kind === 'ball' && c.ball === id).length;
-      const count = n - (this.ballsUsed[id] ?? 0) - reserved;
+      const count = n - (this.ballsUsed[owner]?.[id] ?? 0) - reserved;
       if (count > 0) out.push({ id, name: ITEMS[id]?.name ?? id, count });
     }
     return out;
@@ -295,8 +308,8 @@ export class BattleDirector {
     const b = this.battle;
     const mon = b.at(pos)!;
     const owner = b.slotOwner(pos);
-    // Only the host's own trainer throws from the host's bag.
-    const throws = b.kind === 'wild' && owner === PLAYER_ID;
+    // Each trainer throws from their own bag.
+    const throws = b.kind === 'wild' && (owner === PLAYER_ID || owner === 'partner');
     const team = b.team(owner);
     const foes = b.foesOf(pos);
     return {
@@ -315,7 +328,7 @@ export class BattleDirector {
       bench: b.bench(owner).map((m) => ({ index: team.indexOf(m), label: `${m.name}  Lv. ${m.creature.level}`, hp: m.hp, maxHp: m.maxHp, portrait: this.deps.portraits.get(m.species.id) })),
       canRun: b.kind === 'wild',
       canBack,
-      balls: throws ? this.ballsLeft(pending) : [],
+      balls: throws ? this.ballsLeft(owner, pending) : [],
       ballTargets: throws ? foes.map((t) => ({ pos: t, label: this.targetLabel(t, pos) })) : [],
     };
   }
@@ -438,13 +451,16 @@ export class BattleDirector {
         case 'throw': {
           await this.until(() => !this.stage.busy);
           this.ui.caption(e.text ?? null);
-          if (e.pos.side === 0) this.deps.onThrow?.(0);
+          // Only this player's own trainer plays the throw; a friend's ball comes from the ring's edge.
+          if (e.pos.side === 0 && e.owner === PLAYER_ID) this.deps.onThrow?.(0);
           await this.wait(THROW_RELEASE);
           break;
         }
         case 'catch': {
-          this.ballsUsed[e.ball] = (this.ballsUsed[e.ball] ?? 0) + 1;
-          const from = e.pos.side === 0 ? (this.deps.trainerPosition?.() ?? this.stage.trainerSpot) : this.stage.foeTrainerSpot;
+          const used = (this.ballsUsed[e.owner] ??= {});
+          used[e.ball] = (used[e.ball] ?? 0) + 1;
+          if (e.caught) this.catchers.set(e.uid, e.owner);
+          const from = e.pos.side === 1 ? this.stage.foeTrainerSpot : e.owner === PLAYER_ID ? (this.deps.trainerPosition?.() ?? this.stage.trainerSpot) : this.stage.trainerSpot;
           const d = this.stage.catchSequence(e.target, from, e.ball, e.shakes, e.caught);
           await this.wait(d);
           if (e.caught) {
