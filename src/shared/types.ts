@@ -41,6 +41,29 @@ export interface PlayerSnapshot {
   battle?: boolean;
   battleFrame?: BattleFrame;
   battleControl?: BattleControl;
+  /** The latest overworld ball throw, repeated for a moment so the partner sees it. */
+  ballThrow?: BallThrowFx;
+  /** The latest overworld catch attempt's result, likewise. */
+  ballCatch?: BallCatchFx;
+  /** Knockdown pose, 0 standing to 1 flat on the ground. */
+  down?: number;
+}
+
+/** A thrown ball: the partner replays the same physical flight from the same launch. */
+export interface BallThrowFx {
+  id: number;
+  ball: string;
+  from: [number, number, number];
+  vel: [number, number, number];
+}
+
+/** Where a thrown ball caught (or failed to catch) something, and how it went. */
+export interface BallCatchFx {
+  id: number;
+  ball: string;
+  at: [number, number, number];
+  shakes: number;
+  caught: boolean;
 }
 
 export const DEFAULT_APPEARANCE: Appearance = {

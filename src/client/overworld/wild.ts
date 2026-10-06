@@ -15,7 +15,45 @@ import { Mover } from './mover';
  * interact key starts a double battle with the creature and its nearest herd-mate.
  */
 
-export type WildState = 'graze' | 'wander' | 'flee' | 'watch' | 'charge' | 'battle' | 'gone';
+export type WildState = 'graze' | 'wander' | 'flee' | 'watch' | 'charge' | 'battle' | 'gone'
+  /** Inside an overworld ball while it shakes. */
+  | 'ball'
+  /** Broke out of a ball and is backing away, wary. */
+  | 'startle'
+  /** Furious after a failed catch: charges the trainer directly with telegraphed lunges. */
+  | 'attack';
+
+/** A charge at the trainer (DESIGN §5.3): close in, wind up, lunge in a straight line, recover. */
+export interface WildAttack {
+  phase: 'approach' | 'windup' | 'lunge' | 'recover';
+  /** Seconds left in the current phase. */
+  t: number;
+  /** Seconds before it calms down. */
+  left: number;
+  /** Where its territory is centred; leaving it by ATTACK_RANGE ends the charge. */
+  ox: number;
+  oz: number;
+  /** Lunge direction, fixed when the wind-up ends so the trainer can sidestep it. */
+  dx: number;
+  dz: number;
+  hit: boolean;
+}
+
+/** Tunables for a creature charging the trainer. */
+export const WILD_ATTACK = {
+  /** Seconds before it calms down (DESIGN: about 20 s). */
+  duration: 20,
+  /** Trainer this far from its territory: it gives up. */
+  range: 40,
+  /** Starts the wind-up this close. */
+  windupAt: 4.6,
+  windup: 0.7,
+  lungeSpeed: 10.5,
+  lunge: 0.55,
+  recover: 1.4,
+  /** Extra reach beyond its body for a lunge to connect. */
+  reach: 0.55,
+};
 
 export interface WildCreature {
   id: number;
@@ -34,6 +72,10 @@ export interface WildCreature {
   calm: number;
   /** Fade-out progress once defeated. */
   fade: number;
+  /** Seconds it stays alert to the trainer (no unaware throws) after being disturbed. */
+  alert: number;
+  /** Set while charging the trainer. */
+  attack?: WildAttack;
 }
 
 interface Herd {
@@ -102,6 +144,8 @@ export class WildManager {
   private rng: Rng;
   private nextId = 1;
   private spawnTimer = 0;
+  /** Lunges that connected with the trainer since the last consumeHits(). */
+  private hits: WildCreature[] = [];
 
   constructor(private world: World, seed: number) {
     this.rng = new Rng(seed);
@@ -141,7 +185,8 @@ export class WildManager {
   private think(m: WildCreature, dt: number, player: THREE.Vector3, playerSpeed: number, sprinting: boolean, paused: boolean): void {
     const world = this.world;
     m.calm = Math.max(0, m.calm - dt);
-    if (m.state === 'battle') {
+    m.alert = Math.max(0, m.alert - dt);
+    if (m.state === 'battle' || m.state === 'ball') {
       // Positioned by the battle scene.
       m.model.update(dt, 0);
       return;
@@ -158,7 +203,9 @@ export class WildManager {
     const run = 2.6 + m.model.radius * 4;
     const walk = 0.9 + m.model.radius * 1.5;
 
-    if (!paused) {
+    // A creature reacting to a throw ignores its usual reflexes until it's done.
+    const reacting = m.state === 'startle' || m.state === 'attack';
+    if (!paused && !reacting) {
       if (temperament === 'skittish' && sprinting && dist < 12 && m.state !== 'flee') {
         m.state = 'flee';
         m.timer = 2.5 + this.rng.next() * 1.5;
@@ -188,6 +235,27 @@ export class WildManager {
       case 'watch':
         m.mover.idle(dt, world);
         m.mover.face(dt * 2, toPlayer);
+        break;
+      case 'startle': {
+        // Hop back from the trainer, then stand and stare for a moment before settling.
+        m.timer -= dt;
+        if (paused || m.timer < 2.2) {
+          m.mover.idle(dt, world);
+          m.mover.face(dt * 2.5, toPlayer);
+        } else {
+          const away = toPlayer + Math.PI;
+          m.mover.steer(dt, m.mover.pos.x + Math.sin(away) * 4, m.mover.pos.z + Math.cos(away) * 4, walk * 2.2, world, 0);
+        }
+        if (m.timer <= 0) {
+          m.state = 'graze';
+          m.timer = 3;
+          m.herd.cx = m.mover.pos.x;
+          m.herd.cz = m.mover.pos.z;
+        }
+        break;
+      }
+      case 'attack':
+        this.attack(m, dt, player, dist, toPlayer, run, paused);
         break;
       case 'charge':
         if (paused) m.mover.idle(dt, world);
@@ -221,12 +289,152 @@ export class WildManager {
     void playerSpeed;
   }
 
+  private attack(m: WildCreature, dt: number, player: THREE.Vector3, dist: number, toPlayer: number, run: number, paused: boolean): void {
+    const a = m.attack;
+    const A = WILD_ATTACK;
+    if (!a) {
+      m.state = 'graze';
+      return;
+    }
+    if (paused) {
+      m.mover.idle(dt, this.world);
+      return;
+    }
+    a.left -= dt;
+    if (a.left <= 0 || Math.hypot(player.x - a.ox, player.z - a.oz) > A.range) {
+      this.calmDown(m);
+      return;
+    }
+    a.t -= dt;
+    switch (a.phase) {
+      case 'approach':
+        m.mover.steer(dt, player.x, player.z, run * 1.15, this.world, 0.5);
+        if (dist < A.windupAt) {
+          a.phase = 'windup';
+          a.t = A.windup;
+        }
+        break;
+      case 'windup':
+        // The tell: it stops dead and squares up before lunging.
+        m.mover.idle(dt, this.world);
+        m.mover.face(dt * 4, toPlayer);
+        if (a.t <= 0) {
+          a.phase = 'lunge';
+          a.t = A.lunge;
+          a.hit = false;
+          a.dx = Math.sin(toPlayer);
+          a.dz = Math.cos(toPlayer);
+          m.model.play('attack');
+        }
+        break;
+      case 'lunge':
+        m.mover.dash(dt, a.dx * A.lungeSpeed, a.dz * A.lungeSpeed, this.world);
+        if (!a.hit && Math.hypot(player.x - m.mover.pos.x, player.z - m.mover.pos.z) < m.model.radius + A.reach) {
+          a.hit = true;
+          this.hits.push(m);
+          a.phase = 'recover';
+          a.t = A.recover;
+        } else if (a.t <= 0) {
+          a.phase = 'recover';
+          a.t = A.recover;
+        }
+        break;
+      case 'recover': {
+        // Skid out of the lunge and circle back.
+        const away = toPlayer + Math.PI;
+        if (a.t > A.recover * 0.5) m.mover.steer(dt, m.mover.pos.x + Math.sin(away) * 3, m.mover.pos.z + Math.cos(away) * 3, run * 0.5, this.world, 0);
+        else {
+          m.mover.idle(dt, this.world);
+          m.mover.face(dt * 2, toPlayer);
+        }
+        if (a.t <= 0) a.phase = 'approach';
+        break;
+      }
+    }
+  }
+
+  /** Lunges that hit the trainer since the last call. */
+  consumeHits(): WildCreature[] {
+    const out = this.hits;
+    this.hits = [];
+    return out;
+  }
+
+  /** Any creature currently charging the trainer (no HP regeneration while one is). */
+  get attacking(): boolean {
+    return this.creatures.some((m) => m.state === 'attack');
+  }
+
+  /** Freeze a creature inside an overworld ball while it shakes. */
+  hold(m: WildCreature): void {
+    m.state = 'ball';
+    m.tension = 0;
+    m.attack = undefined;
+  }
+
+  /** Caught: it stays in the ball and is gone from the world. */
+  caught(m: WildCreature): void {
+    m.state = 'gone';
+    m.fade = 1;
+  }
+
+  /**
+   * Broke out of a ball (DESIGN §5.3): 'flee' bolts (with any skittish herd-mates), 'startle'
+   * backs off warily, 'charge' goes for the trainer. 'battle' is started by the game; here it
+   * just turns to face the trainer. Every reaction leaves it alert for a while.
+   */
+  breakOut(m: WildCreature, reaction: 'flee' | 'startle' | 'battle' | 'charge'): void {
+    m.mover.place(m.root.position.x, m.root.position.z, this.world, m.root.rotation.y);
+    m.alert = 25;
+    m.tension = 0;
+    m.attack = undefined;
+    if (reaction === 'flee') {
+      m.state = 'flee';
+      m.timer = 4 + this.rng.next() * 1.5;
+      for (const o of m.herd.members) {
+        if (o === m || o.state === 'battle' || o.state === 'ball' || o.state === 'gone') continue;
+        o.alert = Math.max(o.alert, 20);
+        if (SPECIES[o.creature.species].temperament === 'skittish') {
+          o.state = 'flee';
+          o.timer = 3 + this.rng.next() * 1.5;
+        }
+      }
+    } else if (reaction === 'startle') {
+      m.state = 'startle';
+      m.timer = 3.6;
+    } else if (reaction === 'charge') {
+      m.state = 'attack';
+      m.attack = { phase: 'approach', t: 0, left: WILD_ATTACK.duration, ox: m.herd.cx, oz: m.herd.cz, dx: 0, dz: 1, hit: false };
+    } else {
+      m.state = 'watch';
+    }
+  }
+
+  /** It gives up the chase and goes back to grazing, still wary. */
+  calmDown(m: WildCreature): void {
+    m.state = 'graze';
+    m.attack = undefined;
+    m.timer = 3;
+    m.calm = Math.max(m.calm, 20);
+    m.alert = Math.max(m.alert, 10);
+    m.herd.cx = m.mover.pos.x;
+    m.herd.cz = m.mover.pos.z;
+  }
+
+  /** Something landed nearby (a missed ball): creatures within `r` notice and stay alert. */
+  disturb(x: number, z: number, r: number, seconds: number): void {
+    for (const m of this.creatures) {
+      if (m.state !== 'graze' && m.state !== 'wander') continue;
+      if (Math.hypot(m.mover.pos.x - x, m.mover.pos.z - z) < r) m.alert = Math.max(m.alert, seconds);
+    }
+  }
+
   /** The closest wild creature the player can start a battle with, if any. */
   nearestEngageable(player: THREE.Vector3): WildCreature | null {
     let best: WildCreature | null = null;
     let bd = ENGAGE_RADIUS;
     for (const m of this.creatures) {
-      if (m.state === 'battle' || m.state === 'gone' || m.state === 'flee') continue;
+      if (m.state === 'battle' || m.state === 'gone' || m.state === 'flee' || m.state === 'ball') continue;
       const d = Math.hypot(player.x - m.mover.pos.x, player.z - m.mover.pos.z);
       if (d < bd) {
         bd = d;
@@ -248,7 +456,7 @@ export class WildManager {
   /** The creature plus its nearest healthy herd-mate: the two that will fight. */
   opponentsFor(m: WildCreature): WildCreature[] {
     const mates = m.herd.members
-      .filter((o) => o !== m && o.state !== 'gone' && o.state !== 'battle' && o.mover.pos.distanceTo(m.mover.pos) < 16)
+      .filter((o) => o !== m && o.state !== 'gone' && o.state !== 'battle' && o.state !== 'ball' && o.mover.pos.distanceTo(m.mover.pos) < 16)
       .sort((a, b) => a.mover.pos.distanceTo(m.mover.pos) - b.mover.pos.distanceTo(m.mover.pos));
     return mates.length ? [m, mates[0]] : [m];
   }
@@ -258,6 +466,7 @@ export class WildManager {
     for (const m of list) {
       m.state = 'battle';
       m.tension = 0;
+      m.attack = undefined;
     }
   }
 
@@ -276,6 +485,7 @@ export class WildManager {
         m.state = 'graze';
         m.timer = 3;
         m.calm = 20;
+        m.alert = 20;
         m.herd.cx = m.mover.pos.x;
         m.herd.cz = m.mover.pos.z;
       }
@@ -286,7 +496,7 @@ export class WildManager {
 
   private despawnFar(player: THREE.Vector3): void {
     for (const h of this.herds) {
-      if (h.members.some((m) => m.state === 'battle')) continue;
+      if (h.members.some((m) => m.state === 'battle' || m.state === 'ball')) continue;
       if (Math.hypot(h.cx - player.x, h.cz - player.z) > DESPAWN) for (const m of [...h.members]) this.removeMember(m);
     }
     this.herds = this.herds.filter((h) => h.members.length);
@@ -334,7 +544,7 @@ export class WildManager {
       root.position.copy(mover.pos);
       const m: WildCreature = {
         id: this.nextId++, creature, model, root, mover, herd, state: 'graze', timer: this.rng.next() * 3,
-        tx: x, tz: z, tension: 0, calm: 0, fade: 0,
+        tx: x, tz: z, tension: 0, calm: 0, fade: 0, alert: 0,
       };
       herd.members.push(m);
       this.root.add(root);

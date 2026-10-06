@@ -3,7 +3,7 @@ import type { GraphicsQuality } from './render';
 /** Rebindable actions. Esc is reserved for the pause menu. */
 export type Action =
   | 'forward' | 'back' | 'left' | 'right' | 'sprint' | 'jump' | 'climb' | 'interact'
-  | 'map' | 'bag' | 'party' | 'quests' | 'throw' | 'partner';
+  | 'map' | 'bag' | 'party' | 'quests' | 'throw' | 'partner' | 'heal';
 
 export const ACTION_LABELS: Record<Action, string> = {
   forward: 'Move forward',
@@ -18,8 +18,9 @@ export const ACTION_LABELS: Record<Action, string> = {
   bag: 'Open bag',
   party: 'Open party',
   quests: 'Open quests',
-  throw: 'Throw ball',
+  throw: 'Aim and throw a ball (hold)',
   partner: 'Call partner Pokemon',
+  heal: 'Use a Potion on yourself',
 };
 
 export const DEFAULT_KEYS: Record<Action, string> = {
@@ -37,6 +38,7 @@ export const DEFAULT_KEYS: Record<Action, string> = {
   quests: 'KeyJ',
   throw: 'KeyQ',
   partner: 'KeyF',
+  heal: 'KeyH',
 };
 
 export interface Settings {

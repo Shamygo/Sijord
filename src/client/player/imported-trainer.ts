@@ -4,6 +4,12 @@ import { instantiateAsset, loadAsset, loadedAsset, trainerUrl } from '../assets/
 import { locomotionRate, REI_STANCE_SPEED } from './locomotion';
 import type { AnimateInput, Avatar, GroundFn } from './types';
 
+/**
+ * Rei's overhand throw clip, measured on the final rig: the arm is cocked furthest back at
+ * about 0.18 s and the hand passes the shoulder going forward at about 0.26 s.
+ */
+export const THROW_CLIP = { windup: 0.18, release: 0.26 };
+
 /** Imported trainer skins, with baked keyframes where supplied and a terrain-aware fallback. */
 export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar {
   const root = driver.root;
@@ -13,7 +19,7 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
   type Link = { source: THREE.Object3D; target: THREE.Object3D; alignment: THREE.Quaternion };
   let links: Link[] = [];
   let mixer: THREE.AnimationMixer | undefined, active: THREE.AnimationAction | undefined;
-  let clips: THREE.AnimationClip[] = [], gestureTime = 0, landingTime = 0;
+  let clips: THREE.AnimationClip[] = [], gestureTime = 0, landingTime = 0, aimHold = false;
   let previousAnim: AnimateInput['anim'] = 'idle';
   let plantedFoot = -1;
   const footAnchor = new THREE.Vector3();
@@ -143,6 +149,16 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
       }
       if(mixer){
         gestureTime=Math.max(0,gestureTime-dt);landingTime=Math.max(0,landingTime-dt);
+        if(aimHold) {
+          // Draw the arm back, then hold the wound-up pose until the throw is released.
+          if(active?.getClip().name!=='throw')setClip('throw',true);
+          if(active && active.time>=THROW_CLIP.windup){active.time=THROW_CLIP.windup;active.timeScale=0;}
+          else if(active)active.timeScale=1;
+          mixer.update(dt);
+          if(motion){const decay=Math.exp(-14*dt);motion.position.x*=decay;motion.position.z*=decay;motion.position.y=0;}
+          plantedFoot=-1;previousAnim=snapshot.anim;
+          return;
+        }
         if((previousAnim==='jump'||previousAnim==='fall')&&snapshot.anim==='idle'&&!gestureTime){setClip('land',true);landingTime=.3;}
         if(snapshot.anim!=='idle')landingTime=0;
         // 4.5 m/s exploration is a jog: use the running stride rather than a frantic walk.
@@ -187,7 +203,22 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
       else pose();
       previousAnim=snapshot.anim;
     },
-    gesture(name) { if(mixer){setClip(name,true);gestureTime=clips.find(c=>c.name===name)?.duration ?? 1;}else driver.gesture(name); },
+    gesture(name) {
+      if(!mixer){driver.gesture(name);return;}
+      const duration=clips.find(c=>c.name===name)?.duration ?? 1;
+      if(aimHold && name==='throw' && active?.getClip().name==='throw') {
+        // Release from the wound-up pose rather than starting the wind-up again.
+        aimHold=false;active.timeScale=1;gestureTime=Math.max(.1,duration-active.time);return;
+      }
+      aimHold=false;setClip(name,true);gestureTime=duration;
+    },
+    aim(on: boolean) {
+      if(!mixer)return;
+      if(on===aimHold)return;
+      aimHold=on;
+      if(on){setClip('throw',true);gestureTime=0;landingTime=0;}
+      else if(active){active.timeScale=1;gestureTime=0;}
+    },
     setGround(fn: GroundFn | null) { driver.setGround(fn); },
     setAppearance(next) {
       current = next;

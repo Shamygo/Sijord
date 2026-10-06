@@ -42,6 +42,12 @@ export interface Avatar {
   animate(dt: number, snapshot: AnimateInput): void;
   /** Play a one-shot upper-body gesture while standing, e.g. throwing a ball. */
   gesture(name: 'throw'): void;
+  /**
+   * Hold the throw wound up while aiming (true), or drop the pose without throwing (false).
+   * A gesture('throw') while held releases from the wound-up pose. Optional: models without
+   * clips just throw from the start.
+   */
+  aim?(on: boolean): void;
   /** Terrain height function used to plant the feet on slopes (null: estimate from motion). */
   setGround(fn: GroundFn | null): void;
   dispose(): void;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { catchChance, rollCatch, type CatchRoll } from '../../shared/battle/catch';
 import { createCreature, displayName, evolve, healCreature, isUsable, maxHp, teachMove } from '../../shared/battle/creature';
 import { randomSeed, Rng } from '../../shared/battle/rng';
 import { levelCap } from '../../shared/battle/stats';
@@ -10,16 +11,21 @@ import { classInfo } from '../../shared/classes';
 import { ITEMS, PARTY_MAX, STARTING_BAG } from '../../shared/items';
 import type { BattleControl, BattleFrame } from '../../shared/battle/session';
 import { RemoteBattle } from '../battle/remote';
-import type { PlayerProfile, PlayerSnapshot } from '../../shared/types';
+import type { BallCatchFx, BallThrowFx, PlayerProfile, PlayerSnapshot } from '../../shared/types';
+import { failedCatchReaction, isUnaware, type CatchReaction } from '../../shared/overworld-catch';
+import { chargeDamage, knockdownTilt, KNOCKDOWN_ANGLE, TRAINER_HP, TrainerVitals, trainerMaxHp } from '../../shared/trainer-vitals';
 import { NetClient, serverOverride, type NetEvents } from '../net/client';
 import { P2PClient } from '../net/p2p';
 import { Professor } from '../npc/professor';
 import { Rival } from '../npc/rival';
 import { Follower } from '../overworld/follower';
 import { WildManager, type WildCreature } from '../overworld/wild';
+import { OverworldThrows } from '../overworld/throw';
+import { launchElevation, launchVelocity, solveLaunch, type Vec3 } from '../overworld/ball-flight';
+import { THROW_CLIP } from '../player/imported-trainer';
 import { createAvatar } from '../player/avatar';
 import { PLAYER_TUNING, PlayerController } from '../player/controller';
-import { ThirdPersonCamera } from '../player/camera';
+import { CAMERA_TUNING, ThirdPersonCamera } from '../player/camera';
 import { RemotePlayer } from '../player/remote';
 import { Hud, type Quest } from '../ui/hud';
 import { GameMenu, type MenuTab } from '../ui/menu';
@@ -104,6 +110,28 @@ export class Game {
   private suppressPause = false;
   private started = false;
 
+  /** The trainer's own HP and knockdowns (DESIGN §5.4). */
+  private vitals: TrainerVitals;
+  private knockedOut = false;
+  /** Overworld throws: aim preview, flights, catches and missed balls lying around. */
+  private throws: OverworldThrows;
+  private aiming = false;
+  private aimTime = 0;
+  private aimBall = 'poke-ball';
+  private aimCamHold = 0;
+  private throwCooldown = 0;
+  /** Throw ids only ever grow, even across reloads, so the partner never mistakes a new throw for an old one. */
+  private throwSeq = Date.now();
+  private catchRng = new Rng(randomSeed());
+  /** A creature that broke out and will start a battle once it has popped back out. */
+  private pendingBattle: { m: WildCreature; t: number } | null = null;
+  /** The latest throw and catch, repeated in snapshots for a moment so the partner sees them. */
+  private netThrow: { fx: BallThrowFx; until: number } | null = null;
+  private netCatch: { fx: BallCatchFx; until: number } | null = null;
+  private lastCatch: { species: string; chance: number; unaware: boolean; caught?: boolean; reaction?: CatchReaction } | null = null;
+  /** Dev only: force overworld catch outcomes in scripted tests. */
+  debugCatch: { caught?: boolean; reaction?: CatchReaction } | null = null;
+
   constructor(private parent: HTMLElement, private save: SaveData) {
     this.flags = new Set(save.flags);
     const canvas = document.createElement('canvas');
@@ -115,6 +143,8 @@ export class Game {
     save.bag ??= { ...STARTING_BAG };
     const mods = classInfo(save.profile.playerClass).modifiers;
     this.controller = new PlayerController({ staminaDrain: PLAYER_TUNING.staminaDrain / mods.stamina });
+    const hpMax = trainerMaxHp(1, mods.maxHp);
+    this.vitals = new TrainerVitals(hpMax, save.trainerHp && save.trainerHp > 0 ? save.trainerHp : hpMax);
 
     this.world = createWorld();
     applyAtmosphere(this.scene);
@@ -127,6 +157,8 @@ export class Game {
     this.pipeline = new RenderPipeline(this.renderer, this.scene, this.cam.camera, this.settings.quality);
     this.avatar = createAvatar(save.profile.appearance);
     this.avatar.setGround((x, z) => this.world.heightAt(x, z));
+    // Yaw first, then tip over around the trainer's own left-right axis when knocked down.
+    this.avatar.root.rotation.order = 'YXZ';
     this.scene.add(this.avatar.root);
 
     const a = this.world.anchors;
@@ -143,6 +175,16 @@ export class Game {
     this.scene.add(this.follower.root);
     this.wild = new WildManager(this.world, randomSeed());
     this.scene.add(this.wild.root);
+    this.throws = new OverworldThrows({
+      world: this.world,
+      targets: () => this.wild.creatures.filter((m) => m.state !== 'battle' && m.state !== 'ball' && m.state !== 'gone'),
+      onHit: (m, ball, id, at) => this.overworldCatchRoll(m, ball, id, at),
+      onResult: (m, ball, roll) => this.overworldCatchResult(m, ball, roll),
+      // A ball thudding down nearby puts creatures on their guard.
+      onRest: (_ball, at) => this.wild.disturb(at.x, at.z, 4.5, 10),
+      onSink: (ball) => this.hud.showToast(`The ${ITEMS[ball]?.name ?? 'ball'} sank`, 'Balls that land in deep water are lost', 2.2),
+    });
+    this.scene.add(this.throws.root);
     // Added before the first movement update, which is when the collider list gets indexed.
     this.world.colliders.push({ kind: 'circle', x: a.professor.x, z: a.professor.z, r: 0.45 });
 
@@ -235,6 +277,9 @@ export class Game {
         }
         if (this.remoteBattleHost === id) this.receiveRemoteBattle(s.battleFrame);
         if (pf) pf.lead = s.lead && !s.battle && SPECIES[s.lead] ? s.lead : null;
+        // The partner's throws replay here (catching itself is decided on their side).
+        if (s.ballThrow && ITEMS[s.ballThrow.ball] && this.throws.remoteThrow(id, s.ballThrow, THROW_CLIP.release)) this.partners.get(id)?.remote.avatar.gesture('throw');
+        if (s.ballCatch && ITEMS[s.ballCatch.ball]) this.throws.remoteCatch(id, s.ballCatch);
       },
       onPeerLeft: (id) => {
         this.partnerBattles.delete(id); this.battle?.director.partnerLeft(id);
@@ -300,6 +345,36 @@ export class Game {
   /** Dev only: run game time faster (automated tests in slow headless browsers). */
   debugTimeScale = 1;
 
+  /** Dev only: spawn a herd `dist` metres in front of the player. Returns how many creatures it has. */
+  debugSpawnWild(speciesId = 'nibblet', level = 4, dist = 9): number {
+    const p = this.controller.position;
+    const yaw = this.controller.yaw;
+    return this.wild.spawnHerd(p.x + Math.sin(yaw) * dist, p.z + Math.cos(yaw) * dist, speciesId, level).members.length;
+  }
+
+  /** Dev only: turn the camera so the crosshair sits on (x, y, z), as a player would with the mouse. */
+  debugAimAt(x: number, y: number, z: number): void {
+    const p = this.controller.position;
+    let best = { yaw: Math.atan2(x - p.x, z - p.z), pitch: CAMERA_TUNING.defaultPitch, err: Infinity };
+    const target = new THREE.Vector3(x, y, z);
+    for (let pass = 0; pass < 2; pass++) {
+      const yaws = pass ? [best.yaw - 0.06, best.yaw - 0.03, best.yaw, best.yaw + 0.03, best.yaw + 0.06] : [best.yaw];
+      for (const yaw of yaws) {
+        for (let pitch = CAMERA_TUNING.minPitch; pitch <= CAMERA_TUNING.maxPitch; pitch += 0.005) {
+          this.cam.setLook(yaw, pitch);
+          this.cam.update(1e-4, p, this.world, false);
+          const cam = this.cam.camera;
+          const toT = target.clone().sub(cam.position).normalize();
+          const err = toT.angleTo(cam.getWorldDirection(new THREE.Vector3()));
+          if (err < best.err) best = { yaw, pitch, err };
+        }
+      }
+    }
+    this.controller.yaw = best.yaw;
+    this.cam.setLook(best.yaw, best.pitch);
+    this.cam.update(1e-4, p, this.world, false);
+  }
+
   /** Dev only: the current battle, for scripted tests. */
   get debugBattle(): BattleDirector | null {
     return this.battle?.director ?? null;
@@ -320,6 +395,8 @@ export class Game {
   /** Menu keys and Esc, delivered straight from the key event. */
   private onInstant(a: Action | 'pause'): void {
     if (!this.started) return;
+    // Holding the throw key aims; the frame loop handles it (press, hold, release).
+    if (a === 'throw') return;
     // Battles and scripted scenes own the keyboard.
     if ((this.battle && this.battle.closing === null) || this.remoteBattleHost) {
       if (a === 'pause') this.releaseMouse();
@@ -382,7 +459,8 @@ export class Game {
       if (this.menu.isOpen && this.menu.current === tab) this.menu.close();
       else this.openMenu(tab);
     } else if (a === 'throw') {
-      this.hud.showToast('Not yet', 'Catching wild Pokemon arrives in the next update', 2.5);
+      // The hotbar button: aiming needs a held key or mouse button.
+      this.hud.showToast('Aim, then throw', `Hold ${keyLabel(this.settings.keys.throw)} or the right mouse button to aim, release to throw`, 3);
     } else if (a === 'partner') {
       if (!this.party.length) {
         this.hud.showToast('No Pokemon yet', 'Professor Hazel will give you your first partner', 2.5);
@@ -576,6 +654,252 @@ export class Game {
         this.hud.showToast(`${displayName(c)} was sent to the PC`, 'Your party is full. Swap it in at Hazel\'s lab.', 3.5);
       }
     }
+  }
+
+  // ---- Overworld throws (DESIGN §5.1-5.4) -----------------------------------------------------
+
+  /** Ball kinds in the bag, in item order. */
+  private ballKinds(): string[] {
+    const bag = this.save.bag ?? {};
+    return Object.keys(ITEMS).filter((id) => ITEMS[id].category === 'balls' && (bag[id] ?? 0) > 0);
+  }
+
+  /**
+   * Where a throw leaves the hand and how fast. The ball goes where the crosshair (the camera's
+   * centre) points, on the flatter arc that reaches it; aimed at the sky or out of reach, it's a
+   * long lob that rises with the camera.
+   */
+  private throwLaunch(): { from: Vec3; vel: Vec3; creature: WildCreature | null } {
+    const yaw = this.cam.yaw;
+    const p = this.controller.position;
+    // Rei's right hand as the throw comes over: a little right of and in front of the shoulder.
+    const fx = Math.sin(yaw);
+    const fz = Math.cos(yaw);
+    const from = { x: p.x - fz * 0.25 + fx * 0.2, y: p.y + 1.45, z: p.z + fx * 0.25 + fz * 0.2 };
+    const cam = this.cam.camera;
+    const hit = this.throws.aimRay(cam.position, cam.getWorldDirection(new THREE.Vector3()));
+    const solved = hit && solveLaunch(from, hit.point);
+    if (solved) return { from, vel: solved, creature: hit.creature };
+    return { from, vel: launchVelocity(yaw, Math.min(Math.PI / 4, launchElevation(this.cam.pitch, CAMERA_TUNING.defaultPitch))), creature: null };
+  }
+
+  private startAim(): void {
+    const kinds = this.ballKinds();
+    if (!kinds.includes(this.aimBall)) this.aimBall = kinds[0];
+    this.aiming = true;
+    this.aimTime = 0;
+    this.aimCamHold = 0;
+    this.avatar.aim?.(true);
+    this.cam.setAim(true);
+    this.hud.setAiming(true);
+  }
+
+  /** Put the ball away without throwing. */
+  private cancelAim(): void {
+    if (!this.aiming) return;
+    this.aiming = false;
+    this.avatar.aim?.(false);
+    this.cam.setAim(false);
+    this.hud.setAiming(false);
+    this.throws.hidePreview();
+  }
+
+  private releaseThrow(): void {
+    const bag = (this.save.bag ??= {});
+    const ball = this.aimBall;
+    if (!bag[ball]) {
+      this.cancelAim();
+      this.hud.showToast(`No ${ITEMS[ball]?.name ?? 'balls'} left`, '', 1.8);
+      return;
+    }
+    bag[ball]--;
+    if (!bag[ball]) delete bag[ball];
+    writeSave(this.save);
+    const { from, vel } = this.throwLaunch();
+    // The ball leaves the hand when the arm comes over: sooner from a full wind-up.
+    const delay = Math.max(0.05, THROW_CLIP.release - Math.min(this.aimTime, THROW_CLIP.windup));
+    const id = ++this.throwSeq;
+    this.avatar.gesture('throw');
+    this.throws.launch({ id, ball, from, vel, delay, local: true });
+    this.netThrow = { fx: { id, ball, from: [from.x, from.y, from.z], vel: [vel.x, vel.y, vel.z] }, until: performance.now() + 1500 };
+    this.aiming = false;
+    this.hud.setAiming(false);
+    this.throws.hidePreview();
+    // Keep the shoulder view a moment to watch the ball fly.
+    this.aimCamHold = 0.7;
+    this.throwCooldown = 0.6;
+    if (this.menu?.isOpen) this.menu.refresh();
+  }
+
+  /** Hold to aim, release to throw; E cancels and the wheel picks the ball. */
+  private updateAim(dt: number, blocked: boolean): void {
+    const input = this.input;
+    this.throwCooldown = Math.max(0, this.throwCooldown - dt);
+    if (this.aimCamHold > 0) {
+      this.aimCamHold -= dt;
+      if (this.aimCamHold <= 0 && !this.aiming) this.cam.setAim(false);
+    }
+    const able = !blocked && !this.vitals.knockedDown && !this.controller.climbing;
+    if (this.aiming) {
+      if (!able) {
+        this.cancelAim();
+        return;
+      }
+      this.aimTime += dt;
+      if (input.consumeAction('interact')) {
+        this.cancelAim();
+        return;
+      }
+      const kinds = this.ballKinds();
+      if (input.wheel && kinds.length > 1) {
+        const i = Math.max(0, kinds.indexOf(this.aimBall));
+        this.aimBall = kinds[(i + (input.wheel > 0 ? 1 : -1) + kinds.length) % kinds.length];
+      }
+      // Turn to face where the camera looks.
+      const d = Math.atan2(Math.sin(this.cam.yaw - this.controller.yaw), Math.cos(this.cam.yaw - this.controller.yaw));
+      this.controller.yaw += d * (1 - Math.exp(-18 * dt));
+      if (input.consumeAimRelease() || input.consumeClick()) this.releaseThrow();
+      return;
+    }
+    if (!input.consumeAimPress()) return;
+    if (!able || this.throwCooldown > 0 || !this.controller.grounded) return;
+    if (!this.ballCount()) {
+      this.hud.showToast('No Poke Balls', this.flags.has('got-balls') ? 'Professor Hazel can spare a few more' : 'Professor Hazel will give you some', 2.2);
+      return;
+    }
+    this.startAim();
+  }
+
+  /** Arc preview and overlay, once the camera has moved this frame (so both match what's drawn). */
+  private updateAimView(): void {
+    if (!this.aiming) return;
+    this.cam.camera.updateMatrixWorld();
+    const { from, vel, creature } = this.throwLaunch();
+    const target = this.throws.preview(from, vel);
+    this.showAimHud(target, !!creature);
+  }
+
+  private showAimHud(target: WildCreature | null, onTarget: boolean): void {
+    const bag = this.save.bag ?? {};
+    let view;
+    if (target) {
+      const c = target.creature;
+      const h = Math.max(0.35, target.model.height);
+      const mid = target.root.position.clone().add(new THREE.Vector3(0, h * 0.5, 0));
+      const scr = this.project(mid);
+      const right = new THREE.Vector3(-Math.cos(this.cam.yaw), 0, Math.sin(this.cam.yaw));
+      const edge = this.project(mid.clone().addScaledVector(right, Math.max(target.model.radius, h * 0.55) + 0.25));
+      const p = this.controller.position;
+      view = {
+        name: displayName(c), level: c.level, hp: c.hp, maxHp: maxHp(c), x: scr.x, y: scr.y, visible: scr.visible,
+        radius: Math.hypot(edge.x - scr.x, edge.y - scr.y),
+        unaware: isUnaware({ state: target.state, alert: target.alert, x: target.mover.pos.x, z: target.mover.pos.z, yaw: target.mover.yaw, px: p.x, pz: p.z }),
+      };
+    }
+    this.hud.aim.show({
+      ball: this.aimBall, count: bag[this.aimBall] ?? 0, balls: this.ballKinds(), target: view, onTarget,
+      throwKey: `${keyLabel(this.settings.keys.throw)} / RMB`, cancelKey: keyLabel(this.settings.keys.interact),
+    });
+  }
+
+  /** A ball hit a wild creature: roll the catch (DESIGN §5.2) with the overworld or unaware modifier. */
+  private overworldCatchRoll(m: WildCreature, ball: string, id: number, at: Vec3): CatchRoll {
+    const c = m.creature;
+    const p = this.controller.position;
+    const unaware = isUnaware({ state: m.state, alert: m.alert, x: m.mover.pos.x, z: m.mover.pos.z, yaw: m.mover.yaw, px: p.x, pz: p.z });
+    const chance = catchChance({
+      maxHp: maxHp(c), hp: c.hp, catchRate: species(c.species).catchRate, ball, status: c.status, level: c.level,
+      partyLevel: Math.max(1, ...this.party.map((x) => x.level)), cap: this.levelCap, throw: unaware ? 'unaware' : 'overworld',
+      classMod: classInfo(this.save.profile.playerClass).modifiers.catchRate,
+    });
+    let roll = rollCatch(chance, this.catchRng);
+    const forced = this.debugCatch?.caught;
+    if (forced !== undefined) roll = forced ? { caught: true, shakes: 3 } : { caught: false, shakes: Math.min(2, roll.shakes) };
+    this.wild.hold(m);
+    this.markDex(c.species, false);
+    this.lastCatch = { species: c.species, chance, unaware };
+    this.netCatch = { fx: { id, ball, at: [at.x, at.y, at.z], shakes: roll.shakes, caught: roll.caught }, until: performance.now() + 1500 };
+    return roll;
+  }
+
+  /** The shakes are done: it's caught, or it bursts out and reacts by temperament (DESIGN §5.3). */
+  private overworldCatchResult(m: WildCreature, _ball: string, roll: CatchRoll): void {
+    const c = m.creature;
+    const name = displayName(c);
+    if (roll.caught) {
+      this.wild.caught(m);
+      if (c.status === 'tox') c.status = 'psn';
+      if (this.lastCatch) this.lastCatch.caught = true;
+      void this.storeCaught([c]).then(() => this.onPartyChanged());
+      return;
+    }
+    const ref = Math.min(Math.max(1, ...this.party.map((x) => x.level)), this.levelCap);
+    const canBattle = this.party.some(isUsable);
+    let reaction = failedCatchReaction(species(c.species).temperament, c.level - ref, this.catchRng.next(), canBattle);
+    if (this.debugCatch?.reaction) reaction = this.debugCatch.reaction === 'battle' && !canBattle ? 'charge' : this.debugCatch.reaction;
+    if (this.lastCatch) Object.assign(this.lastCatch, { caught: false, reaction });
+    this.wild.breakOut(m, reaction);
+    const near = ['Oh no! It broke free!', 'Aww! It appeared to be caught!', 'Argh! Almost had it!', 'Gah! It was so close, too!'][roll.shakes] ?? 'It broke free!';
+    if (reaction === 'flee') this.hud.showToast(near, `The wild ${name} fled!`, 2.5);
+    else if (reaction === 'startle') this.hud.showToast(near, `The wild ${name} backed off. It's wary of you now.`, 2.5);
+    else if (reaction === 'charge') this.hud.showToast(`The wild ${name} is furious!`, `It's charging you! Get out of its way, or press ${keyLabel(this.settings.keys.interact)} to battle it.`, 3.2);
+    else {
+      this.hud.showToast(near, `The wild ${name} wants to fight!`, 2);
+      this.pendingBattle = { m, t: 0.5 };
+    }
+  }
+
+  /** A charging creature connected: knocked down, HP lost, maybe knocked out. */
+  private onTrainerHit(m: WildCreature): void {
+    if (this.battle || this.remoteBattleHost || this.talking || this.scripted) return;
+    const dmg = chargeDamage(m.creature.level);
+    const r = this.vitals.hit(dmg);
+    if (r === 'ignored') return;
+    this.cancelAim();
+    const p = this.controller.position;
+    // Spun round to face what hit you, and shoved back along its lunge.
+    this.controller.yaw = Math.atan2(m.mover.pos.x - p.x, m.mover.pos.z - p.z);
+    const dx = m.attack?.dx ?? -Math.sin(this.controller.yaw);
+    const dz = m.attack?.dz ?? -Math.cos(this.controller.yaw);
+    this.controller.velocity.set(dx * 4.5, 2.2, dz * 4.5);
+    this.controller.grounded = false;
+    this.hud.hurt();
+    if (r === 'out') {
+      this.knockedOut = true;
+      this.hud.showToast('You were knocked out!', `The wild ${displayName(m.creature)} was too much`, 2);
+    } else this.hud.showToast(`The wild ${displayName(m.creature)} slammed into you!`, `-${dmg} HP`, 1.8);
+    this.save.trainerHp = this.vitals.hp;
+  }
+
+  /** H: a Potion from the bag patches the trainer up. */
+  private healSelf(): void {
+    const bag = (this.save.bag ??= {});
+    const name = ITEMS.bandage?.name ?? 'Potion';
+    if (this.vitals.full) {
+      this.hud.showToast('You\'re not hurt', '', 1.5);
+      return;
+    }
+    if (!bag.bandage) {
+      this.hud.showToast(`No ${name}s left`, 'Your HP comes back slowly while nothing is attacking you', 2.2);
+      return;
+    }
+    const healed = this.vitals.heal(TRAINER_HP.potionHeal);
+    bag.bandage--;
+    if (!bag.bandage) delete bag.bandage;
+    this.save.trainerHp = this.vitals.hp;
+    writeSave(this.save);
+    this.hud.showToast('You patched yourself up', `+${Math.round(healed)} HP · ${name} ×${bag.bandage ?? 0} left`, 2);
+    if (this.menu?.isOpen) this.menu.refresh();
+  }
+
+  private pickupBall(id: number): void {
+    const ball = this.throws.pickup(id);
+    if (!ball) return;
+    const bag = (this.save.bag ??= {});
+    bag[ball] = (bag[ball] ?? 0) + 1;
+    writeSave(this.save);
+    this.hud.showToast(`Picked up a ${ITEMS[ball]?.name ?? 'ball'}`, `×${bag[ball]} in your bag`, 1.6);
+    if (this.menu?.isOpen) this.menu.refresh();
   }
 
   private giveStarter(starter: string): void {
@@ -805,17 +1129,30 @@ export class Game {
     }
   }
 
-  /** Every Pokemon fainted: back to Hazel's lab, healed, with a word from the professor. */
-  private async blackout(): Promise<void> {
+  /**
+   * Every Pokemon fainted, or the trainer was knocked out: back to Hazel's lab, everyone patched
+   * up, with a word from the professor.
+   */
+  private async blackout(reason: 'team' | 'trainer' = 'team'): Promise<void> {
+    this.cancelAim();
     this.beginScene();
     this.scripted = true;
-    await this.hud.dialogue.play([{ speaker: '', text: 'You have no Pokemon left that can fight. You hurried back to Bramblewick to protect them...' }]);
+    const text = reason === 'trainer'
+      ? 'Everything went dark... Someone found you in the grass and helped you back to Bramblewick.'
+      : 'You have no Pokemon left that can fight. You hurried back to Bramblewick to protect them...';
+    await this.hud.dialogue.play([{ speaker: '', text }]);
     await this.hud.fade(true);
     const a = this.world.anchors;
     const spot = a.professor.clone().add(new THREE.Vector3(0, 0, 2.4));
     this.controller.teleport(new THREE.Vector3(spot.x, this.world.heightAt(spot.x, spot.z), spot.z), Math.PI);
     this.cam.snapBehind(this.controller.position, Math.PI);
     this.wild.clear();
+    // Balls still in the air are gone; missed balls stay where they fell.
+    this.throws.clear(true);
+    this.pendingBattle = null;
+    this.vitals.restore();
+    this.knockedOut = false;
+    this.save.trainerHp = this.vitals.hp;
     for (const c of this.party) healCreature(c);
     this.onPartyChanged();
     await sleep(400);
@@ -837,7 +1174,10 @@ export class Game {
   debugAdvance(ms: number): void { for (let t = 0; t < ms; t += 1000 / 60) this.frame(1 / 60); }
 
   debugText(): string {
-    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null });
+    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
+      trainerHp: { hp: Math.round(this.vitals.hp * 10) / 10, max: this.vitals.max, down: this.vitals.knockedDown },
+      throwing: { aiming: this.aiming, ball: this.aimBall, balls: Object.fromEntries(this.ballKinds().map((b) => [b, this.save.bag?.[b] ?? 0])), inFlight: this.throws.busy, dropped: this.throws.droppedCount, lastCatch: this.lastCatch },
+      wildCreatures: this.wild.creatures.map((m) => ({ species: m.creature.species, level: m.creature.level, state: m.state, alert: Math.round(m.alert), attack: m.attack?.phase, position: [m.mover.pos.x, m.mover.pos.z].map((v) => Math.round(v * 10) / 10) })) });
   }
 
   private frame(step?: number): void {
@@ -859,7 +1199,8 @@ export class Game {
     }
     if (input.locked && !this.menu.isOpen) {
       this.cam.onMouseDelta(input.mouseDX, input.mouseDY * (this.settings.invertY ? -1 : 1));
-      this.cam.onWheel(input.wheel);
+      // While aiming the wheel picks the ball instead of zooming.
+      if (!this.aiming) this.cam.onWheel(input.wheel);
     }
 
     this.hud.setPointerLocked(input.locked || this.talking || this.menu.isOpen || inBattle || this.scripted);
@@ -867,6 +1208,9 @@ export class Game {
     if (this.talking) {
       if (input.consumeAction('interact') || input.consume('Space') || input.consume('Enter')) this.hud.dialogue.next();
     }
+    this.updateAim(dt, busy);
+    if (!busy && input.consumeAction('heal')) this.healSelf();
+    const knocked = this.vitals.knockedDown;
     if (actionMode) {
       const x = Math.sin(this.cam.yaw) * move.forward - Math.cos(this.cam.yaw) * move.right;
       const z = Math.cos(this.cam.yaw) * move.forward + Math.sin(this.cam.yaw) * move.right;
@@ -874,7 +1218,8 @@ export class Game {
       if (battle) battle.director.stage.pilot({side:0,slot:0},movement);
       else if (view) this.battleControl = {...this.battleControl, id:view.id, movement:{...movement,dodgeToken:(this.battleControl?.movement?.dodgeToken ?? 0)+(move.jump ? 1 : 0)}};
     }
-    if (this.talking || this.menu.isOpen || (this.scripted && !inBattle) || actionMode) {
+    // Aiming roots the trainer (they turn with the camera); a knockdown takes control away.
+    if (this.talking || this.menu.isOpen || (this.scripted && !inBattle) || actionMode || knocked || this.aiming) {
       move.forward = move.right = 0;
       move.jump = move.sprint = move.climb = false;
     }
@@ -882,7 +1227,19 @@ export class Game {
     const snap = this.controller.snapshot();
     this.avatar.root.position.copy(this.controller.position);
     this.avatar.root.rotation.y = this.controller.yaw;
+    // Knockdown: tip over backwards, lie there, get up (the landing clip plays as they rise).
+    const downT = this.vitals.downTime;
+    const down = knockdownTilt(downT);
+    this.avatar.root.rotation.x = -down * KNOCKDOWN_ANGLE;
+    if (knocked && downT < TRAINER_HP.knockdown - 0.7) snap.anim = 'fall';
     this.avatar.animate(dt, snap);
+    this.vitals.update(dt, inBattle || this.wild.attacking);
+    this.save.trainerHp = this.vitals.hp;
+    this.hud.setTrainerHp(this.vitals.hp, this.vitals.max);
+    if (this.knockedOut && !busy && (!knocked || downT > 0.9)) {
+      this.knockedOut = false;
+      void this.blackout('trainer');
+    }
     if (battle) {
       if (battle.closing === null) battle.director.update(dt);
       else {
@@ -899,28 +1256,45 @@ export class Game {
     this.remoteBattle?.update(dt);
     const focus = actionMode ? battle?.director.stage.spot({side:0,slot:0}) ?? this.remoteBattle?.focus ?? this.controller.position : this.controller.position;
     this.cam.update(dt, focus, this.world, move.sprint && snap.speed > 5);
+    this.updateAimView();
 
     // Interaction
     if (!busy) {
       const pos = this.controller.position;
       const nearProf = pos.distanceTo(this.professor.position) < TALK_RADIUS;
       const nearRival = this.rival.visible && pos.distanceTo(this.rival.position) < TALK_RADIUS;
+      const pickup = !nearProf && !nearRival && !this.aiming ? this.throws.nearestPickup(pos) : null;
       const wildMon = !nearProf && !nearRival ? this.wild.nearestEngageable(pos) : null;
       const canFight = this.party.some(isUsable);
       const invite = [...this.partnerBattles].find(([,f]) => f.joinable && Math.hypot(pos.x-f.center[0],pos.z-f.center[2]) < 14);
-      if (invite && canFight) this.hud.setPrompt('Join your friend’s battle');
+      // Lying on the ground: no prompts until back on your feet.
+      if (knocked) this.hud.setPrompt(null);
+      else if (invite && canFight) this.hud.setPrompt('Join your friend’s battle');
       else if (nearProf) this.hud.setPrompt(`Talk to ${this.professor.name}`);
       else if (nearRival) this.hud.setPrompt(`Talk to ${this.rival.name}`);
+      else if (pickup) this.hud.setPrompt(`Pick up the ${ITEMS[pickup.ball]?.name ?? 'ball'}`);
       else if (wildMon) this.hud.setPrompt(canFight ? `Battle the wild ${displayName(wildMon.creature)} · Lv. ${wildMon.creature.level}` : `Wild ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
       else if(this.controller.climbing)this.hud.setPrompt(`${keyLabel(this.settings.keys.climb)} ascend · ${keyLabel(this.settings.keys.back)} + ${keyLabel(this.settings.keys.climb)} descend · ${keyLabel(this.settings.keys.jump)} let go`,keyLabel(this.settings.keys.climb));
       else if(this.controller.nearClimb(this.world))this.hud.setPrompt('Climb the lookout ladder',keyLabel(this.settings.keys.climb));
       else this.hud.setPrompt(null);
-      if (input.consumeAction('interact')) {
+      if (!knocked && input.consumeAction('interact')) {
         if (invite && canFight) this.joinRemoteBattle(invite[0],invite[1]);
         else if (nearProf) void this.talkToProfessor();
         else if (nearRival) void this.talkToRival();
+        else if (pickup) this.pickupBall(pickup.id);
         else if (wildMon && canFight) void this.startWildBattle(wildMon, false);
       }
+      // A creature that broke out of a ball and wants a fight starts it once it has popped out.
+      const pending = this.pendingBattle;
+      if (pending && (pending.t -= dt) <= 0) {
+        this.pendingBattle = null;
+        const m = pending.m;
+        if (m.state !== 'gone' && m.state !== 'battle' && m.state !== 'ball' && canFight && !this.battle) {
+          this.cancelAim();
+          void this.startWildBattle(m, true);
+        } else if (m.state !== 'gone' && m.state !== 'battle') this.wild.breakOut(m, 'startle');
+      }
+
       // A territorial Pokemon that reaches you starts the fight itself.
       const charger = this.battle ? null : this.wild.charger(pos);
       if (charger) {
@@ -960,8 +1334,13 @@ export class Game {
       pf.follower.setVisible(!!pf.lead && p.remote.root.visible);
       pf.follower.update(dt, rp, p.remote.avatar.root.rotation.y, pf.speed, this.world);
     }
+    this.throws.update(dt);
+    // A furious creature's lunge that connects knocks the trainer down.
+    for (const m of this.wild.consumeHits()) if (!busy) this.onTrainerHit(m);
     const lead = this.follower.active ? this.follower.species ?? undefined : undefined;
-    this.net.send({ ...snap, lead, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl }, now);
+    const ballThrow = this.netThrow && now < this.netThrow.until ? this.netThrow.fx : undefined;
+    const ballCatch = this.netCatch && now < this.netCatch.until ? this.netCatch.fx : undefined;
+    this.net.send({ ...snap, lead, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl, ballThrow, ballCatch, down: down > 0 ? Math.round(down * 100) / 100 : undefined }, now);
 
     // Also keeps the sun's shadow camera centred on the player.
     this.world.update(dt, this.elapsed, this.controller.position);

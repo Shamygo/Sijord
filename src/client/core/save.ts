@@ -22,6 +22,8 @@ export interface SaveData {
   box?: Creature[];
   /** Species ids seen in battle and caught, for the Dex. */
   dex?: { seen: string[]; caught: string[] };
+  /** The trainer's own HP (DESIGN §5.4). Missing means full. */
+  trainerHp?: number;
 }
 
 export function loadSave(): SaveData | null {
