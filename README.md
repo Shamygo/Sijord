@@ -43,7 +43,7 @@ For development, `npm run dev` serves the game at http://localhost:5173.
 
 ## What's in the game so far
 
-Milestones 1 and 2 are done and milestone 3 is nearly done. You get a trainer creator, Bramblewick with both players' houses and Professor Hazel's lab, a starter and a rival battle, and 45 Kanto species roaming Hearthmeadow in herds both players share. Battles are 2v2, in tactical or action mode, and you can catch in battle or by sneaking up and throwing in the overworld. A failed catch can make a Pokémon charge you: dodge it, calm it with a Treat or send your partner at it. There is a party of 6 with a PC box, a region Dex, and co-op battles a friend can join. [docs/HANDOFF.md](docs/HANDOFF.md) has the details.
+Milestones 1, 2 and 3 are done. You get a trainer creator, Bramblewick with both players' houses and Professor Hazel's lab, a starter and a rival battle, and 45 Kanto species roaming Hearthmeadow in herds both players share. Battles are 2v2, in tactical or action mode, and you can catch in battle or by sneaking up and throwing in the overworld. A failed catch can make a Pokémon charge you: dodge it, calm it with a Treat or send your partner at it. Hearthmeadow hides supply caches (the best ones on top of rocks and mesas), Lysfolk tablets that Professor Hazel trades Great Balls for, and pages of her lost field notes. There is a party of 6 with a PC box, a region Dex, and co-op battles a friend can join. [docs/HANDOFF.md](docs/HANDOFF.md) has the details.
 
 ## Docs
 

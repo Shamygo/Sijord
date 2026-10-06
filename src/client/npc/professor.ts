@@ -137,6 +137,24 @@ export class Professor {
     ];
   }
 
+  /** Rubbings of Lysfolk tablets: a Great Ball for every few. */
+  tabletLines(balls: number): DialogueLine[] {
+    return [
+      { speaker: NAME, text: "You've been reading Lysfolk tablets out in the vale? Let me see your rubbings... These are older than anything in Bramblewick." },
+      { speaker: NAME, text: "This is exactly the kind of thing I can't get out to see myself any more. Here, it's the least I can do." },
+      { speaker: '', text: balls > 1 ? `You received ${balls} Great Balls!` : 'You received a Great Ball!' },
+      { speaker: NAME, text: 'I can only spare one for every three tablets you bring me, mind. Great Balls are not cheap.' },
+    ];
+  }
+
+  /** The first time the player has found a page of her old field notes. */
+  fieldNoteLines(): DialogueLine[] {
+    return [
+      { speaker: NAME, text: "Wait, is that my handwriting? Those are my old survey notes! I lost a whole satchel of them in a storm years ago." },
+      { speaker: NAME, text: 'Keep them. If you find any more pages, read them. I was a good deal more careful out there than I am now.' },
+    ];
+  }
+
   healLines(): DialogueLine[] {
     return [
       { speaker: NAME, text: 'Your team looks worn out. Let me take a look at them.' },

@@ -8,6 +8,7 @@ import { ABILITIES } from '../../shared/data/abilities';
 import { moveData } from '../../shared/data/moves';
 import { SPECIES_IDS, species } from '../../shared/data/species';
 import { PARTY_MAX } from '../../shared/items';
+import { DISCOVERIES, DISCOVERY_LABEL, discoveryCounts, type DiscoveryKind } from '../../shared/discoveries';
 import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
 import { ITEMS, ITEM_CATEGORIES, type ItemCategory } from '../../shared/items';
 import { TYPE_COLORS } from '../battle/fx';
@@ -28,6 +29,8 @@ export interface MenuDeps {
   destination(): {x:number;z:number;label:string} | null;
   setDestination(p: {x:number;z:number;label:string} | null): void;
   quests(): Quest[];
+  /** Discovery ids found so far (caches, tablets, field notes). */
+  found(): string[];
   bag(): Record<string, number>;
   party(): Creature[];
   /** Creatures stored in the PC. */
@@ -120,7 +123,7 @@ export class GameMenu {
 
   /** Redraw after the data behind the open tab changed. */
   refresh(): void {
-    if (this.open_ && (this.tab === 'party' || this.tab === 'pokedex')) this.render();
+    if (this.open_ && (this.tab === 'party' || this.tab === 'pokedex' || this.tab === 'quests')) this.render();
   }
 
   /** Called each frame while open so the map shows live positions. */
@@ -448,12 +451,23 @@ export class GameMenu {
 
   private renderQuests(): HTMLElement {
     const quests = this.deps.quests();
+    const found = this.deps.found();
+    const counts = discoveryCounts(found);
+    const have = new Set(found);
+    const kinds: DiscoveryKind[] = ['cache', 'tablet', 'note'];
+    // Tablets and notes stay readable once found, in the order they appear in the vale.
+    const pages = DISCOVERIES.filter((d) => d.kind !== 'cache' && have.has(d.id));
     return h(
       'div.quest-list',
       {},
       ...quests.map((q) =>
         h('div.quest-row' + (q.done ? '.done' : ''), {}, h('span.quest-kind', {}, q.main ? 'Story' : 'Side'), h('b', {}, q.text), h('span.quest-state', {}, q.done ? 'Done' : 'Active')),
       ),
+      h('h3.disc-head', {}, 'Hearthmeadow discoveries'),
+      h('div.disc-counts', {}, ...kinds.map((k) => h(`div.disc-count.disc-${k}`, {}, h('b', {}, `${counts[k].found} / ${counts[k].total}`), h('span', {}, DISCOVERY_LABEL[k].many)))),
+      pages.length
+        ? h('div.disc-pages', {}, ...pages.map((d) => h(`div.disc-page.disc-${d.kind}`, {}, h('span.quest-kind', {}, DISCOVERY_LABEL[d.kind].one), h('p', {}, (d.text ?? []).join(' ')))))
+        : h('p.hint-dark', {}, 'Lysfolk tablets and pages of field notes you find out in the vale can be read again here.'),
     );
   }
 
@@ -557,7 +571,7 @@ class MapView {
     const p = deps.player();
     this.viewX = p.x;
     this.viewZ = p.z;
-    this.el.append(this.canvas, this.info, h('div.map-controls', {}, h('button.act', {onclick:()=>{const p=this.deps.player();this.viewX=p.x;this.viewZ=p.z;}}, 'Recenter'), h('button.act', {onclick:()=>{this.scale=Math.min(6,this.scale*1.3);}}, '+'), h('button.act', {onclick:()=>{this.scale=Math.max(.35,this.scale/1.3);}}, '−')), h('div.map-legend', {}, h('span', {}, '▲ You'), h('span.legend-partner', {}, '● Partner'), h('span.legend-quest', {}, '◆ Quest'), h('span', {}, 'Drag to pan · scroll to zoom')));
+    this.el.append(this.canvas, this.info, h('div.map-controls', {}, h('button.act', {onclick:()=>{const p=this.deps.player();this.viewX=p.x;this.viewZ=p.z;}}, 'Recenter'), h('button.act', {onclick:()=>{this.scale=Math.min(6,this.scale*1.3);}}, '+'), h('button.act', {onclick:()=>{this.scale=Math.max(.35,this.scale/1.3);}}, '−')), h('div.map-legend', {}, h('span', {}, '▲ You'), h('span.legend-partner', {}, '● Partner'), h('span.legend-quest', {}, '◆ Quest'), h('span.legend-find', {}, '■ Found'), h('span', {}, 'Drag to pan · scroll to zoom')));
     this.canvas.addEventListener('mousedown', () => {this.dragging = true;this.dragged = false;});
     this.canvas.addEventListener('click', e => {if(this.dragged)return;const rect=this.canvas.getBoundingClientRect();const x=this.viewX-(e.clientX-rect.left-rect.width/2)/this.scale,z=this.viewZ-(e.clientY-rect.top-rect.height/2)/this.scale;this.deps.setDestination({x,z,label:'Destination'});this.drawInfo();});
     this.drawInfo();
@@ -634,6 +648,19 @@ class MapView {
       const [sx, sy] = toScreen(l.position.x, l.position.z);
       dot(ctx, sx, sy, 5, '#ffffff');
       if (s > 3.5) label(ctx, l.label, sx, sy - 12, 12, '#ffffff');
+    }
+    const found = new Set(this.deps.found());
+    for (const d of DISCOVERIES) {
+      if (!found.has(d.id)) continue;
+      const [sx, sy] = toScreen(d.x, d.z);
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.fillStyle = d.kind === 'cache' ? '#c98a4b' : d.kind === 'tablet' ? '#7fe3ff' : '#f4ecd8';
+      ctx.strokeStyle = '#1d2b38';
+      ctx.lineWidth = 2;
+      ctx.fillRect(-4.5, -4.5, 9, 9);
+      ctx.strokeRect(-4.5, -4.5, 9, 9);
+      ctx.restore();
     }
     const q = this.deps.quests().find((x) => !x.done && x.target);
     if (q?.target) {

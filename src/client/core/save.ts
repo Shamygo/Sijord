@@ -25,6 +25,10 @@ export interface SaveData {
   dex?: { seen: string[]; caught: string[] };
   /** The trainer's own HP (DESIGN §5.4). Missing means full. */
   trainerHp?: number;
+  /** Discovery ids (caches opened, tablets read, notes taken; `src/shared/discoveries.ts`). */
+  found?: string[];
+  /** Lysfolk tablets Professor Hazel has already paid for. */
+  tabletsReported?: number;
 }
 
 export function loadSave(): SaveData | null {
