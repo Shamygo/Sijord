@@ -22,11 +22,11 @@ export interface BattleFrame {
   slots: { pos: Pos; uid: string; species: string; name: string; level: number; hp: number; maxHp: number; status?: MajorStatus; position: [number, number, number] }[];
   events: { seq: number; event: BattleEvent }[];
   prompt?: { token: number; kind: 'move' | 'replace'; move?: MovePrompt; bench?: MovePrompt['bench'] };
-  result?: { party: Creature[]; pendingMoves: [string, string[]][] };
+  result?: { party: Creature[]; pendingMoves: [string, string[]][]; caught?: Creature[]; ballsUsed?: Record<string, number> };
 }
 export interface BattleControl {
   id: string;
-  join?: { party: Creature[]; levelCap: number };
+  join?: { party: Creature[]; levelCap: number; balls?: Record<string, number>; catchMult?: number };
   token?: number;
   choice?: Choice;
   leave?: boolean;
