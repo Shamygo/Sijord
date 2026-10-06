@@ -4,6 +4,8 @@
  * is still full for the other. Regrowth runs on real time, so it carries on while the game is
  * closed.
  */
+import type { TypeName } from './battle/types';
+
 export type NodeKind = 'tree' | 'stones' | 'bush' | 'boulder' | 'berry' | 'apricorn' | 'copper' | 'mushroom';
 export type ToolId = 'stone-hatchet' | 'stone-pick' | 'stone-sickle';
 /** Which of Rei's clips plays while gathering: kneel at the ground, reach and pick, or swing a tool. */
@@ -73,6 +75,48 @@ export const NODE_RULES: Record<NodeKind, NodeRule> = {
     regrow: 1800,
   },
 };
+
+/**
+ * Partner Pokemon help gather (DESIGN §6.3): a lead of the right type, out of its ball and close
+ * by, works the node beside you and may turn up one more of what it gives. Small on purpose.
+ */
+export interface PartnerHelp {
+  types: readonly TypeName[];
+  item: string;
+  /** Chance of the one extra. */
+  chance: number;
+  /** What the toast says it did: "Geodude dug up another stone". */
+  verb: string;
+}
+
+const DIGGERS = ['rock', 'ground', 'steel', 'fighting'] as const;
+
+export const PARTNER_HELP: Record<NodeKind, PartnerHelp> = {
+  tree: { types: ['grass', 'fighting'], item: 'wood', chance: 1, verb: 'broke off more wood' },
+  stones: { types: DIGGERS, item: 'stone', chance: 1, verb: 'dug up another stone' },
+  boulder: { types: DIGGERS, item: 'stone', chance: 1, verb: 'cracked off more stone' },
+  copper: { types: ['rock', 'ground', 'steel'], item: 'copper-ore', chance: 0.35, verb: 'dug out more ore' },
+  bush: { types: ['grass', 'bug'], item: 'fiber', chance: 1, verb: 'tore off more fibre' },
+  berry: { types: ['grass', 'bug', 'flying', 'normal', 'fairy'], item: 'bramble-berry', chance: 0.5, verb: 'found another berry' },
+  apricorn: { types: ['flying', 'bug', 'grass'], item: 'red-apricorn', chance: 0.3, verb: 'shook down another apricorn' },
+  mushroom: { types: ['bug', 'poison', 'normal'], item: 'wild-mushroom', chance: 0.6, verb: 'sniffed out more mushrooms' },
+};
+
+/** How a partner of these types helps at this kind of node, or null if it's no use there. */
+export function partnerHelp(kind: NodeKind, types: readonly string[]): PartnerHelp | null {
+  const help = PARTNER_HELP[kind];
+  return help.types.some((t) => types.includes(t)) ? help : null;
+}
+
+/** A Water-type partner finds clean water: drinking from a river, lake or pond can't upset you. */
+export const CLEAN_WATER_TYPE = 'water';
+/** A Fire-type partner keeps the campfire roaring: cooking there takes this share of the time. */
+export const FIRE_COOK_TIME = 0.6;
+
+/** The partner's extra: 1 or 0. `rand` returns [0, 1). */
+export function rollPartner(help: PartnerHelp, rand: () => number): number {
+  return rand() < help.chance ? 1 : 0;
+}
 
 /** Uses a tool lasts before it breaks. */
 export const TOOL_USES: Record<ToolId, number> = { 'stone-hatchet': 30, 'stone-pick': 30, 'stone-sickle': 30 };
