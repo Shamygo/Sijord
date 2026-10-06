@@ -6,6 +6,8 @@ export interface ClassModifiers {
   catchRate: number;
   xp: number;
   craftCost: number;
+  /** Multiplier on crafting time. */
+  craftTime: number;
   survivalDrain: number;
   maxHp: number;
 }
@@ -21,7 +23,7 @@ export interface PlayerClassInfo {
   color: string;
 }
 
-const BASE: ClassModifiers = { stamina: 1, catchRate: 1, xp: 1, craftCost: 1, survivalDrain: 1, maxHp: 1 };
+const BASE: ClassModifiers = { stamina: 1, catchRate: 1, xp: 1, craftCost: 1, craftTime: 1, survivalDrain: 1, maxHp: 1 };
 
 /**
  * The five trainer classes. Each starts with one small edge and one real cost; the bigger
@@ -34,7 +36,7 @@ export const PLAYER_CLASSES: PlayerClassInfo[] = [
     tagline: 'Pathfinder of the wilds.',
     strengths: ['+8% max stamina'],
     weakness: 'Crafting takes 10% longer',
-    modifiers: { ...BASE, stamina: 1.08 },
+    modifiers: { ...BASE, stamina: 1.08, craftTime: 1.1 },
     color: '#4caf50',
   },
   {

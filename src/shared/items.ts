@@ -1,4 +1,4 @@
-export type ItemCategory = 'items' | 'balls' | 'battle' | 'materials' | 'key';
+export type ItemCategory = 'items' | 'balls' | 'battle' | 'materials' | 'tools' | 'key';
 
 export interface ItemInfo {
   id: string;
@@ -16,6 +16,7 @@ export const ITEM_CATEGORIES: { id: ItemCategory; label: string }[] = [
   { id: 'balls', label: 'Balls' },
   { id: 'battle', label: 'Battle' },
   { id: 'materials', label: 'Materials' },
+  { id: 'tools', label: 'Tools' },
   { id: 'key', label: 'Key items' },
 ];
 
@@ -50,15 +51,31 @@ export const ITEMS: Record<string, ItemInfo> = {
   },
   'wood': {
     id: 'wood', name: 'Wood', category: 'materials', icon: '🪵',
-    description: 'Gathered from trees. Used for tools, fences and your first workbench.',
+    description: 'Gathered from trees: fallen branches by hand, more with a hatchet. Used for tools.',
   },
   'stone': {
-    id: 'stone', name: 'Stone', category: 'materials', icon: '🪨',
-    description: 'Gathered from rocks. Used for tools and sturdier buildings.',
+    id: 'stone', name: 'Stone', category: 'materials', icon: '🪨', sprite: 'common-stone',
+    description: 'Picked up from the ground, or broken off boulders with a pick. Used for tools.',
   },
   'fiber': {
     id: 'fiber', name: 'Plant Fiber', category: 'materials', icon: '🌾',
-    description: 'Pulled from tall grass. Used for rope, bandages and basic clothing.',
+    description: 'Pulled from bushes. Twisted into rope and springs for tools and Poke Balls.',
+  },
+  'red-apricorn': {
+    id: 'red-apricorn', name: 'Red Apricorn', category: 'materials', icon: '🍎', sprite: 'red-apricorn',
+    description: 'A hard red fruit from apricorn trees. Hollowed out, it becomes the shell of a Poke Ball.',
+  },
+  'copper-ore': {
+    id: 'copper-ore', name: 'Copper Ore', category: 'materials', icon: '🟠', sprite: 'relic-copper',
+    description: 'Mined from copper veins with a pick. Hammered into the clasp of a Poke Ball.',
+  },
+  'stone-hatchet': {
+    id: 'stone-hatchet', name: 'Stone Hatchet', category: 'tools', icon: '🪓',
+    description: 'A sharpened stone lashed to a handle. Chops a tree for 2-3 Wood instead of a fallen branch. Wears out after 30 uses.',
+  },
+  'stone-pick': {
+    id: 'stone-pick', name: 'Stone Pick', category: 'tools', icon: '⛏',
+    description: 'A heavy stone point on a handle. Mines copper veins and breaks stone off boulders. Wears out after 30 uses.',
   },
   'trainer-journal': {
     id: 'trainer-journal', name: 'Trainer Journal', category: 'key', icon: '📓', sprite:'fashion-case',

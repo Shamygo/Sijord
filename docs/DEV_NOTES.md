@@ -82,6 +82,8 @@ Things about the code and testing that aren't obvious from reading it. Most of t
 - Frames come at 0.2-1 fps, so poll with `page.waitForFunction` (for example until `window.sijord.aiming` or `window.sijord.battle`) instead of fixed waits, and set `window.sijord.debugTimeScale` to 4-5 while a ball or animation plays out.
 - Useful hooks: `debugTeleport(x, z, yaw)`, `debugGiveParty([[species, level], ...])`, `debugSpawnWild(species, level, dist)`, `debugWildBattle`, `debugAimAt(x, y, z)` (puts the crosshair on a point), `debugCatch = { caught, reaction }` (forces overworld catch outcomes), and `wild`, `controller`, `vitals`, `aiming`. A good open-field spot just north of the gate is (1.2, -232).
 - `pkill -f "<pattern>"` kills its own shell when the pattern appears in the same command line. Use a bracket, for example `pkill -f "probe[.]mjs"`.
+- Don't edit `src/` while a probe runs against `npm run dev`: Vite reloads the page, `window.sijord` goes away and the probe fails with "Cannot read properties of undefined".
+- Gathering and crafting: `window.sijord.world.resources.nodes` lists every node (`key`, `kind`, `x`, `y`, `z`, `r`); stand at about `r + 0.5` from one, facing it, and press E. `window.sijord.gathering` is set while it runs (`t` against `way.seconds`). `window.sijord.cam.setLook(yaw, pitch)` swings the camera round for a side view. Craft buttons are `.craft-card` (find one by its item name) `button.craft-go`. The workbench spot is in `world.anchors.stations`.
 
 ## Smaller known issues (as of PR #3)
 

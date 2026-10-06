@@ -11,7 +11,7 @@ import { classInfo } from '../../shared/classes';
 import { ITEMS, PARTY_MAX, STARTING_BAG } from '../../shared/items';
 import type { BattleControl, BattleFrame } from '../../shared/battle/session';
 import { RemoteBattle } from '../battle/remote';
-import type { BallCatchFx, BallThrowFx, PlayerProfile, PlayerSnapshot } from '../../shared/types';
+import type { BallCatchFx, BallThrowFx, MoveAnim, PlayerProfile, PlayerSnapshot } from '../../shared/types';
 import { failedCatchReaction, isUnaware, type CatchReaction } from '../../shared/overworld-catch';
 import { chargeDamage, knockdownTilt, KNOCKDOWN_ANGLE, TRAINER_HP, TrainerVitals, trainerMaxHp } from '../../shared/trainer-vitals';
 import { NetClient, serverOverride, type NetEvents } from '../net/client';
@@ -33,6 +33,10 @@ import { Portraits } from '../ui/portraits';
 import { applyAtmosphere, createWorld } from '../world';
 import { DiscoveryProps, type DiscoverySpot } from '../world/discoveries';
 import { DISCOVERY_LABEL, discoveryCounts, tabletReward } from '../../shared/discoveries';
+import { applyCraft, craftBlock, craftSpend, RECIPES, recipeById, type Station } from '../../shared/crafting';
+import { gatherWay, NODE_RULES, pruneDepleted, rollYield, wearTool, type GatherWay, type ToolId } from '../../shared/gathering';
+import { earnedXp, trainerLevel, TRAINER_XP } from '../../shared/trainer-level';
+import type { ResourceNode } from '../world/resources';
 import { TOWN } from '../world/layout';
 import type { World } from '../world/types';
 import { Input } from './input';
@@ -142,6 +146,9 @@ export class Game {
   private netThrow: { fx: BallThrowFx; until: number } | null = null;
   private netCatch: { fx: BallCatchFx; until: number } | null = null;
   private lastCatch: { species: string; chance: number; unaware: boolean; caught?: boolean; reaction?: CatchReaction } | null = null;
+  /** Gathering in progress (DESIGN §6.3): the node, how, and seconds so far. */
+  private gathering: { node: ResourceNode; way: GatherWay; t: number } | null = null;
+  private regrowCheck = 0;
   /** Dev only: force overworld catch outcomes in scripted tests. */
   debugCatch: { caught?: boolean; reaction?: CatchReaction } | null = null;
 
@@ -154,9 +161,11 @@ export class Game {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
     save.bag ??= { ...STARTING_BAG };
+    // Saves from before trainer levels start with what they had already earned.
+    save.trainerXp ??= earnedXp(save);
     const mods = classInfo(save.profile.playerClass).modifiers;
     this.controller = new PlayerController({ staminaDrain: PLAYER_TUNING.staminaDrain / mods.stamina });
-    const hpMax = trainerMaxHp(1, mods.maxHp);
+    const hpMax = trainerMaxHp(trainerLevel(save.trainerXp).level, mods.maxHp);
     this.vitals = new TrainerVitals(hpMax, save.trainerHp && save.trainerHp > 0 ? save.trainerHp : hpMax);
 
     this.world = createWorld();
@@ -164,6 +173,8 @@ export class Game {
     this.scene.add(this.world.root);
     this.discoveries = new DiscoveryProps(this.world, save.found ?? []);
     this.scene.add(this.discoveries.root);
+    save.depleted = pruneDepleted(save.depleted ?? {}, Date.now());
+    this.world.resources?.setAllEmpty(Object.keys(save.depleted));
 
     this.input = new Input(canvas, () => this.settings, (a) => this.onInstant(a), () =>
       !this.menu?.isOpen && !this.talking && (!this.scripted || !!(this.battle && this.battle.closing === null) || !!this.remoteBattleHost) &&
@@ -207,6 +218,7 @@ export class Game {
 
     this.hud = new Hud(this.world, save.profile, () => this.input.requestLock(), (a) => this.onAction(a));
     parent.append(this.hud.el);
+    { const t = trainerLevel(save.trainerXp); this.hud.setTrainer(t.level, t.into, t.need); }
     canvas.addEventListener('click', () => {
       if (!this.talking && !this.menu.isOpen) this.input.requestLock();
     });
@@ -237,6 +249,11 @@ export class Game {
       },
       onPartyChanged: () => this.onPartyChanged(),
       levelCap: () => this.levelCap,
+      trainer: () => this.trainer,
+      stations: () => this.stationsNear(this.controller.position),
+      craftSeconds: (id) => (recipeById(id)?.seconds ?? 1) * classInfo(this.save.profile.playerClass).modifiers.craftTime,
+      craft: (id) => this.craft(id),
+      toolUses: (id) => this.save.toolWear?.[id],
       settings: this.settings,
       onSettings: (s) => this.applySettings(s),
       onSave: () => writeSave(this.save),
@@ -488,7 +505,7 @@ export class Game {
   }
 
   private onAction(a: Action): void {
-    const tabs: Partial<Record<Action, MenuTab>> = { map: 'map', bag: 'bag', party: 'party', quests: 'quests' };
+    const tabs: Partial<Record<Action, MenuTab>> = { map: 'map', bag: 'bag', craft: 'craft', party: 'party', quests: 'quests' };
     const tab = tabs[a];
     if (tab) {
       if (this.menu.isOpen && this.menu.current === tab) this.menu.close();
@@ -661,6 +678,7 @@ export class Game {
     if (found.includes(d.id)) return;
     found.push(d.id);
     this.discoveries.markFound(d.id);
+    this.gainXp(TRAINER_XP[d.kind]);
     const count = discoveryCounts(found)[d.kind];
     const tally = `${DISCOVERY_LABEL[d.kind].many} found: ${count.found} of ${count.total}`;
     if (d.kind === 'cache') {
@@ -787,7 +805,9 @@ export class Game {
   private async storeCaught(caught: Creature[]): Promise<void> {
     for (const c of caught) {
       c.ot = this.save.profile.name;
+      const isNew = !(this.save.dex?.caught ?? []).includes(c.species);
       this.markDex(c.species, true);
+      this.gainXp(isNew ? TRAINER_XP.catchNew : TRAINER_XP.catchAgain);
       if (this.party.length < PARTY_MAX) {
         this.party.push(c);
         this.hud.showToast(`${displayName(c)} joined your team!`, `Lv. ${c.level} ${species(c.species).name}`, 3);
@@ -1122,6 +1142,100 @@ export class Game {
     if (this.menu?.isOpen) this.menu.refresh();
   }
 
+  // ---- Trainer level, gathering and crafting (DESIGN §6-7) -------------------------------------
+
+  private get trainer(): { level: number; into: number; need: number } {
+    return trainerLevel(this.save.trainerXp ?? 0);
+  }
+
+  /** Trainer experience; a level up raises max HP and can unlock recipes. */
+  private gainXp(amount: number): void {
+    const mods = classInfo(this.save.profile.playerClass).modifiers;
+    const before = this.trainer.level;
+    this.save.trainerXp = (this.save.trainerXp ?? 0) + Math.round(amount * mods.xp);
+    const now = this.trainer;
+    this.hud.setTrainer(now.level, now.into, now.need);
+    if (now.level <= before) return;
+    const max = trainerMaxHp(now.level, mods.maxHp);
+    this.vitals.setMax(max);
+    this.vitals.heal(max);
+    const unlocked = RECIPES.filter((r) => r.level > before && r.level <= now.level).map((r) => ITEMS[r.out]?.name ?? r.id);
+    // After whatever toast the find or catch put up.
+    setTimeout(() => this.hud.showToast(`Trainer level ${now.level}!`, unlocked.length ? `New recipes: ${unlocked.join(', ')}` : `Max HP is now ${max}`, 3.5), 2400);
+  }
+
+  /** Crafting stations the trainer is standing at. */
+  private stationsNear(pos: THREE.Vector3): Station[] {
+    const out: Station[] = [];
+    for (const s of this.world.anchors.stations ?? []) {
+      const reach = s.kind === 'campfire' ? 2.8 : 1.6;
+      if (Math.hypot(pos.x - s.position.x, pos.z - s.position.z) < reach && Math.abs(pos.y - s.position.y) < 1.5) out.push(s.kind);
+    }
+    return out;
+  }
+
+  /** Make one of a recipe from the bag (the menu runs the timer). */
+  private craft(id: string): boolean {
+    const r = recipeById(id);
+    const bag = (this.save.bag ??= {});
+    if (!r || craftBlock(r, bag, this.trainer.level, this.stationsNear(this.controller.position))) return false;
+    const spend = craftSpend(r, classInfo(this.save.profile.playerClass).modifiers.craftCost, Math.random);
+    applyCraft(r, bag, spend);
+    const saved = Object.entries(r.cost).filter(([i, n]) => (spend[i] ?? 0) < n).map(([i]) => ITEMS[i]?.name ?? i);
+    const crafted = (this.save.crafted ??= []);
+    const first = !crafted.includes(r.id);
+    if (first) crafted.push(r.id);
+    this.hud.showToast(`Made a ${ITEMS[r.out]?.name ?? r.out}`, saved.length ? `Careful work saved you some ${saved.join(' and ')}` : `×${bag[r.out]} in your bag`, 2);
+    if (first) this.gainXp(TRAINER_XP.firstCraft);
+    writeSave(this.save);
+    return true;
+  }
+
+  /** The node the trainer could gather from right now, and how (null way: it needs a tool you lack). */
+  private nearestGather(pos: THREE.Vector3): { node: ResourceNode; way: GatherWay | null } | null {
+    const bag = this.save.bag ?? {};
+    const has = (t: ToolId) => (bag[t] ?? 0) > 0;
+    const node = this.world.resources?.nearest(pos.x, pos.y, pos.z, (n) => !!gatherWay(n.kind, has) || !!NODE_RULES[n.kind].needs);
+    return node ? { node, way: gatherWay(node.kind, has) } : null;
+  }
+
+  private startGather(node: ResourceNode, way: GatherWay): void {
+    this.cancelAim();
+    const p = this.controller.position;
+    this.controller.yaw = Math.atan2(node.x - p.x, node.z - p.z);
+    this.gathering = { node, way, t: 0 };
+  }
+
+  private finishGather(g: { node: ResourceNode; way: GatherWay }): void {
+    this.gathering = null;
+    const bag = (this.save.bag ??= {});
+    const got = rollYield(g.way, Math.random);
+    for (const [id, n] of Object.entries(got)) bag[id] = (bag[id] ?? 0) + n;
+    (this.save.depleted ??= {})[g.node.key] = Date.now() + NODE_RULES[g.node.kind].regrow * 1000;
+    this.world.resources?.setEmpty(g.node.key, true);
+    let note = Object.keys(got).map((id) => `${ITEMS[id]?.name ?? id} ×${bag[id]}`).join(' · ');
+    if (g.way.tool && wearTool(bag, (this.save.toolWear ??= {}), g.way.tool).broke) {
+      note = `Your ${ITEMS[g.way.tool]?.name ?? 'tool'} broke${bag[g.way.tool] ? ' · you have a spare' : ''}`;
+    }
+    this.hud.showToast(Object.entries(got).map(([id, n]) => `+${n} ${ITEMS[id]?.name ?? id}`).join('   ') || 'Nothing useful here', note, 1.8);
+    writeSave(this.save);
+    if (this.menu?.isOpen) this.menu.refresh();
+  }
+
+  /** Emptied nodes grow back on real time, even while the game was closed. */
+  private updateRegrowth(dt: number): void {
+    this.regrowCheck -= dt;
+    const depleted = this.save.depleted;
+    if (this.regrowCheck > 0 || !depleted) return;
+    this.regrowCheck = 2;
+    const now = Date.now();
+    for (const [k, t] of Object.entries(depleted)) {
+      if (t > now) continue;
+      delete depleted[k];
+      this.world.resources?.setEmpty(k, false);
+    }
+  }
+
   private giveStarter(starter: string): void {
     const rng = new Rng(randomSeed());
     const ot = this.save.profile.name;
@@ -1202,6 +1316,7 @@ export class Game {
     this.rival.lookAt(this.controller.position);
     await this.hud.dialogue.play(won ? this.rival.winLines() : this.rival.loseLines());
     if (won) {
+      if (!this.flags.has('beat-rival')) this.gainXp(TRAINER_XP.trainerWin);
       this.setFlag('beat-rival');
       this.hud.showToast('New quest', 'Head out onto Route 1');
     }
@@ -1276,7 +1391,7 @@ export class Game {
         playerName: this.save.profile.name,
         party: this.party,
         levelCap: this.levelCap,
-        xpMult: 1,
+        xpMult: classInfo(this.save.profile.playerClass).modifiers.xp,
         balls,
         catchMult: classInfo(this.save.profile.playerClass).modifiers.catchRate,
       },
@@ -1299,6 +1414,10 @@ export class Game {
       if (!bag[id]) delete bag[id];
     }
     await this.storeCaught(outcome.caught);
+    if (start.kind === 'wild' && outcome.winner === 0) {
+      const beaten = start.foes.filter((f) => outcome.fainted.has(f.uid)).length;
+      if (beaten) this.gainXp(beaten * TRAINER_XP.wildWin);
+    }
     this.onPartyChanged();
     await this.afterBattle(outcome);
     return outcome;
@@ -1445,8 +1564,10 @@ export class Game {
       if (battle) battle.director.stage.pilot({side:0,slot:0},movement);
       else if (view) this.battleControl = {...this.battleControl, id:view.id, movement:{...movement,dodgeToken:(this.battleControl?.movement?.dodgeToken ?? 0)+(move.jump ? 1 : 0)}};
     }
+    // Moving, jumping or rolling stops gathering; until then the trainer stays put.
+    if (this.gathering && (Math.abs(move.forward) > 0.3 || Math.abs(move.right) > 0.3 || move.jump || move.dodge || busy || knocked)) this.gathering = null;
     // Aiming roots the trainer (they turn with the camera); a knockdown takes control away.
-    if (this.talking || this.menu.isOpen || (this.scripted && !inBattle) || actionMode || knocked || this.aiming) {
+    if (this.talking || this.menu.isOpen || (this.scripted && !inBattle) || actionMode || knocked || this.aiming || this.gathering) {
       move.forward = move.right = 0;
       move.jump = move.sprint = move.climb = move.dodge = false;
     }
@@ -1459,7 +1580,17 @@ export class Game {
     const down = knockdownTilt(downT);
     this.avatar.root.rotation.x = -down * KNOCKDOWN_ANGLE;
     if (knocked && downT < TRAINER_HP.knockdown - 0.7) snap.anim = 'fall';
+    const gathering = this.gathering;
+    if (gathering) {
+      gathering.t += dt;
+      snap.anim = gathering.way.anim as MoveAnim;
+      if (gathering.way.anim === 'chop') snap.tool = gathering.way.tool;
+    }
+    this.avatar.hold?.(snap.tool ?? null);
     this.avatar.animate(dt, snap);
+    if (gathering && gathering.t >= gathering.way.seconds) this.finishGather(gathering);
+    this.hud.setGather(this.gathering ? this.gathering.t / this.gathering.way.seconds : null);
+    this.updateRegrowth(dt);
     this.vitals.update(dt, inBattle || this.wild.attacking);
     this.save.trainerHp = this.vitals.hp;
     this.hud.setTrainerHp(this.vitals.hp, this.vitals.max);
@@ -1494,7 +1625,9 @@ export class Game {
       const pickup = !nearProf && !nearRival && !this.aiming ? this.throws.nearestPickup(pos) : null;
       const find = !nearProf && !nearRival && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
       const home = !nearProf && !nearRival && !pickup && !find ? this.nearHome(pos) : null;
+      const station = !nearProf && !nearRival && !pickup && !find && !home ? this.stationsNear(pos)[0] ?? null : null;
       const wildMon = !nearProf && !nearRival ? this.wild.nearestEngageable(pos) : null;
+      const gather = !nearProf && !nearRival && !pickup && !find && !home && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing ? this.nearestGather(pos) : null;
       const canFight = this.party.some(isUsable);
       const invite = [...this.partnerBattles].find(([,f]) => f.joinable && Math.hypot(pos.x-f.center[0],pos.z-f.center[2]) < 14);
       const chargingAt = !knocked ? this.interceptTarget() : null;
@@ -1508,7 +1641,10 @@ export class Game {
       else if (pickup) this.hud.setPrompt(`Pick up the ${ITEMS[pickup.ball]?.name ?? 'ball'}`);
       else if (find) this.hud.setPrompt(DISCOVERY_LABEL[find.def.kind].prompt);
       else if (home) this.hud.setPrompt(`Rest at ${home.id === 'p1-house' ? 'home' : 'your friend’s house'}`);
+      else if (station) this.hud.setPrompt(station === 'workbench' ? 'Use the workbench' : 'Cook at the campfire');
       else if (wildMon) this.hud.setPrompt(canFight ? `Battle the wild ${displayName(wildMon.creature)} · Lv. ${wildMon.creature.level}` : `Wild ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
+      else if (this.gathering) this.hud.setPrompt(`${this.gathering.way.doing}…`, '');
+      else if (gather) gather.way ? this.hud.setPrompt(gather.way.prompt) : this.hud.setPrompt(NODE_RULES[gather.node.kind].needs ?? null, '');
       else if(this.controller.onLadder)this.hud.setPrompt(`${keyLabel(this.settings.keys.forward)} up · ${keyLabel(this.settings.keys.back)} down · ${keyLabel(this.settings.keys.jump)} let go`,'');
       else if(this.controller.onWall)this.hud.setPrompt(`${[this.settings.keys.forward,this.settings.keys.left,this.settings.keys.back,this.settings.keys.right].map(keyLabel).join(' ')} climb · ${keyLabel(this.settings.keys.jump)} leap · ${keyLabel(this.settings.keys.back)} + ${keyLabel(this.settings.keys.jump)} kick off · ${keyLabel(this.settings.keys.climb)} let go`,'');
       else if(this.controller.nearClimb(this.world))this.hud.setPrompt('Walk into the ladder to climb the lookout',keyLabel(this.settings.keys.forward));
@@ -1520,7 +1656,9 @@ export class Game {
         else if (pickup) this.pickupBall(pickup.id);
         else if (find) void this.openDiscovery(find);
         else if (home) void this.restAtHome();
+        else if (station) this.openMenu('craft');
         else if (wildMon && canFight) void this.startWildBattle(wildMon, false);
+        else if (gather?.way) this.startGather(gather.node, gather.way);
       }
       // A creature that broke out of a ball and wants a fight starts it once it has popped out.
       const pending = this.pendingBattle;

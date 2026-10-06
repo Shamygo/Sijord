@@ -92,6 +92,8 @@ export class RemotePlayer {
   private tired = false;
   /** Knockdown pose from the partner's snapshots (0 standing, 1 down). */
   private down = 0;
+  /** Tool in the partner's hand while they chop or mine. */
+  private tool: string | null = null;
   private readonly tmp = new THREE.Vector3();
 
   constructor(profile: PlayerProfile | { name: string; appearance: Appearance }) {
@@ -162,6 +164,7 @@ export class RemotePlayer {
       this.anim = a.s.anim;
       this.tired = isTired(a.s);
       this.down = a.s.down ?? 0;
+      this.tool = a.s.tool ?? null;
     } else if (renderT <= b.t) {
       const k = (renderT - a.t) / (b.t - a.t);
       target.set(a.s.x + (b.s.x - a.s.x) * k, a.s.y + (b.s.y - a.s.y) * k, a.s.z + (b.s.z - a.s.z) * k);
@@ -169,6 +172,7 @@ export class RemotePlayer {
       this.speed = a.s.speed + (b.s.speed - a.s.speed) * k;
       this.anim = k < 0.5 ? a.s.anim : b.s.anim;
       this.tired = isTired(k < 0.5 ? a.s : b.s);
+      this.tool = (k < 0.5 ? a.s : b.s).tool ?? null;
       this.down = (a.s.down ?? 0) + ((b.s.down ?? 0) - (a.s.down ?? 0)) * k;
     } else {
       // Past the newest sample: extrapolate briefly along the last velocity, then hold.
@@ -180,12 +184,14 @@ export class RemotePlayer {
       this.anim = b.s.anim;
       this.tired = isTired(b.s);
       this.down = b.s.down ?? 0;
+      this.tool = b.s.tool ?? null;
       // Ease the animation speed down once we've stopped hearing from them.
       const stale = Math.min(1, (renderT - b.t) / T.maxExtrapolateMs);
       this.speed = b.s.speed * (1 - 0.6 * stale);
       if (renderT - b.t > T.maxExtrapolateMs && this.anim !== 'jump' && this.anim !== 'fall') {
         this.speed = 0;
         if(this.anim !== 'climb')this.anim = 'idle';
+        this.tool = null;
       }
     }
 
@@ -198,6 +204,7 @@ export class RemotePlayer {
       this.displayYaw = lerpAngle(this.displayYaw, yaw, 1 - Math.exp(-T.yawSmooth * dt));
     }
     this.apply();
+    this.avatar.hold?.(this.anim === 'chop' ? this.tool : null);
     // World position + yaw let the avatar plant its feet, lean into turns and detect jumps.
     this.avatar.animate(dt, {
       speed: this.speed,

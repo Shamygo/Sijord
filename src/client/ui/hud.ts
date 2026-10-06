@@ -56,6 +56,13 @@ export class Hud {
   private hpBar = h('div.bar', {}, this.hpFill);
   private hpText = h('small');
   private vitals!: HTMLElement;
+  private nameEl = h('div.name');
+  private xpFill = h('i');
+  private trainerLabel = '';
+  private gatherFill = h('i');
+  private gatherBar = h('div.gather-ring', {}, this.gatherFill);
+  private profileName: string;
+  private className: string;
   private hurtFlash = h('div.hurt-flash');
   private lastHp = '';
   private prompt = h('div.prompt');
@@ -72,6 +79,9 @@ export class Hud {
   constructor(world: World, profile: PlayerProfile, onClickToPlay: () => void, private onHotbar: (a: Action) => void) {
     this.minimap = new Minimap(world);
     const cls = PLAYER_CLASSES.find((c) => c.id === profile.playerClass) ?? PLAYER_CLASSES[0];
+    this.profileName = profile.name;
+    this.className = cls.name;
+    this.nameEl.textContent = `${profile.name} · ${cls.name} · Lv. 1`;
     this.clickToPlay.addEventListener('click', onClickToPlay);
     this.el = h(
       'div.hud',
@@ -88,7 +98,8 @@ export class Hud {
         h(
           'div.info',
           {},
-          h('div.name', {}, `${profile.name} · ${cls.name} · Lv. 1`),
+          this.nameEl,
+          h('div.trainer-xp', { title: 'Trainer experience' }, this.xpFill),
           // The trainer's own HP only shows once something has hurt them.
           h('div.trainer-hp', { title: 'Your HP' }, this.hpBar, this.hpText),
           this.staminaBar,
@@ -100,6 +111,7 @@ export class Hud {
       this.hurtFlash,
       this.aim.el,
       this.prompt,
+      this.gatherBar,
       this.net,
       this.toast,
       this.fadeEl,
@@ -117,10 +129,11 @@ export class Hud {
       this.hot('🐾', 'partner', this.hasParty ? 'Call or recall your partner' : 'No partner Pokemon yet', s, !this.hasParty),
       this.hot('🗺', 'map', 'Map', s),
       this.hot('🎒', 'bag', 'Bag', s),
+      this.hot('🔨', 'craft', 'Crafting', s),
     );
     this.help.replaceChildren(
       k('forward'), k('left'), k('back'), k('right'), ' move  ', k('sprint'), ' sprint  ', k('jump'), ' jump  ', k('dodge'), ' roll  ', k('climb'), ' let go of a wall  ', k('interact'), ' talk / battle  ',
-      k('throw'), ' hold: aim & throw  ', k('party'), ' party  ', k('map'), ' map  ', k('bag'), ' bag  ', h('span.key', {}, 'Esc'), ' menu',
+      k('throw'), ' hold: aim & throw  ', k('party'), ' party  ', k('map'), ' map  ', k('bag'), ' bag  ', k('craft'), ' craft  ', h('span.key', {}, 'Esc'), ' menu',
     );
     this.help.style.display = s.showControlsHint ? '' : 'none';
     this.fps.classList.toggle('show', s.showFps);
@@ -167,6 +180,22 @@ export class Hud {
   }
 
   /** Trainer HP: the bar appears only while below full. */
+  /** Trainer level and the experience bar under the name. */
+  setTrainer(level: number, into: number, need: number): void {
+    const label = `${this.profileName} · ${this.className} · Lv. ${level}`;
+    if (label !== this.trainerLabel) {
+      this.trainerLabel = label;
+      this.nameEl.textContent = label;
+    }
+    this.xpFill.style.width = `${need ? Math.round((into / need) * 100) : 100}%`;
+  }
+
+  /** Progress of the gathering in hand (0..1), or null to hide it. */
+  setGather(progress: number | null): void {
+    this.gatherBar.classList.toggle('show', progress !== null);
+    if (progress !== null) this.gatherFill.style.width = `${Math.round(Math.min(1, progress) * 100)}%`;
+  }
+
   setTrainerHp(hp: number, max: number): void {
     const shown = Math.ceil(hp);
     const key = `${shown}/${max}`;

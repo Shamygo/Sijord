@@ -183,7 +183,7 @@ export class Input {
   }
 }
 
-const INSTANT: Action[] = ['map', 'bag', 'party', 'quests', 'throw', 'partner'];
+const INSTANT: Action[] = ['map', 'bag', 'craft', 'party', 'quests', 'throw', 'partner'];
 
 function isTyping(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null;

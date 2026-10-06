@@ -12,6 +12,7 @@ import type { Kit } from './buildings';
 import { GrassSystem, makeTownMask } from './grass';
 import { buildCliffs, type CliffResult } from './cliffs';
 import { createFauna } from './fauna';
+import { ResourceField } from './resources';
 import { collidersNear, colliderContains, colliderTop } from '../core/collision';
 
 export { applyAtmosphere } from './sky';
@@ -129,6 +130,15 @@ export function createWorld(): World {
   });
   root.add(veg.group);
 
+  // ---- things to gather: trees, bushes and stones from the scatter, plus berries, apricorns and copper ----
+  const resources = new ResourceField({
+    heightAt: rawH, slopeAt: (x, z) => terrain.slopeAt(x, z), reserved, waterDist: (x, z) => waterDistance(x, z).d, grassAt: (x, z) => terrain.grassAt(x, z),
+    colliders, half: HALF, town: { x: TOWN.x, z: TOWN.z, r: TOWN.fenceR + 4 }, mesas: MESAS,
+    scatter: veg.nodes, rocks: veg.rocks, foliage: veg.foliage,
+  });
+  root.add(resources.root);
+  town.anchors.stations = [...(town.anchors.stations ?? []), { kind: 'campfire', position: poi.fire.clone() }];
+
   // ---- GPU grass + flowers ----
   const blockBoxes = colliders.filter((c): c is Extract<Collider, { kind: 'box' }> => c.kind === 'box' && c.maxX - c.minX < 60);
   const grassBlocked = (x: number, z: number): boolean => {
@@ -174,6 +184,7 @@ export function createWorld(): World {
     colliders,
     regions: [town.region],
     anchors: town.anchors,
+    resources,
     halfSize: HALF,
     sun,
     update(dt: number, elapsed: number, focus: THREE.Vector3): void {
@@ -188,6 +199,7 @@ export function createWorld(): World {
       clouds.update(focus, elapsed);
       centreSun(sun, focus);
       fauna.update(focus, heightAt);
+      resources.update(focus);
       for (let i = 0; i < flames.length; i++) {
         const f = flames[i];
         const s = 0.85 + Math.sin(elapsed * (9 + i * 3) + i) * 0.12 + Math.sin(elapsed * 17 + i * 2) * 0.06;
