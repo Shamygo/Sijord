@@ -308,7 +308,27 @@ export function makeBall(ball = 'poke-ball'): THREE.Group {
   return g;
 }
 
-/** Free a ball made by makeBall. */
+/** A Treat as thrown and lying in the grass: a round honey biscuit with a glazed top and crumbs. */
+export function makeTreat(): THREE.Group {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.09, 0.04, 22), new THREE.MeshStandardMaterial({ color: 0xc27a35, roughness: 0.85 }));
+  const glaze = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.078, 0.012, 22), new THREE.MeshStandardMaterial({ color: 0xe8a548, roughness: 0.35 }));
+  glaze.position.y = 0.024;
+  g.add(body, glaze);
+  const crumbMat = new THREE.MeshStandardMaterial({ color: 0x6b3a17, roughness: 0.9 });
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + 0.4;
+    const r = i % 2 ? 0.045 : 0.025;
+    const crumb = new THREE.Mesh(new THREE.SphereGeometry(0.009 + (i % 3) * 0.002, 6, 4), crumbMat);
+    crumb.position.set(Math.cos(a) * r, 0.032, Math.sin(a) * r);
+    g.add(crumb);
+  }
+  // Tumbles end over end in flight, like a thrown biscuit.
+  g.rotation.x = Math.PI / 2;
+  return g;
+}
+
+/** Free a ball made by makeBall (or a Treat from makeTreat). */
 export function disposeBall(g: THREE.Group): void {
   g.removeFromParent();
   g.traverse((o) => {

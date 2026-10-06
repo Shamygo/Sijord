@@ -20,7 +20,7 @@ import { Professor } from '../npc/professor';
 import { Rival } from '../npc/rival';
 import { Follower } from '../overworld/follower';
 import { seedFromName, WildManager, type WildCreature } from '../overworld/wild';
-import { OverworldThrows } from '../overworld/throw';
+import { isTreat, OverworldThrows, TREAT_ITEM } from '../overworld/throw';
 import { launchElevation, launchVelocity, solveLaunch, type Vec3 } from '../overworld/ball-flight';
 import { THROW_CLIP } from '../player/imported-trainer';
 import { createAvatar } from '../player/avatar';
@@ -39,6 +39,8 @@ import { writeSave, type SaveData } from './save';
 import { keyLabel, loadSettings, saveSettings, type Action, type Settings } from './settings';
 
 const TALK_RADIUS = 2.6;
+/** A charging wild Pokemon this close can be cut off by the partner (DESIGN §5.3). */
+const INTERCEPT_RANGE = 14;
 /** Standing this close to a house door offers a rest. */
 const HOME_RADIUS = 3;
 
@@ -128,6 +130,8 @@ export class Game {
   private catchRng = new Rng(randomSeed());
   /** A creature that broke out and will start a battle once it has popped back out. */
   private pendingBattle: { m: WildCreature; t: number } | null = null;
+  /** The partner rushing a charging wild Pokemon; the battle starts when it gets there. */
+  private intercept: { m: WildCreature; t: number } | null = null;
   /** Per friend: shared wild creatures they're battling or catching (hidden here meanwhile), and their herds' cells. */
   private partnerWild = new Map<string, { busy: string[]; cells: string[] }>();
   /** The latest throw and catch, repeated in snapshots for a moment so the partner sees them. */
@@ -188,7 +192,8 @@ export class Game {
       onResult: (m, ball, roll) => this.overworldCatchResult(m, ball, roll),
       // A ball thudding down nearby puts creatures on their guard.
       onRest: (_ball, at) => this.wild.disturb(at.x, at.z, 4.5, 10),
-      onSink: (ball) => this.hud.showToast(`The ${ITEMS[ball]?.name ?? 'ball'} sank`, 'Balls that land in deep water are lost', 2.2),
+      onSink: (ball) => this.hud.showToast(`The ${ITEMS[ball]?.name ?? 'ball'} sank`, isTreat(ball) ? 'Treats that land in deep water are lost' : 'Balls that land in deep water are lost', 2.2),
+      onTreat: (m, at) => this.onTreat(m, at),
     });
     this.scene.add(this.throws.root);
     // Added before the first movement update, which is when the collider list gets indexed.
@@ -485,6 +490,12 @@ export class Game {
       // The hotbar button: aiming needs a held key or mouse button.
       this.hud.showToast('Aim, then throw', `Hold ${keyLabel(this.settings.keys.throw)} or the right mouse button to aim, release to throw`, 3);
     } else if (a === 'partner') {
+      // Something is charging you: the partner cuts it off instead of being called or recalled.
+      const target = !this.battle && !this.scripted && !this.talking && !this.vitals.knockedDown ? this.interceptTarget() : null;
+      if (target) {
+        this.startIntercept(target);
+        return;
+      }
       if (!this.party.length) {
         this.hud.showToast('No Pokemon yet', 'Professor Hazel will give you your first partner', 2.5);
         return;
@@ -660,6 +671,8 @@ export class Game {
     // Saves from before catching existed get the starter gift late; an empty bag gets a small refill.
     if (!this.flags.has('got-balls')) await this.giveBalls(5, true);
     else if (!this.ballCount()) await this.giveBalls(3, false);
+    if (!this.flags.has('got-treats')) await this.giveTreats(3, true);
+    else if (!this.save.bag?.[TREAT_ITEM]) await this.giveTreats(2, false);
     this.professor.lookAt(null);
     this.endScene();
   }
@@ -701,6 +714,15 @@ export class Game {
     if (this.menu?.isOpen) this.menu.refresh();
   }
 
+  private async giveTreats(count: number, gift: boolean): Promise<void> {
+    await this.hud.dialogue.play(gift ? this.professor.treatGiftLines(count) : this.professor.treatRefillLines(count));
+    const bag = (this.save.bag ??= {});
+    bag[TREAT_ITEM] = (bag[TREAT_ITEM] ?? 0) + count;
+    this.setFlag('got-treats');
+    writeSave(this.save);
+    if (this.menu?.isOpen) this.menu.refresh();
+  }
+
   /** Record a species as seen, or caught (which implies seen). */
   private markDex(id: string, caught: boolean): void {
     const dex = (this.save.dex ??= { seen: [], caught: [] });
@@ -731,6 +753,11 @@ export class Game {
     return Object.keys(ITEMS).filter((id) => ITEMS[id].category === 'balls' && (bag[id] ?? 0) > 0);
   }
 
+  /** What can be thrown while aiming: the ball kinds in the bag, then Treats. */
+  private throwKinds(): string[] {
+    return [...this.ballKinds(), ...((this.save.bag?.[TREAT_ITEM] ?? 0) > 0 ? [TREAT_ITEM] : [])];
+  }
+
   /**
    * Where a throw leaves the hand and how fast. The ball goes where the crosshair (the camera's
    * centre) points, on the flatter arc that reaches it; aimed at the sky or out of reach, it's a
@@ -751,7 +778,7 @@ export class Game {
   }
 
   private startAim(): void {
-    const kinds = this.ballKinds();
+    const kinds = this.throwKinds();
     if (!kinds.includes(this.aimBall)) this.aimBall = kinds[0];
     this.aiming = true;
     this.aimTime = 0;
@@ -817,7 +844,7 @@ export class Game {
         this.cancelAim();
         return;
       }
-      const kinds = this.ballKinds();
+      const kinds = this.throwKinds();
       if (input.wheel && kinds.length > 1) {
         const i = Math.max(0, kinds.indexOf(this.aimBall));
         this.aimBall = kinds[(i + (input.wheel > 0 ? 1 : -1) + kinds.length) % kinds.length];
@@ -834,7 +861,7 @@ export class Game {
     if (!input.aimHeld) this.aimWanted = false;
     if (!this.aimWanted || !able || this.throwCooldown > 0 || !this.controller.grounded) return;
     this.aimWanted = false;
-    if (!this.ballCount()) {
+    if (!this.throwKinds().length) {
       this.hud.showToast('No Poke Balls', this.flags.has('got-balls') ? 'Professor Hazel can spare a few more' : 'Professor Hazel will give you some', 2.2);
       return;
     }
@@ -868,7 +895,7 @@ export class Game {
       };
     }
     this.hud.aim.show({
-      ball: this.aimBall, count: bag[this.aimBall] ?? 0, balls: this.ballKinds(), target: view, onTarget,
+      ball: this.aimBall, count: bag[this.aimBall] ?? 0, balls: this.throwKinds(), target: view, onTarget,
       throwKey: `${keyLabel(this.settings.keys.throw)} / RMB`, cancelKey: keyLabel(this.settings.keys.interact),
     });
   }
@@ -913,10 +940,78 @@ export class Game {
     const near = ['Oh no! It broke free!', 'Aww! It appeared to be caught!', 'Argh! Almost had it!', 'Gah! It was so close, too!'][roll.shakes] ?? 'It broke free!';
     if (reaction === 'flee') this.hud.showToast(near, `The wild ${name} fled!`, 2.5);
     else if (reaction === 'startle') this.hud.showToast(near, `The wild ${name} backed off. It's wary of you now.`, 2.5);
-    else if (reaction === 'charge') this.hud.showToast(`The wild ${name} is furious!`, `It's charging you! Get out of its way, or press ${keyLabel(this.settings.keys.interact)} to battle it.`, 3.2);
+    else if (reaction === 'charge') {
+      const lead = this.party.find(isUsable);
+      const ways = [`dodge with ${keyLabel(this.settings.keys.dodge)}`];
+      if (lead) ways.push(`${keyLabel(this.settings.keys.partner)} sends ${displayName(lead)} to cut it off`);
+      if (this.save.bag?.[TREAT_ITEM]) ways.push('a Treat calms it');
+      this.hud.showToast(`The wild ${name} is furious!`, `It's charging you: ${ways.join(' · ')}`, 3.6);
+    }
     else {
       this.hud.showToast(near, `The wild ${name} wants to fight!`, 2);
       this.pendingBattle = { m, t: 0.5 };
+    }
+  }
+
+  /** A Treat landed, or bounced off a creature: whoever comes to eat it (DESIGN §5.3). */
+  private onTreat(m: WildCreature | null, at: Vec3): void {
+    const furious = new Set(this.wild.creatures.filter((c) => c.state === 'attack' || c.state === 'charge'));
+    const eater = this.wild.treat(at, m);
+    if (!eater) {
+      this.hud.showToast('The Treat landed', 'A Pokemon that wanders close will come and eat it', 2);
+      return;
+    }
+    const name = displayName(eater.creature);
+    if (furious.has(eater)) this.hud.showToast(`The wild ${name} calmed down`, 'It went for the Treat instead of you', 2.4);
+    else this.hud.showToast(`The wild ${name} went for the Treat`, 'Busy eating, it won\'t notice you unless it\'s already wary', 2.4);
+  }
+
+  /** A wild Pokemon charging the trainer, close enough for the partner to cut it off. */
+  private interceptTarget(): WildCreature | null {
+    if (this.intercept || this.remoteBattleHost || !this.party.some(isUsable)) return null;
+    const p = this.controller.position;
+    let best: WildCreature | null = null;
+    let bd = INTERCEPT_RANGE;
+    for (const m of this.wild.creatures) {
+      if (m.state !== 'attack' || m.remoteBusy) continue;
+      const d = Math.hypot(m.mover.pos.x - p.x, m.mover.pos.z - p.z);
+      if (d < bd) {
+        bd = d;
+        best = m;
+      }
+    }
+    return best;
+  }
+
+  /** The partner Pokemon rushes the charging creature; the battle starts when it gets there. */
+  private startIntercept(m: WildCreature): void {
+    const lead = this.party.find(isUsable);
+    if (!lead) return;
+    this.cancelAim();
+    this.followerOut = true;
+    this.refreshFollower();
+    this.intercept = { m, t: 0 };
+    this.hud.showToast(`Go, ${displayName(lead)}!`, `Cut off the wild ${displayName(m.creature)}!`, 1.6);
+  }
+
+  private updateIntercept(dt: number): void {
+    const i = this.intercept;
+    if (!i) return;
+    const m = i.m;
+    i.t += dt;
+    if (m.state !== 'attack' || m.remoteBusy || this.battle || this.vitals.knockedDown || !this.party.some(isUsable)) {
+      this.intercept = null;
+      this.follower.rushAt(null);
+      return;
+    }
+    this.follower.rushAt(m.mover.pos);
+    const f = this.follower.mover.pos;
+    const there = Math.hypot(f.x - m.mover.pos.x, f.z - m.mover.pos.z) < m.model.radius + 1;
+    if (there || i.t > 1.6 || !this.follower.active) {
+      this.intercept = null;
+      this.follower.rushAt(null);
+      this.cancelAim();
+      void this.startWildBattle(m, true, true);
     }
   }
 
@@ -1070,14 +1165,20 @@ export class Game {
     this.endScene();
   }
 
-  /** Walk up to a wild Pokemon and press interact, or get charged by one. */
-  private async startWildBattle(m: WildCreature, charged: boolean): Promise<void> {
-    const list = this.wild.opponentsFor(m);
+  /**
+   * Walk up to a wild Pokemon and press interact, or get charged by one. A partner that
+   * `intercepted` a charge takes it on alone: its herd-mate doesn't get the chance to join in.
+   */
+  private async startWildBattle(m: WildCreature, charged: boolean, intercepted = false): Promise<void> {
+    const list = intercepted ? [m] : this.wild.opponentsFor(m);
     this.wild.enterBattle(list);
     const p = this.controller.position.clone();
     const facing = Math.atan2(m.mover.pos.x - p.x, m.mover.pos.z - p.z);
     const names = list.map((w) => displayName(w.creature));
-    const intro = charged
+    const lead = this.party.find(isUsable);
+    const intro = intercepted && lead
+      ? `${displayName(lead)} cut off the wild ${names[0]}!`
+      : charged
       ? `A wild ${names[0]} charged at you!${names[1] ? ` Another ${names[1]} joined in!` : ''}`
       : names.length > 1 ? `You challenged a wild ${names[0]} and ${names[1]}!` : `You challenged a wild ${names[0]}!`;
     const outcome = await this.runBattle({
@@ -1250,7 +1351,7 @@ export class Game {
   debugText(): string {
     return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
       trainerHp: { hp: Math.round(this.vitals.hp * 10) / 10, max: this.vitals.max, down: this.vitals.knockedDown },
-      throwing: { aiming: this.aiming, ball: this.aimBall, balls: Object.fromEntries(this.ballKinds().map((b) => [b, this.save.bag?.[b] ?? 0])), inFlight: this.throws.busy, dropped: this.throws.droppedCount, lastCatch: this.lastCatch },
+      throwing: { aiming: this.aiming, ball: this.aimBall, balls: Object.fromEntries(this.throwKinds().map((b) => [b, this.save.bag?.[b] ?? 0])), treats: this.wild.treats.length, intercept: this.intercept ? displayName(this.intercept.m.creature) : null, inFlight: this.throws.busy, dropped: this.throws.droppedCount, lastCatch: this.lastCatch },
       wildCreatures: this.wild.creatures.map((m) => ({ species: m.creature.species, level: m.creature.level, state: m.state, alert: Math.round(m.alert), attack: m.attack?.phase, position: [m.mover.pos.x, m.mover.pos.z].map((v) => Math.round(v * 10) / 10) })) });
   }
 
@@ -1343,8 +1444,11 @@ export class Game {
       const wildMon = !nearProf && !nearRival ? this.wild.nearestEngageable(pos) : null;
       const canFight = this.party.some(isUsable);
       const invite = [...this.partnerBattles].find(([,f]) => f.joinable && Math.hypot(pos.x-f.center[0],pos.z-f.center[2]) < 14);
+      const chargingAt = !knocked ? this.interceptTarget() : null;
+      const lead = this.party.find(isUsable);
       // Lying on the ground: no prompts until back on your feet.
       if (knocked) this.hud.setPrompt(null);
+      else if (chargingAt && lead) this.hud.setPrompt(`Send ${displayName(lead)} to cut off the wild ${displayName(chargingAt.creature)}`, keyLabel(this.settings.keys.partner));
       else if (invite && canFight) this.hud.setPrompt('Join your friend’s battle');
       else if (nearProf) this.hud.setPrompt(`Talk to ${this.professor.name}`);
       else if (nearRival) this.hud.setPrompt(`Talk to ${this.rival.name}`);
@@ -1372,6 +1476,8 @@ export class Game {
           void this.startWildBattle(m, true);
         } else if (m.state !== 'gone' && m.state !== 'battle') this.wild.breakOut(m, 'startle');
       }
+
+      this.updateIntercept(dt);
 
       // A territorial Pokemon that reaches you starts the fight itself.
       const charger = this.battle ? null : this.wild.charger(pos);

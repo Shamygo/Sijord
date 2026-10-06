@@ -31,14 +31,18 @@ For development, `npm run dev` serves the game at http://localhost:5173.
 | Shift | Sprint (uses stamina) |
 | Space | Jump / let go while climbing |
 | C / S+C | Climb up / climb down; release C to hang |
-| E | Talk / interact, advance dialogue |
+| E | Talk / interact, advance dialogue, battle a nearby wild Pokémon |
+| Q (hold) or right mouse | Aim a Poke Ball or Treat; release to throw, wheel to pick, E to cancel |
+| V | Dodge |
+| H | Use a Potion on yourself |
+| F | Call or recall your partner, or send it at a Pokémon charging you |
 | M / B / P / J | Map, bag, party, quests |
 | Esc | Pause and settings (rebind keys, sensitivity, FOV, quality) |
 | Mouse wheel | Zoom the camera |
 
-## What is in this milestone
+## What's in the game so far
 
-Milestone 1 is the foundation: the trainer creator with five classes, third-person movement and camera, the hometown of Bramblewick with both players' houses and Professor Hazel's lab, the first story beat, the HUD (compass, minimap, quests) and two players seeing each other in the same world.
+Milestones 1 and 2 are done and milestone 3 is nearly done. You get a trainer creator, Bramblewick with both players' houses and Professor Hazel's lab, a starter and a rival battle, and 45 Kanto species roaming Hearthmeadow in herds both players share. Battles are 2v2, in tactical or action mode, and you can catch in battle or by sneaking up and throwing in the overworld. A failed catch can make a Pokémon charge you: dodge it, calm it with a Treat or send your partner at it. There is a party of 6 with a PC box, a region Dex, and co-op battles a friend can join. [docs/HANDOFF.md](docs/HANDOFF.md) has the details.
 
 ## Docs
 

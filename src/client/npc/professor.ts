@@ -120,6 +120,23 @@ export class Professor {
     ];
   }
 
+  /** Treats (DESIGN §5.3), the first time she sees the player after they set out. */
+  treatGiftLines(count: number): DialogueLine[] {
+    return [
+      { speaker: NAME, text: "One more thing. I baked these honey Treats. Toss one in front of an angry Pokemon and it will usually stop to eat instead of flattening you." },
+      { speaker: '', text: `You received ${count} Treats!` },
+      { speaker: NAME, text: "A calm one will happily eat one too, and it won't look up while it does. Hold your aim key and use the wheel to pick a Treat." },
+    ];
+  }
+
+  /** Out of Treats and back at the lab. */
+  treatRefillLines(count: number): DialogueLine[] {
+    return [
+      { speaker: NAME, text: 'All gone? I suppose that means they worked. Here, the last of this batch.' },
+      { speaker: '', text: `You received ${count} Treats.` },
+    ];
+  }
+
   healLines(): DialogueLine[] {
     return [
       { speaker: NAME, text: 'Your team looks worn out. Let me take a look at them.' },
