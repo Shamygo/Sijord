@@ -641,3 +641,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .sell-name small { color: var(--muted); font-weight: 700; }
 .sell-row .act { padding: 6px 10px; font-size: 12px; white-space: nowrap; }
 @media (max-width: 760px) { .shop-cols { grid-template-columns: 1fr; } }
+/* Technology Points and learning recipes (DESIGN §6.4). */
+.craft-top { display: flex; align-items: stretch; }
+.craft-top > .craft-where { flex: 1; }
+.craft-level.tp b { color: #9fe0ff; }
+.craft-go.learn { background: linear-gradient(#9ce3ff, #65badf); box-shadow: 0 3px 0 #317590; color: #173443; }
+@media (max-width: 640px) { .craft-top { flex-direction: column; } }
+.bag-worn { position:absolute; left:6px; top:5px; padding:1px 6px; border-radius:6px; background:#8ae6ff; color:#06202b; font-size:10px; font-weight:900; letter-spacing:.04em; text-transform:uppercase; }

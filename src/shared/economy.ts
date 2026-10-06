@@ -22,6 +22,11 @@ export const VALUE: Record<string, number> = {
   'water-flask': 120,
   'mushroom-skewer': 180,
   canteen: 1200,
+  'woven-cloth': 80,
+  'cloth-cap': 500,
+  'cloth-trousers': 800,
+  'cloth-tunic': 1100,
+  'stone-sickle': 280,
   'stone-hatchet': 300,
   'stone-pick': 320,
   'red-apricorn': 120,
@@ -33,7 +38,7 @@ export const VALUE: Record<string, number> = {
   fiber: 16,
 };
 
-export type ShopId = 'field-supplies' | 'apothecary' | 'wayfarer-inn';
+export type ShopId = 'field-supplies' | 'apothecary' | 'wayfarer-inn' | 'clothier';
 
 export interface Shop {
   id: ShopId;
@@ -56,6 +61,11 @@ export const SHOPS: Record<ShopId, Shop> = {
     id: 'apothecary', name: 'Apothecary', prompt: 'Visit the Apothecary',
     greeting: 'Potions brewed fresh, berries from the hedgerows. Mind your Pokemon out there.',
     stock: ['bandage', 'bramble-berry'],
+  },
+  clothier: {
+    id: 'clothier', name: 'The Clothier', prompt: 'Visit The Clothier',
+    greeting: 'Padded cloth, stitched to last. It won\'t stop a charging Pokemon, but it\'ll soften the blow.',
+    stock: ['cloth-cap', 'cloth-trousers', 'cloth-tunic', 'woven-cloth'],
   },
   'wayfarer-inn': {
     id: 'wayfarer-inn', name: 'Wayfarer Inn', prompt: 'Order food at the Wayfarer Inn',

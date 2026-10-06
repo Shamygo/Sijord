@@ -36,7 +36,7 @@ export function buildHometown(kit: Kit, kinds: Record<string, TreeKind>): TownRe
 
   // A denser commercial street, with porches facing the central avenue.
   const shops: { id: ShopId; position: THREE.Vector3 }[] = [];
-  const SHOP_AT: Record<string, ShopId> = { 'FIELD SUPPLIES': 'field-supplies', APOTHECARY: 'apothecary', 'WAYFARER INN': 'wayfarer-inn' };
+  const SHOP_AT: Record<string, ShopId> = { 'FIELD SUPPLIES': 'field-supplies', 'THE CLOTHIER': 'clothier', APOTHECARY: 'apothecary', 'WAYFARER INN': 'wayfarer-inn' };
   for(const [x,z,yaw,label] of [
     [-20,38,Math.PI/2,'FIELD SUPPLIES'],[-20,9,Math.PI/2,'THE CLOTHIER'],[-20,-20,Math.PI/2,'WAYFARER INN'],
     [20,40,-Math.PI/2,'CRAFT WORKSHOP'],[20,0,-Math.PI/2,'APOTHECARY'],[20,-26,-Math.PI/2,'SURVEY LODGE'],

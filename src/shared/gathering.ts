@@ -5,7 +5,7 @@
  * closed.
  */
 export type NodeKind = 'tree' | 'stones' | 'bush' | 'boulder' | 'berry' | 'apricorn' | 'copper' | 'mushroom';
-export type ToolId = 'stone-hatchet' | 'stone-pick';
+export type ToolId = 'stone-hatchet' | 'stone-pick' | 'stone-sickle';
 /** Which of Rei's clips plays while gathering: kneel at the ground, reach and pick, or swing a tool. */
 export type GatherAnim = 'gather' | 'pick' | 'chop';
 
@@ -48,6 +48,7 @@ export const NODE_RULES: Record<NodeKind, NodeRule> = {
   },
   bush: {
     hand: { prompt: 'Pull plant fibre', doing: 'Pulling fibre', gives: { fiber: [1, 2] }, seconds: 1.7, anim: 'gather' },
+    withTool: { prompt: 'Cut plant fibre', doing: 'Cutting fibre', gives: { fiber: [2, 3] }, seconds: 1.3, anim: 'gather', tool: 'stone-sickle' },
     regrow: 600,
   },
   boulder: {
@@ -74,7 +75,7 @@ export const NODE_RULES: Record<NodeKind, NodeRule> = {
 };
 
 /** Uses a tool lasts before it breaks. */
-export const TOOL_USES: Record<ToolId, number> = { 'stone-hatchet': 30, 'stone-pick': 30 };
+export const TOOL_USES: Record<ToolId, number> = { 'stone-hatchet': 30, 'stone-pick': 30, 'stone-sickle': 30 };
 
 /** How a node can be worked right now: with a tool you carry, by hand, or not at all. */
 export function gatherWay(kind: NodeKind, has: (tool: ToolId) => boolean): GatherWay | null {
