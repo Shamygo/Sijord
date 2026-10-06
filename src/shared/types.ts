@@ -47,6 +47,12 @@ export interface PlayerSnapshot {
   ballCatch?: BallCatchFx;
   /** Knockdown pose, 0 standing to 1 flat on the ground. */
   down?: number;
+  /** Shared wild creatures this player caught or defeated recently (spawn keys). */
+  wildTaken?: string[];
+  /** Shared wild creatures this player is battling or catching right now. */
+  wildBusy?: string[];
+  /** Grid cells this player has wild herds out in, as `i,j,epoch` (so a friend rolls the same herds). */
+  wildCells?: string[];
 }
 
 /** A thrown ball: the partner replays the same physical flight from the same launch. */

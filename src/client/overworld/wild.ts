@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createCreature } from '../../shared/battle/creature';
+import { createCreature, newUid } from '../../shared/battle/creature';
 import { Rng } from '../../shared/battle/rng';
 import type { Creature } from '../../shared/battle/types';
 import { MOVES } from '../../shared/data/moves';
@@ -77,6 +77,10 @@ export interface WildCreature {
   alert: number;
   /** Set while charging the trainer. */
   attack?: WildAttack;
+  /** Shared spawn key (cell, epoch, index): the same creature on a friend's screen. */
+  key?: string;
+  /** A friend is battling or catching this one: hidden here until they're done. */
+  remoteBusy?: boolean;
 }
 
 interface Herd {
@@ -85,6 +89,45 @@ interface Herd {
   cx: number;
   cz: number;
   members: WildCreature[];
+  /** Grid cell it spawned from, when it's a shared herd. */
+  cell?: string;
+  /** The time window it was rolled in (shared herds only). */
+  epoch?: number;
+}
+
+/**
+ * Shared spawns: herds come from a grid of cells seeded by the world's name and a time window,
+ * so two friends in the same area meet the same herds (same species, levels, stats and spots).
+ * Each player still simulates the herds locally; what's synced is which ones are taken (caught or
+ * defeated) and which are busy in a friend's battle or ball.
+ */
+export const SHARED_SPAWN = {
+  /** Cell size in metres: at most one herd per cell. */
+  cell: 70,
+  /** Share of cells that hold a herd. */
+  chance: 0.6,
+  /** A cell's herd is re-rolled every this many ms (taken creatures return after it). */
+  epochMs: 15 * 60_000,
+  /** Taken keys are repeated to friends for this long. */
+  shareMs: 30_000,
+};
+
+/** FNV-style mix of integers into a 32-bit seed. */
+function mix(...values: number[]): number {
+  let h = 2166136261;
+  for (const v of values) {
+    h ^= v | 0;
+    h = Math.imul(h, 16777619);
+    h ^= h >>> 15;
+  }
+  return h >>> 0;
+}
+
+/** A 32-bit seed from a world name, so both players derive the same herds. */
+export function seedFromName(name: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619);
+  return h >>> 0;
 }
 
 /** Where a species lives: by water (the lake, river and pond) or among the stone mesas. */
@@ -206,6 +249,14 @@ function teleported(c: Creature): boolean {
 }
 
 const MAX_HERDS = 7;
+
+interface CellPlan {
+  x: number;
+  z: number;
+  entry: ZoneEntry;
+  /** Seeds the herd's members (levels, stats, spots). */
+  seed: number;
+}
 const SPAWN_MIN = 55;
 const SPAWN_MAX = 105;
 const DESPAWN = 160;
@@ -219,10 +270,27 @@ export class WildManager {
   private spawnTimer = 0;
   /** Lunges that connected with the trainer since the last consumeHits(). */
   private hits: WildCreature[] = [];
+  /** Shared spawn keys caught or defeated here or by a friend: they don't come back this epoch. */
+  private taken = new Set<string>();
+  /** Keys this player took recently, with when, to repeat to friends. */
+  private recentTaken: { key: string; at: number }[] = [];
+  /** Cells whose whole herd is taken this epoch. */
+  private emptied = new Set<string>();
+  /** Cells a friend has a herd out in, with the time window it was rolled in. */
+  private friendCells = new Map<string, number>();
 
-  constructor(private world: World, seed: number) {
+  private clock: () => number;
+  private modelReady: (species: string) => boolean;
+
+  /**
+   * `seed` drives behaviour; `spawnSeed` (from the world's name) decides which herds live where.
+   * Tests can pass their own clock and model check.
+   */
+  constructor(private world: World, seed: number, private spawnSeed = seed, opts: { clock?: () => number; modelReady?: (species: string) => boolean } = {}) {
     this.rng = new Rng(seed);
     this.root.name = 'wild';
+    this.clock = opts.clock ?? (() => Date.now());
+    this.modelReady = opts.modelReady ?? creatureModelReady;
   }
 
   get creatures(): WildCreature[] {
@@ -241,6 +309,8 @@ export class WildManager {
       this.spawnTimer = 1.5;
       this.despawnFar(player);
       if (this.herds.length < MAX_HERDS) this.trySpawn(player);
+      const cut = this.clock() - SHARED_SPAWN.shareMs;
+      this.recentTaken = this.recentTaken.filter((t) => t.at >= cut);
     }
     for (const h of this.herds) {
       // The herd's centre drifts slowly so the group roams.
@@ -262,6 +332,11 @@ export class WildManager {
     if (m.state === 'battle' || m.state === 'ball') {
       // Positioned by the battle scene.
       m.model.update(dt, 0);
+      return;
+    }
+    if (m.remoteBusy) {
+      // In a friend's battle or ball: their screen shows it, so it waits here unseen.
+      m.mover.idle(dt, world);
       return;
     }
     if (m.state === 'gone') {
@@ -449,6 +524,74 @@ export class WildManager {
   caught(m: WildCreature): void {
     m.state = 'gone';
     m.fade = 1;
+    this.take(m);
+  }
+
+  /** Mark a shared creature as taken so it doesn't respawn, and tell friends. */
+  private take(m: WildCreature): void {
+    if (!m.key || this.taken.has(m.key)) return;
+    this.taken.add(m.key);
+    this.recentTaken.push({ key: m.key, at: this.clock() });
+  }
+
+  /** Keys taken here recently, for the network snapshot (empty most of the time). */
+  get sharedTaken(): string[] {
+    return this.recentTaken.map((t) => t.key);
+  }
+
+  /** Keys of shared creatures this player is battling or catching right now. */
+  get sharedBusy(): string[] {
+    const out: string[] = [];
+    for (const m of this.creatures) if (m.key && (m.state === 'battle' || m.state === 'ball')) out.push(m.key);
+    return out;
+  }
+
+  /** A friend caught or defeated these: they fade out here too (unless this player is mid-battle with one). */
+  applyTaken(keys: readonly string[]): void {
+    for (const key of keys) {
+      if (this.taken.has(key)) continue;
+      this.taken.add(key);
+      const m = this.creatures.find((c) => c.key === key);
+      if (m && m.state !== 'battle' && m.state !== 'ball' && m.state !== 'gone') {
+        m.state = 'gone';
+        m.fade = m.remoteBusy ? 1 : 0;
+      }
+    }
+  }
+
+  /** Cells with a herd out here, as `i,j,epoch`, so a friend arriving later rolls the same ones. */
+  get liveCells(): string[] {
+    const out: string[] = [];
+    for (const h of this.herds) if (h.cell && h.epoch !== undefined) out.push(`${h.cell},${h.epoch}`);
+    return out;
+  }
+
+  /** Every friend's live cells (`i,j,epoch`). */
+  setFriendCells(cells: Iterable<string>): void {
+    this.friendCells.clear();
+    for (const c of cells) {
+      const m = /^(-?\d+),(-?\d+),(\d+)$/.exec(c);
+      if (m) this.friendCells.set(`${m[1]},${m[2]}`, Number(m[3]));
+    }
+  }
+
+  /** Every friend's busy keys: those creatures are hidden here until released. */
+  setRemoteBusy(keys: ReadonlySet<string>): void {
+    for (const m of this.creatures) {
+      const busy = !!m.key && keys.has(m.key) && m.state !== 'battle' && m.state !== 'ball' && m.state !== 'gone';
+      if (busy === !!m.remoteBusy) continue;
+      m.remoteBusy = busy;
+      m.root.visible = !busy;
+      if (busy) {
+        m.attack = undefined;
+        m.tension = 0;
+        if (m.state === 'charge' || m.state === 'attack') m.state = 'graze';
+      } else {
+        // Back from a friend's battle or ball: wary for a while.
+        m.alert = Math.max(m.alert, 20);
+        m.calm = Math.max(m.calm, 20);
+      }
+    }
   }
 
   /**
@@ -507,7 +650,7 @@ export class WildManager {
     let best: WildCreature | null = null;
     let bd = ENGAGE_RADIUS;
     for (const m of this.creatures) {
-      if (m.state === 'battle' || m.state === 'gone' || m.state === 'flee' || m.state === 'ball') continue;
+      if (m.state === 'battle' || m.state === 'gone' || m.state === 'flee' || m.state === 'ball' || m.remoteBusy) continue;
       const d = Math.hypot(player.x - m.mover.pos.x, player.z - m.mover.pos.z);
       if (d < bd) {
         bd = d;
@@ -520,7 +663,7 @@ export class WildManager {
   /** A territorial creature that has reached the player mid-charge (it starts the battle). */
   charger(player: THREE.Vector3): WildCreature | null {
     for (const m of this.creatures) {
-      if (m.state !== 'charge') continue;
+      if (m.state !== 'charge' || m.remoteBusy) continue;
       if (Math.hypot(player.x - m.mover.pos.x, player.z - m.mover.pos.z) < 2.2) return m;
     }
     return null;
@@ -529,7 +672,7 @@ export class WildManager {
   /** The creature plus its nearest healthy herd-mate: the two that will fight. */
   opponentsFor(m: WildCreature): WildCreature[] {
     const mates = m.herd.members
-      .filter((o) => o !== m && o.state !== 'gone' && o.state !== 'battle' && o.state !== 'ball' && o.mover.pos.distanceTo(m.mover.pos) < 16)
+      .filter((o) => o !== m && o.state !== 'gone' && o.state !== 'battle' && o.state !== 'ball' && !o.remoteBusy && o.mover.pos.distanceTo(m.mover.pos) < 16)
       .sort((a, b) => a.mover.pos.distanceTo(m.mover.pos) - b.mover.pos.distanceTo(m.mover.pos));
     return mates.length ? [m, mates[0]] : [m];
   }
@@ -549,9 +692,11 @@ export class WildManager {
       if (caught.has(m.creature.uid)) {
         m.state = 'gone';
         m.fade = 1;
+        this.take(m);
       } else if (fainted.has(m.creature.uid) || teleported(m.creature)) {
         m.state = 'gone';
         m.fade = 0;
+        this.take(m);
       } else {
         // Pick up from wherever the battle left it standing.
         m.mover.place(m.root.position.x, m.root.position.z, this.world, m.root.rotation.y);
@@ -575,17 +720,63 @@ export class WildManager {
     this.herds = this.herds.filter((h) => h.members.length);
   }
 
+  /**
+   * Fill nearby grid cells with their herds, nearest first: cells whose herd point lies in the
+   * spawn ring (out of sight, not too far) and that don't already have a herd here.
+   */
   private trySpawn(player: THREE.Vector3): void {
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const a = this.rng.next() * Math.PI * 2;
-      const r = SPAWN_MIN + this.rng.next() * (SPAWN_MAX - SPAWN_MIN);
-      const x = player.x + Math.cos(a) * r;
-      const z = player.z + Math.sin(a) * r;
-      if (!this.spawnable(x, z)) continue;
-      if (this.herds.some((h) => Math.hypot(h.cx - x, h.cz - z) < 30)) continue;
-      this.spawnHerd(x, z);
-      return;
+    const C = SHARED_SPAWN.cell;
+    const epoch = Math.floor(this.clock() / SHARED_SPAWN.epochMs);
+    const reach = Math.ceil(SPAWN_MAX / C) + 1;
+    const ci = Math.floor(player.x / C);
+    const cj = Math.floor(player.z / C);
+    const live = new Set(this.herds.map((h) => h.cell));
+    const plans: { i: number; j: number; e: number; d: number; plan: CellPlan }[] = [];
+    for (let i = ci - reach; i <= ci + reach; i++) {
+      for (let j = cj - reach; j <= cj + reach; j++) {
+        if (live.has(`${i},${j}`)) continue;
+        // A friend's herd from just before the window turned over: meet that one, not a new roll.
+        const theirs = this.friendCells.get(`${i},${j}`);
+        const e = theirs !== undefined && Math.abs(theirs - epoch) <= 1 ? theirs : epoch;
+        if (this.emptied.has(`${i},${j},${e}`)) continue;
+        const plan = this.cellPlan(i, j, e);
+        if (!plan) continue;
+        const d = Math.hypot(plan.x - player.x, plan.z - player.z);
+        if (d >= SPAWN_MIN && d <= SPAWN_MAX) plans.push({ i, j, e, d, plan });
+      }
     }
+    plans.sort((a, b) => a.d - b.d);
+    for (const p of plans) {
+      if (this.herds.length >= MAX_HERDS) return;
+      // Wait for a streamed model rather than spawning something else: both players must agree.
+      if (!this.modelReady(p.plan.entry.species)) continue;
+      this.spawnFromPlan(p.i, p.j, p.e, p.plan);
+    }
+  }
+
+  /** What lives in a cell this epoch: the same answer on every machine for the same world. */
+  cellPlan(i: number, j: number, epoch: number): CellPlan | null {
+    const C = SHARED_SPAWN.cell;
+    const rng = new Rng(mix(this.spawnSeed, i, j, epoch));
+    if (rng.next() >= SHARED_SPAWN.chance) return null;
+    // Keep herd points in the middle of their cells so neighbouring herds don't overlap.
+    const x = (i + 0.2 + rng.next() * 0.6) * C;
+    const z = (j + 0.2 + rng.next() * 0.6) * C;
+    if (!this.spawnable(x, z)) return null;
+    const d = Math.hypot(x - TOWN.x, z - TOWN.z);
+    const zone = ZONES.find((zn) => d < zn.maxDist) ?? ZONES[ZONES.length - 1];
+    const fits = zone.entries.filter((e) => !e.habitat || habitatAt(x, z, e.habitat));
+    const entry = this.pickEntry(fits.length ? fits : zone.entries.filter((e) => !e.habitat), rng);
+    return { x, z, entry, seed: rng.int(0, 0x7fffffff) };
+  }
+
+  /** Spawn a cell's herd, leaving out members already taken this epoch. */
+  private spawnFromPlan(i: number, j: number, epoch: number, plan: CellPlan): Herd {
+    const herd = this.spawnHerd(plan.x, plan.z, plan.entry.species, undefined, { entry: plan.entry, rng: new Rng(plan.seed), keyPrefix: `${i},${j},${epoch}` });
+    herd.cell = `${i},${j}`;
+    herd.epoch = epoch;
+    if (!herd.members.length) this.emptied.add(`${i},${j},${epoch}`);
+    return herd;
   }
 
   spawnable(x: number, z: number): boolean {
@@ -597,27 +788,37 @@ export class WildManager {
     return true;
   }
 
-  /** Spawn a herd at a point (also used by debugging tools). */
-  spawnHerd(x: number, z: number, forceSpecies?: string, forceLevel?: number): Herd {
+  /**
+   * Spawn a herd at a point. Shared herds pass their cell's entry, seeded rng and key prefix, so
+   * every member comes out identical on each machine; debugging tools pass just a species.
+   */
+  spawnHerd(x: number, z: number, forceSpecies?: string, forceLevel?: number, shared?: { entry: ZoneEntry; rng: Rng; keyPrefix: string }): Herd {
     const d = Math.hypot(x - TOWN.x, z - TOWN.z);
     const zone = ZONES.find((zn) => d < zn.maxDist) ?? ZONES[ZONES.length - 1];
-    const entry = forceSpecies ? zone.entries.find((e) => e.species === forceSpecies) ?? { species: forceSpecies, weight: 1, min: 3, max: 5, herd: [2, 2] as [number, number] } : this.pickEntry(this.candidates(zone.entries, x, z));
+    const entry = shared?.entry ?? (forceSpecies ? zone.entries.find((e) => e.species === forceSpecies) ?? { species: forceSpecies, weight: 1, min: 3, max: 5, herd: [2, 2] as [number, number] } : this.pickEntry(this.candidates(zone.entries, x, z)));
+    const rng = shared?.rng ?? this.rng;
     const herd: Herd = { id: this.nextId++, species: entry.species, cx: x, cz: z, members: [] };
-    const n = this.rng.int(entry.herd[0], entry.herd[1]);
+    const n = rng.int(entry.herd[0], entry.herd[1]);
     for (let i = 0; i < n; i++) {
-      const level = forceLevel ?? this.rng.int(entry.min, entry.max);
-      const creature = createCreature(entry.species, level, this.rng, { item: this.rng.chance(8) ? 'oran-berry' : undefined });
+      const level = forceLevel ?? rng.int(entry.min, entry.max);
+      // Shared herds take their ID from this machine, so two catches of one creature (a race) stay two creatures.
+      const creature = createCreature(entry.species, level, rng, { item: rng.chance(8) ? 'oran-berry' : undefined, uid: shared ? newUid(this.rng) : undefined });
+      const key = shared ? `${shared.keyPrefix}:${i}` : undefined;
+      const a = rng.next() * Math.PI * 2;
+      const rr = 1 + rng.next() * 3;
+      const yaw = rng.next() * Math.PI * 2;
+      const timer = rng.next() * 3;
+      // Taken this epoch (here or by a friend): the rest of the herd still comes out the same.
+      if (key && this.taken.has(key)) continue;
       const model = createCreatureModel(entry.species);
       const root = new THREE.Group();
       root.add(model.root);
       const mover = new Mover(Math.max(0.2, model.radius * 0.8), 10, 6);
-      const a = this.rng.next() * Math.PI * 2;
-      const rr = 1 + this.rng.next() * 3;
-      mover.place(x + Math.cos(a) * rr, z + Math.sin(a) * rr, this.world, this.rng.next() * Math.PI * 2);
+      mover.place(x + Math.cos(a) * rr, z + Math.sin(a) * rr, this.world, yaw);
       root.position.copy(mover.pos);
       const m: WildCreature = {
-        id: this.nextId++, creature, model, root, mover, herd, state: 'graze', timer: this.rng.next() * 3,
-        tx: x, tz: z, tension: 0, calm: 0, fade: 0, alert: 0,
+        id: this.nextId++, creature, model, root, mover, herd, state: 'graze', timer,
+        tx: x, tz: z, tension: 0, calm: 0, fade: 0, alert: 0, key,
       };
       herd.members.push(m);
       this.root.add(root);
@@ -635,9 +836,9 @@ export class WildManager {
     return ok.length ? ok : entries.filter((e) => !e.habitat);
   }
 
-  private pickEntry(entries: ZoneEntry[]): ZoneEntry {
+  private pickEntry(entries: ZoneEntry[], rng: Rng = this.rng): ZoneEntry {
     const total = entries.reduce((a, e) => a + e.weight, 0);
-    let r = this.rng.next() * total;
+    let r = rng.next() * total;
     for (const e of entries) {
       r -= e.weight;
       if (r <= 0) return e;
