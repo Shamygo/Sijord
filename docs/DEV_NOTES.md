@@ -41,6 +41,8 @@ Things about the code and testing that aren't obvious from reading it. Most of t
 - Clips are pose keyframes in `avatar-clips.ts`. The pure maths (IK, springs, blends) is in `anim-math.ts`.
 - Feet on terrain need `avatar.setGround((x, z) => world.heightAt(x, z))` and `RemotePlayer.setGround(...)`. Without it, feet only estimate the slope from movement. The creator preview and the professor run without ground, which is fine.
 
+**Rei's scarf** (`player/bone-chain.ts`, set up in `imported-trainer.ts`). No clip keys the scarf tail bones (`parts_01-04`), so after `mixer.update` a verlet chain resets them to rest, measures where the pose puts each joint, simulates gravity, a light pull back to that pose (stiffness 0.008, fading to the tip), damping relative to the knot's own motion, air drag, a tapered capsule from `spine_01` (0.235 m, clear of the back bag) to `neck` (0.19 m), which is where the authored drape sits, and a plane 8 cm behind the spine along Rei's facing so a sudden stop can't swing it through the chest. Then it turns each bone to its simulated joint. It runs at a fixed 1/60 s, at most 6 steps a frame, and restarts from the pose after a jump of more than 1.5 m (teleports). `root.userData.scarf` exposes the joints for probes. Damping absolute velocity instead of velocity relative to the body makes the tail stream out flat behind any run.
+
 **Jump.** Physics is instant because the controller tests require it. The crouch before take-off is a visual hold (`AVATAR_ANIM.takeoffHold`).
 
 **Camera.** `setSensitivity`, `setFov` and `setInvertY` exist. Invert-Y is applied in `game.ts` before the delta reaches the camera, and the camera's own `setInvertY` is called with false so it isn't applied twice.
