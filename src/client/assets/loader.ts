@@ -3,7 +3,7 @@ import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { worldCharacterMaterial } from './materials';
-import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
+import { POKEMON_VISUALS, inGameplayPack, pokemonModelPath } from '../../shared/pokemon-visuals';
 
 /** Local files use the same paths on Pages and Vite. Single-file downloads use the published assets. */
 export function assetUrl(path: string): string {
@@ -59,12 +59,11 @@ export function loadAsset(url: string, pinned = false): Promise<GLTF> {
 }
 
 export function loadedAsset(url: string): GLTF | undefined { return cache.get(url)?.asset; }
-export function pokemonUrl(dex: number): string { return assetUrl(`models/pokemon/${String(dex).padStart(3, '0')}.glb`); }
+export function pokemonUrl(dex: number): string { return assetUrl(pokemonModelPath(dex)); }
 export const trainerUrl = (model: 'red' | 'rei' | 'custom' = 'rei'): string => assetUrl(`models/trainer/${model === 'red' ? 'red' : 'rei'}.glb`);
 
-/** Complete gameplay assets before constructing portraits or the initial world creatures. */
-export async function preloadGameplayAssets(): Promise<void> {
-  const urls = [trainerUrl(), trainerUrl('red'), ...Object.values(POKEMON_VISUALS).map((v) => pokemonUrl(v.dex))];
+/** Load pinned assets four at a time; an unavailable one keeps the playable procedural fallback. */
+async function loadPinned(urls: string[]): Promise<void> {
   let next = 0;
   await Promise.all(Array.from({ length: 4 }, async () => {
     while (next < urls.length) {
@@ -72,6 +71,26 @@ export async function preloadGameplayAssets(): Promise<void> {
       try { await loadAsset(url, true); } catch { /* Keep the playable procedural fallback on an unavailable asset. */ }
     }
   }));
+}
+
+/**
+ * Complete gameplay assets before constructing portraits or the initial world creatures: both
+ * trainers, the 21-model gameplay pack and the models of any `species` named (the saved party and
+ * box). The other regional species are bigger downloads and come later, from loadRegionalModels.
+ */
+export async function preloadGameplayAssets(species: string[] = []): Promise<void> {
+  const dexes = new Set(Object.values(POKEMON_VISUALS).map((v) => v.dex).filter(inGameplayPack));
+  for (const id of species) { const v = POKEMON_VISUALS[id]; if (v) dexes.add(v.dex); }
+  await loadPinned([trainerUrl(), trainerUrl('red'), ...[...dexes].map(pokemonUrl)]);
+}
+
+let regional: Promise<void> | undefined;
+/**
+ * Load every remaining species' model in the background (once). Wild creatures of a species only
+ * spawn once its model is in (see creatureModelReady), so nothing pops in as a placeholder.
+ */
+export function loadRegionalModels(): Promise<void> {
+  return regional ??= loadPinned(Object.values(POKEMON_VISUALS).map((v) => pokemonUrl(v.dex)));
 }
 
 /** Independent skeletons and materials; immutable geometries/textures are shared between instances. */

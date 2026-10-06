@@ -47,6 +47,24 @@ export const SPECIES: Record<string, SpeciesDef> = {
   shepherion: { height: 1.45, element: EL.normal, build: shepherion },
 };
 
+/**
+ * Display heights (metres) for species that only exist as imported Pokémon models, on the same
+ * scale as the table above: small ones are scaled up so they read at third-person distance,
+ * bigger ones stay near their dex height. Ekans and Zubat use their coiled / wing-spread size.
+ */
+export const IMPORTED_HEIGHTS: Record<string, number> = {
+  weedle: 0.5, kakuna: 0.85, beedrill: 1.3,
+  spearow: 0.5, fearow: 1.4,
+  ekans: 0.8,
+  pikachu: 0.6, raichu: 0.95,
+  'nidoran-f': 0.55, 'nidoran-m': 0.6,
+  vulpix: 0.75, jigglypuff: 0.6, zubat: 0.75,
+  oddish: 0.6, gloom: 0.9,
+  meowth: 0.6, psyduck: 0.9, mankey: 0.65,
+  poliwag: 0.7, abra: 0.95, bellsprout: 0.85,
+  geodude: 0.6, ponyta: 1.2, eevee: 0.55,
+};
+
 /** Fallback used for ids that have no dedicated model. */
 export function fallbackSpecies(): SpeciesDef {
   return SPECIES.cindlet;

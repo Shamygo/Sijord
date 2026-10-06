@@ -108,6 +108,16 @@ export interface BattleMon {
   seededBy: Pos | null;
   flashFire: boolean;
   movedThisTurn: boolean;
+  /** Took damage from anything this turn (Assurance). */
+  hurtThisTurn: boolean;
+  /** Focus Energy: +2 critical-hit stages until it leaves the field. */
+  focusEnergy: boolean;
+  /** Turns left in a binding move (Wrap, Fire Spin), the binder's uid and the move's name. */
+  bound: number;
+  boundBy: string | null;
+  boundMove: string;
+  /** Held item knocked away by Knock Off; it comes back after the battle. */
+  lostItem?: string;
   /** Foes (uids) it has faced on the field; they share the experience when it faints. */
   faced: Set<string>;
 }
@@ -188,6 +198,11 @@ interface QueuedAction {
   tie: number;
 }
 
+/** "oran-berry" -> "Oran Berry". */
+function itemName(id: string): string {
+  return id.split('-').map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
+}
+
 function alive(m: BattleMon | null | undefined): m is BattleMon {
   return !!m && !m.fainted && m.hp > 0;
 }
@@ -213,6 +228,8 @@ export class Battle {
   /** The most recent creature to leave the field was caught (rather than fainting). */
   private lastCatch = false;
   private choices = new Map<string, Choice>();
+  /** What each creature (by uid) is doing this turn, for Sucker Punch. */
+  private turnChoices = new Map<string, Choice>();
   private events: BattleEvent[] = [];
   /** Moves creatures wanted to learn while already knowing four (uid -> moves). */
   readonly pendingMoves = new Map<string, string[]>();
@@ -266,6 +283,11 @@ export class Battle {
       seededBy: null,
       flashFire: false,
       movedThisTurn: false,
+      hurtThisTurn: false,
+      focusEnergy: false,
+      bound: 0,
+      boundBy: null,
+      boundMove: '',
       faced: new Set(),
     };
   }
@@ -433,9 +455,11 @@ export class Battle {
   private runTurn(): void {
     this.turn++;
     this.emit({ t: 'turn', turn: this.turn });
+    this.turnChoices.clear();
     for (const p of this.activePositions()) {
       const m = this.at(p)!;
       m.movedThisTurn = false;
+      m.hurtThisTurn = false;
       m.turnsOut++;
     }
 
@@ -461,6 +485,7 @@ export class Battle {
       if (choice.kind === 'switch') priority = 7;
       else if (choice.kind === 'ball') priority = 6;
       else if (choice.kind === 'move') priority = this.choiceMove(mon, choice).priority;
+      this.turnChoices.set(mon.uid, choice);
       queue.push({ mon, pos, choice, priority, speed: this.speed(mon), tie: this.rng.next() });
     }
     queue.sort((a, b) => b.priority - a.priority || b.speed - a.speed || a.tie - b.tie);
@@ -643,6 +668,10 @@ export class Battle {
     mon.seededBy = null;
     mon.flashFire = false;
     mon.toxicCounter = 0;
+    mon.focusEnergy = false;
+    mon.bound = 0;
+    mon.boundBy = null;
+    mon.types = [...mon.species.types];
     const trainer = this.teamSetup(mon.owner)?.name ?? '';
     const isWild = this.teamSetup(mon.owner)?.ai === 'wild';
     this.emit({
@@ -762,16 +791,74 @@ export class Battle {
           return;
         }
         break;
+      case 'teleport': {
+        // Only works in a wild battle, and only for a creature standing alone on its side.
+        if (this.kind !== 'wild' || this.allyOf(pos)) {
+          this.emit({ t: 'fail', pos, text: 'But it failed!' });
+          return;
+        }
+        const wild = this.teamSetup(mon.owner)?.ai === 'wild';
+        this.emit({ t: 'msg', text: wild ? `${this.label(pos)} teleported away!` : `${mon.name} teleported you out of the battle!` });
+        if (!wild) this.escaped = true;
+        this.phase = 'ended';
+        this.winner = null;
+        this.emit({ t: 'end', winner: null, reason: 'run' });
+        return;
+      }
+      case 'focus-energy':
+        if (mon.focusEnergy) {
+          this.emit({ t: 'fail', pos, text: 'But it failed!' });
+          return;
+        }
+        mon.focusEnergy = true;
+        this.emit({ t: 'msg', text: `${mon.name} is getting pumped!` });
+        return;
+      case 'rest':
+        if (mon.hp >= mon.maxHp || mon.status === 'slp' || mon.ability === 'vital-spirit') {
+          this.emit({ t: 'fail', pos, text: 'But it failed!' });
+          return;
+        }
+        mon.status = 'slp';
+        mon.sleepTurns = 3; // two turns asleep, then it wakes and acts on the third
+        mon.toxicCounter = 0;
+        this.emit({ t: 'status', pos, status: 'slp', text: `${mon.name} slept and became healthy!` });
+        this.heal(pos, mon.maxHp - mon.hp);
+        return;
+      case 'self-destruct': {
+        const damp = this.activePositions().find((p) => alive(this.at(p)) && this.at(p)!.ability === 'damp');
+        if (damp) {
+          this.emit({ t: 'ability', pos: damp, ability: 'damp', text: `${this.at(damp)!.name}'s Damp! ${mon.name} cannot use ${move.name}!` });
+          return;
+        }
+        break;
+      }
+      case 'sucker-punch': {
+        // Fails unless the target is about to attack.
+        const t = targets[0] ? this.at(targets[0]) : null;
+        const c = t ? this.turnChoices.get(t.uid) : undefined;
+        if (!t || t.movedThisTurn || c?.kind !== 'move' || this.choiceMove(t, c).category === 'status') {
+          this.emit({ t: 'fail', pos, text: 'But it failed!' });
+          return;
+        }
+        break;
+      }
       default:
         break;
     }
 
     if (move.target === 'self' || move.target === 'ally-side') {
+      // Ally-side moves (Life Dew, Howl) work on the user and its partner.
+      const ally = move.target === 'ally-side' ? this.allyOf(pos) : null;
+      const who = ally ? [pos, ally] : [pos];
       if (move.heal) {
-        if (mon.hp >= mon.maxHp) this.emit({ t: 'fail', pos, text: `${mon.name}'s HP is full!` });
-        else this.heal(pos, Math.ceil(mon.maxHp * move.heal), `${mon.name} regained health!`);
+        let healed = 0;
+        for (const p of who) {
+          const m = this.at(p)!;
+          healed += this.heal(p, Math.ceil(m.maxHp * move.heal), `${m.name} regained health!`);
+        }
+        if (!healed) this.emit({ t: 'fail', pos, text: who.length > 1 ? 'But it failed!' : `${mon.name}'s HP is full!` });
       }
-      if (move.selfBoosts) for (const [s, n] of Object.entries(move.selfBoosts)) this.applyBoost(pos, s as BoostName, n, true);
+      if (move.selfBoosts) for (const p of who) for (const [s, n] of Object.entries(move.selfBoosts)) this.applyBoost(p, s as BoostName, n, true);
       return;
     }
 
@@ -792,8 +879,16 @@ export class Battle {
       for (const [s, n] of Object.entries(move.selfBoosts)) this.applyBoost(pos, s as BoostName, n, true);
     }
     if (move === STRUGGLE && alive(mon)) this.damage(pos, Math.max(1, Math.floor(mon.maxHp / 4)), 'recoil', `${mon.name} is hit with recoil!`);
-    else if (move.recoil && totalDamage > 0 && alive(mon)) this.damage(pos, Math.max(1, Math.floor(totalDamage * move.recoil)), 'recoil', `${mon.name} is hit with recoil!`);
+    else if (move.recoil && totalDamage > 0 && alive(mon) && mon.ability !== 'rock-head') this.indirect(pos, Math.max(1, Math.floor(totalDamage * move.recoil)), 'recoil', `${mon.name} is hit with recoil!`);
     if (move.drain && totalDamage > 0 && alive(mon)) this.heal(pos, Math.max(1, Math.floor(totalDamage * move.drain)), `${mon.name} drained some energy!`);
+    if (move.special === 'rapid-spin' && totalDamage > 0 && alive(mon) && (mon.seededBy || mon.bound)) {
+      mon.seededBy = null;
+      mon.bound = 0;
+      mon.boundBy = null;
+      this.emit({ t: 'msg', text: `${mon.name} spun itself free!` });
+    }
+    // Self-Destruct and Explosion: the user faints whatever happened.
+    if (move.special === 'self-destruct' && alive(mon)) this.damage(pos, mon.hp, 'recoil');
   }
 
   /** Status checks before acting. Returns false if the creature loses its turn. */
@@ -886,8 +981,12 @@ export class Battle {
   /** One move against one target. Returns damage dealt. */
   private hitTarget(pos: Pos, user: BattleMon, tPos: Pos, target: BattleMon, move: MoveData, spread: boolean): number {
     if (target.protect && !samePos(pos, tPos)) {
-      this.emit({ t: 'protect', pos: tPos, text: `${target.name} protected itself!` });
-      return 0;
+      if (move.special !== 'feint') {
+        this.emit({ t: 'protect', pos: tPos, text: `${target.name} protected itself!` });
+        return 0;
+      }
+      target.protect = false;
+      this.emit({ t: 'msg', text: `${target.name} fell for the feint!` });
     }
 
     // Immunities from abilities.
@@ -909,6 +1008,11 @@ export class Battle {
       if (move.type === 'grass' && target.ability === 'sap-sipper') {
         this.emit({ t: 'ability', pos: tPos, ability: 'sap-sipper', text: `${target.name}'s Sap Sipper!` });
         this.applyBoost(tPos, 'atk', 1, true);
+        return 0;
+      }
+      if (move.type === 'electric' && target.ability === 'lightning-rod') {
+        this.emit({ t: 'ability', pos: tPos, ability: 'lightning-rod', text: `${target.name}'s Lightning Rod took the attack!` });
+        this.applyBoost(tPos, 'spa', 1, true);
         return 0;
       }
       if (move.powder && target.types.includes('grass')) {
@@ -935,11 +1039,14 @@ export class Battle {
     }
 
     const hits = move.multihit ? this.rollHits(move.multihit) : 1;
+    // Fixed-damage moves ignore type matchups beyond immunity, and never crit.
+    const fixed = move.special === 'seismic-toss' || move.special === 'super-fang';
+    const shownEff = fixed ? 1 : typeEff;
     let dealt = 0;
     let landed = 0;
     for (let i = 0; i < hits; i++) {
       if (!alive(target) || !alive(user)) break;
-      const crit = this.rollCrit(user, move);
+      const crit = !fixed && this.rollCrit(user, move);
       let dmg = this.computeDamage(user, target, tPos, move, typeEff, spread, crit, this.rng.int(85, 100));
       // Sturdy: survive a hit from full HP.
       if (target.ability === 'sturdy' && target.hp === target.maxHp && dmg >= target.hp) {
@@ -949,16 +1056,43 @@ export class Battle {
       dmg = Math.min(dmg, target.hp);
       landed++;
       dealt += dmg;
-      this.damage(tPos, dmg, 'move', undefined, { effect: typeEff, crit });
+      this.damage(tPos, dmg, 'move', undefined, { effect: shownEff, crit });
       if (crit) this.emit({ t: 'msg', text: 'A critical hit!' });
+      if (crit && alive(target) && target.ability === 'anger-point' && target.boosts.atk < 6) {
+        this.emit({ t: 'ability', pos: tPos, ability: 'anger-point', text: `${target.name}'s Anger Point maxed its Attack!` });
+        this.applyBoost(tPos, 'atk', 12, true);
+      }
       this.afterHit(pos, user, tPos, target, move);
     }
     if (hits > 1) this.emit({ t: 'msg', text: `Hit ${landed} time${landed === 1 ? '' : 's'}!` });
-    if (typeEff > 1) this.emit({ t: 'msg', text: "It's super effective!" });
-    else if (typeEff < 1) this.emit({ t: 'msg', text: "It's not very effective..." });
+    if (shownEff > 1) this.emit({ t: 'msg', text: "It's super effective!" });
+    else if (shownEff < 1) this.emit({ t: 'msg', text: "It's not very effective..." });
 
     if (alive(target) || move.secondary?.self) this.applySecondary(pos, user, tPos, target, move);
+    if (alive(target) && dealt > 0) {
+      if (move.type === 'dark' && target.ability === 'justified') {
+        this.emit({ t: 'ability', pos: tPos, ability: 'justified', text: `${target.name}'s Justified!` });
+        this.applyBoost(tPos, 'atk', 1, true);
+      }
+      // Stench: a 10% flinch on attacks that can't already cause one.
+      if (user.ability === 'stench' && !move.secondary?.flinch && !target.movedThisTurn && target.ability !== 'inner-focus' && this.rng.chance(10)) target.flinch = true;
+      if (move.special === 'bind' && !target.bound) {
+        target.bound = this.rng.int(4, 5);
+        target.boundBy = user.uid;
+        target.boundMove = move.name;
+        this.emit({ t: 'msg', text: `${target.name} was trapped by ${move.name}!` });
+      }
+      if (move.special === 'incinerate' && target.item?.endsWith('-berry')) {
+        this.emit({ t: 'item', pos: tPos, item: target.item, text: `${target.name}'s ${itemName(target.item)} was burnt up!` });
+        target.item = undefined;
+      }
+    }
     this.checkBerry(tPos);
+    if (move.special === 'knock-off' && alive(target) && dealt > 0 && target.item) {
+      this.emit({ t: 'item', pos: tPos, item: target.item, text: `${user.name} knocked off ${target.name}'s ${itemName(target.item)}!` });
+      target.lostItem = target.item;
+      target.item = undefined;
+    }
     return dealt;
   }
 
@@ -970,7 +1104,7 @@ export class Battle {
   }
 
   private rollCrit(user: BattleMon, move: MoveData): boolean {
-    const stage = (move.critStage ?? 0) + (user.ability === 'super-luck' ? 1 : 0);
+    const stage = (move.critStage ?? 0) + (user.ability === 'super-luck' ? 1 : 0) + (user.focusEnergy ? 2 : 0);
     const odds = stage <= 0 ? 1 / 24 : stage === 1 ? 1 / 8 : stage === 2 ? 1 / 2 : 1;
     return this.rng.next() < odds;
   }
@@ -989,6 +1123,7 @@ export class Battle {
     let acc = move.accuracy * accuracyStageMultiplier(accStage);
     if (user.ability === 'compound-eyes') acc *= 1.3;
     if (user.ability === 'hustle' && move.category === 'physical') acc *= 0.8;
+    if (target.ability === 'tangled-feet' && target.confused > 0) acc *= 0.5;
     return this.rng.next() * 100 < acc;
   }
 
@@ -997,8 +1132,10 @@ export class Battle {
    * estimateDamage) so the AI can reason with the same numbers.
    */
   private computeDamage(user: BattleMon, target: BattleMon, tPos: Pos, move: MoveData, typeEff: number, spread: boolean, crit: boolean, random: number): number {
+    if (move.special === 'seismic-toss') return user.creature.level;
+    if (move.special === 'super-fang') return Math.max(1, Math.floor(target.hp / 2));
     const physical = move.category === 'physical';
-    let power = move.power;
+    let power = this.movePower(user, target, move);
     if (user.ability === 'technician' && power <= 60) power = modify(power, 1.5);
     if (user.helpingHand) power = modify(power, 1.5);
 
@@ -1025,6 +1162,8 @@ export class Battle {
     const allyPos = { side: tPos.side, slot: (1 - tPos.slot) as 0 | 1 };
     const targetAlly = this.at(allyPos);
     if (targetAlly && !targetAlly.fainted && targetAlly.ability === 'friend-guard') final.push(0.75);
+    if (crit && user.ability === 'sniper') final.push(1.5);
+    if (typeEff < 1 && user.ability === 'tinted-lens') final.push(2);
 
     return calcDamage({
       level: user.creature.level,
@@ -1034,11 +1173,32 @@ export class Battle {
       spread,
       crit,
       random,
-      stab: move !== STRUGGLE && user.types.includes(move.type),
+      stab: move !== STRUGGLE && user.types.includes(move.type) && (user.ability === 'adaptability' ? 2 : true),
       effectiveness: typeEff,
       burned: physical && user.status === 'brn' && user.ability !== 'guts',
       final,
     });
+  }
+
+  /** Base power after the move's own rules (Electro Ball, Stored Power, Venoshock, ...). */
+  private movePower(user: BattleMon, target: BattleMon, move: MoveData): number {
+    switch (move.special) {
+      case 'electro-ball': {
+        const them = this.speed(target);
+        const ratio = them > 0 ? this.speed(user) / them : 0;
+        return ratio >= 4 ? 150 : ratio >= 3 ? 120 : ratio >= 2 ? 80 : ratio >= 1 ? 60 : 40;
+      }
+      case 'stored-power':
+        return move.power + 20 * Object.values(user.boosts).reduce((a, v) => a + Math.max(0, v), 0);
+      case 'venoshock':
+        return target.status === 'psn' || target.status === 'tox' ? move.power * 2 : move.power;
+      case 'assurance':
+        return target.hurtThisTurn ? move.power * 2 : move.power;
+      case 'knock-off':
+        return target.item ? modify(move.power, 1.5) : move.power;
+      default:
+        return move.power;
+    }
   }
 
   /** Average damage of a move from one position to another (for AI and UI hints). */
@@ -1053,6 +1213,7 @@ export class Battle {
     if (move.type === 'fire' && target.ability === 'flash-fire') return { min: 0, max: 0, effect: 0 };
     if (move.type === 'water' && target.ability === 'water-absorb') return { min: 0, max: 0, effect: 0 };
     if (move.type === 'grass' && target.ability === 'sap-sipper') return { min: 0, max: 0, effect: 0 };
+    if (move.type === 'electric' && target.ability === 'lightning-rod') return { min: 0, max: 0, effect: 0 };
     const spread = (move.target === 'all-adjacent-foes' || move.target === 'all-adjacent') && this.resolveTargets(from, move).length > 1;
     const hits = move.multihit ? (move.multihit[0] + move.multihit[1]) / 2 : 1;
     return {
@@ -1071,6 +1232,10 @@ export class Battle {
     if (target.ability === 'flame-body' && !user.status && this.rng.chance(30)) {
       this.emit({ t: 'ability', pos: tPos, ability: 'flame-body', text: `${target.name}'s Flame Body!` });
       this.setStatus(pos, 'brn', false);
+    }
+    if (target.ability === 'poison-point' && !user.status && !user.types.includes('poison') && !user.types.includes('steel') && this.rng.chance(30)) {
+      this.emit({ t: 'ability', pos: tPos, ability: 'poison-point', text: `${target.name}'s Poison Point!` });
+      this.setStatus(pos, 'psn', false);
     }
   }
 
@@ -1098,6 +1263,15 @@ export class Battle {
       this.emit({ t: 'msg', text: `${target.name} was seeded!` });
       return;
     }
+    if (move.special === 'soak') {
+      if (target.types.length === 1 && target.types[0] === 'water') {
+        this.emit({ t: 'fail', pos, text: 'But it failed!' });
+        return;
+      }
+      target.types = ['water'];
+      this.emit({ t: 'msg', text: `${target.name} transformed into the Water type!` });
+      return;
+    }
     if (move.status) did = this.setStatus(tPos, move.status, true) || did;
     if (move.confuse) did = this.confuse(tPos, true) || did;
     if (move.boosts) for (const [s, n] of Object.entries(move.boosts)) did = this.applyBoost(tPos, s as BoostName, n, false) || did;
@@ -1116,9 +1290,16 @@ export class Battle {
     if (!m || !alive(m)) return 0;
     const dealt = Math.max(0, Math.min(m.hp, Math.round(amount)));
     m.hp -= dealt;
+    if (dealt > 0) m.hurtThisTurn = true;
     this.emit({ t: 'damage', pos, amount: dealt, hp: m.hp, maxHp: m.maxHp, cause, ...extra, text });
     if (cause !== 'move') this.checkBerry(pos);
     return dealt;
+  }
+
+  /** Damage that isn't a direct hit (recoil, poison, burn, seeds, binding): Magic Guard ignores it. */
+  private indirect(pos: Pos, amount: number, cause: 'recoil' | 'status' | 'seed', text?: string): number {
+    if (this.at(pos)?.ability === 'magic-guard') return 0;
+    return this.damage(pos, amount, cause, text);
   }
 
   private heal(pos: Pos, amount: number, text?: string): number {
@@ -1134,10 +1315,11 @@ export class Battle {
   private checkBerry(pos: Pos): void {
     const m = this.at(pos);
     if (!m || !alive(m) || !m.item || !BERRIES[m.item] || m.hp > m.maxHp / 2) return;
+    // Unnerve: too nervous to eat berries.
+    if (this.foesOf(pos).some((f) => this.at(f)!.ability === 'unnerve')) return;
     const item = m.item;
     m.item = undefined;
-    const name = item === 'oran-berry' ? 'Oran Berry' : 'Sitrus Berry';
-    this.emit({ t: 'item', pos, item, text: `${m.name} ate its ${name}!` });
+    this.emit({ t: 'item', pos, item, text: `${m.name} ate its ${itemName(item)}!` });
     this.heal(pos, BERRIES[item](m));
     if (m.ability === 'cheek-pouch') this.heal(pos, Math.floor(m.maxHp / 3));
   }
@@ -1155,6 +1337,7 @@ export class Battle {
     if (status === 'par' && m.types.includes('electric')) return fail(`It doesn't affect ${m.name}...`);
     if ((status === 'psn' || status === 'tox') && (m.types.includes('poison') || m.types.includes('steel'))) return fail(`It doesn't affect ${m.name}...`);
     if (status === 'frz' && m.types.includes('ice')) return false;
+    if (status === 'slp' && m.ability === 'vital-spirit') return fail(`${m.name}'s Vital Spirit keeps it awake!`);
     m.status = status;
     if (status === 'slp') m.sleepTurns = this.rng.int(2, 4);
     if (status === 'tox') m.toxicCounter = 0;
@@ -1201,8 +1384,13 @@ export class Battle {
     }
     m.boosts[stat] = after;
     const d = after - before;
-    const how = d >= 2 ? 'rose sharply' : d > 0 ? 'rose' : d <= -2 ? 'harshly fell' : 'fell';
+    const how = d >= 6 ? 'was maximised' : d >= 2 ? 'rose sharply' : d > 0 ? 'rose' : d <= -2 ? 'harshly fell' : 'fell';
     this.emit({ t: 'boost', pos, stat, amount: d, text: `${m.name}'s ${STAT_LABEL[stat]} ${how}!` });
+    // Defiant and Competitive answer a foe's stat drop.
+    if (!self && d < 0 && (m.ability === 'defiant' || m.ability === 'competitive')) {
+      this.emit({ t: 'ability', pos, ability: m.ability, text: `${m.name}'s ${ABILITIES[m.ability].name}!` });
+      this.applyBoost(pos, m.ability === 'defiant' ? 'atk' : 'spa', 2, true);
+    }
     return true;
   }
 
@@ -1213,15 +1401,30 @@ export class Battle {
       if (m.seededBy) {
         const src = this.at(m.seededBy);
         const amt = Math.max(1, Math.floor(m.maxHp / 8));
-        const dealt = this.damage(p, amt, 'seed', `${m.name}'s health is sapped by Leech Seed!`);
+        const dealt = this.indirect(p, amt, 'seed', `${m.name}'s health is sapped by Leech Seed!`);
         if (src && !src.fainted && dealt) this.heal(m.seededBy, dealt);
       }
       if (!alive(m)) continue;
-      if (m.status === 'brn') this.damage(p, Math.max(1, Math.floor(m.maxHp / 16)), 'status', `${m.name} is hurt by its burn!`);
-      else if (m.status === 'psn') this.damage(p, Math.max(1, Math.floor(m.maxHp / 8)), 'status', `${m.name} is hurt by poison!`);
+      if (m.status === 'brn') this.indirect(p, Math.max(1, Math.floor(m.maxHp / 16)), 'status', `${m.name} is hurt by its burn!`);
+      else if (m.status === 'psn') this.indirect(p, Math.max(1, Math.floor(m.maxHp / 8)), 'status', `${m.name} is hurt by poison!`);
       else if (m.status === 'tox') {
         m.toxicCounter = Math.min(15, m.toxicCounter + 1);
-        this.damage(p, Math.max(1, Math.floor((m.maxHp * m.toxicCounter) / 16)), 'status', `${m.name} is hurt by poison!`);
+        this.indirect(p, Math.max(1, Math.floor((m.maxHp * m.toxicCounter) / 16)), 'status', `${m.name} is hurt by poison!`);
+      }
+      if (m.bound > 0 && alive(m)) {
+        // Binding ends early if the creature holding it has left the field.
+        const binder = this.activePositions().map((q) => this.at(q)!).find((x) => x.uid === m.boundBy && alive(x));
+        if (!binder) {
+          m.bound = 0;
+          m.boundBy = null;
+        } else {
+          this.indirect(p, Math.max(1, Math.floor(m.maxHp / 8)), 'status', `${m.name} is hurt by ${m.boundMove}!`);
+          m.bound--;
+          if (m.bound === 0 && alive(m)) {
+            m.boundBy = null;
+            this.emit({ t: 'msg', text: `${m.name} was freed from ${m.boundMove}!` });
+          }
+        }
       }
       if (m.hp > 0 && m.status && m.ability === 'shed-skin' && this.rng.chance(30)) {
         m.status = undefined;
@@ -1322,7 +1525,8 @@ export class Battle {
           const c = m.creature;
           c.hp = Math.max(0, Math.min(m.hp, maxHp(c)));
           c.status = m.fainted ? undefined : m.status;
-          c.item = m.item;
+          // A knocked-off item is found again after the battle.
+          c.item = m.item ?? m.lostItem;
           c.moves = m.moves.map((x) => ({ id: x.id, pp: x.pp }));
         }
       }

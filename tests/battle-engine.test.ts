@@ -122,7 +122,7 @@ describe('battle engine', () => {
   });
 
   it('burns: chip damage each turn and weaker physical hits; Fire types are immune', () => {
-    const attacker = mon('hjordpup', 20, ['tackle']);
+    const attacker = mon('splashpup', 20, ['tackle']);
     const b = battle([attacker], [mon('stashquill', 20, ['will-o-wisp'])], { seed: 5 });
     const before = b.estimateDamage(P0, 'tackle', F0).max;
     let burned = false;

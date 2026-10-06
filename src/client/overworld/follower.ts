@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createCreatureModel, type CreatureModel } from '../creatures';
+import { createCreatureModel, creatureModelReady, type CreatureModel } from '../creatures';
 import type { World } from '../world/types';
 import { Mover } from './mover';
 
@@ -16,16 +16,24 @@ export class Follower {
   private visible = true;
   private placed = false;
   private idleTime = 0;
+  /** Showing a stand-in while the species' real model is still downloading. */
+  private provisional = false;
 
   setSpecies(id: string | null): void {
     if (id === this.species) return;
+    this.species = id;
+    this.placed = false;
+    this.buildModel();
+  }
+
+  private buildModel(): void {
     if (this.model) {
       this.root.remove(this.model.root);
       this.model.dispose();
       this.model = null;
     }
-    this.species = id;
-    this.placed = false;
+    const id = this.species;
+    this.provisional = !!id && !creatureModelReady(id);
     if (id) {
       this.model = createCreatureModel(id);
       this.root.add(this.model.root);
@@ -51,6 +59,8 @@ export class Follower {
   }
 
   update(dt: number, leader: THREE.Vector3, leaderYaw: number, leaderSpeed: number, world: World): void {
+    // Swap in the real model once it has downloaded.
+    if (this.provisional && this.species && creatureModelReady(this.species)) this.buildModel();
     if (!this.model || !this.visible) return;
     const size = this.model.radius;
     const [tx, tz] = this.slot(leader, leaderYaw, size);

@@ -85,8 +85,46 @@ export interface MoveData {
   /** Stage changes to the user that always happen (status moves, Close Combat drops). */
   selfBoosts?: Partial<Boosts>;
   secondary?: MoveSecondary;
-  /** Special behaviour that needs code. */
-  special?: 'protect' | 'fake-out' | 'helping-hand' | 'follow-me' | 'tailwind' | 'leech-seed';
+  /**
+   * Special behaviour that needs code in the engine. Fixed-damage and variable-power moves
+   * (Seismic Toss, Super Fang, Electro Ball) list power 0, as the games show "—".
+   */
+  special?:
+    | 'protect' | 'fake-out' | 'helping-hand' | 'follow-me' | 'tailwind' | 'leech-seed'
+    /** Ends a wild battle (the user flees); fails in trainer battles or beside an ally. */
+    | 'teleport'
+    /** Hits through Protect. */
+    | 'feint'
+    /** Raises the user's critical-hit stage by 2 until it leaves the field. */
+    | 'focus-energy'
+    /** Wrap, Fire Spin: the target takes 1/8 of its max HP for 4-5 turns. */
+    | 'bind'
+    /** Sleeps for two turns and restores all HP and status. */
+    | 'rest'
+    /** Makes the target pure Water type. */
+    | 'soak'
+    /** 1.5x power against a held item, which is knocked away for the rest of the battle. */
+    | 'knock-off'
+    /** Burns up the target's berry. */
+    | 'incinerate'
+    /** Only works if the target is about to use a damaging move. */
+    | 'sucker-punch'
+    /** Self-Destruct and Explosion: the user faints. Blocked by Damp. */
+    | 'self-destruct'
+    /** Damage equal to the user's level. */
+    | 'seismic-toss'
+    /** Damage equal to half the target's current HP. */
+    | 'super-fang'
+    /** Power from the speed ratio: 40 / 60 / 80 / 120 / 150. */
+    | 'electro-ball'
+    /** 20 power plus 20 for every stage the user's stats are raised. */
+    | 'stored-power'
+    /** Double power against a poisoned target. */
+    | 'venoshock'
+    /** Double power if the target was already hurt this turn. */
+    | 'assurance'
+    /** Frees the user from Leech Seed and binding moves. */
+    | 'rapid-spin';
   /** Powder and spore moves (Grass types are immune). */
   powder?: boolean;
   sound?: boolean;
@@ -107,7 +145,7 @@ export interface LearnEntry {
 
 export interface SpeciesData {
   id: string;
-  /** Dex number, e.g. "S001" for Sijord originals. */
+  /** National Pokédex number for display, e.g. "#001". */
   dex: string;
   name: string;
   types: [TypeName] | [TypeName, TypeName];
@@ -125,9 +163,9 @@ export interface SpeciesData {
   temperament: Temperament;
   learnset: LearnEntry[];
   evolution?: { into: string; level: number };
-  /** Short dex entry. */
+  /** Short dex entry (original Sijord text). */
   description: string;
-  /** Rough height in metres, also used by the world for spacing. */
+  /** Height in metres, as listed in the Pokédex. Display sizes live with the models. */
   height: number;
 }
 

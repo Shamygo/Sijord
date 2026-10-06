@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
-import { loadedAsset, pokemonUrl } from '../assets/loader';
+import { assetStatus, loadedAsset, pokemonUrl } from '../assets/loader';
 import { importedCreature } from './imported';
 import { hashString, type BaseInit, type Clip } from './core';
 import { quadClips } from './clips';
 import { Kit, cloneTemplate, remap } from './kit';
-import { SPECIES, fallbackSpecies, type Built, type SpeciesDef } from './species';
+import { IMPORTED_HEIGHTS, SPECIES, fallbackSpecies, type Built, type SpeciesDef } from './species';
 
 /**
  * Procedural creature models for Sijord's species, built in code on shared body plans
@@ -124,12 +124,24 @@ function release(t: Template): void {
   for (const m of t.materials) m.dispose();
 }
 
+/**
+ * Whether a species can be shown as its final model right now: its imported model has loaded, or
+ * it never will (no model, or the download failed), so the procedural stand-in is what it gets.
+ * Models outside the gameplay pack load in the background after the world is built.
+ */
+export function creatureModelReady(speciesId: string): boolean {
+  const visual = POKEMON_VISUALS[speciesId.toLowerCase()];
+  if (!visual) return true;
+  const url = pokemonUrl(visual.dex);
+  return !!loadedAsset(url) || assetStatus.failed.has(url);
+}
+
 export function createCreatureModel(speciesId: string): CreatureModel {
   const id = speciesId.toLowerCase();
   const visual = POKEMON_VISUALS[id];
   const asset = visual && loadedAsset(pokemonUrl(visual.dex));
   if (asset) {
-    const model = importedCreature(asset, (SPECIES[id] ?? fallbackSpecies()).height);
+    const model = importedCreature(asset, IMPORTED_HEIGHTS[id] ?? (SPECIES[id] ?? fallbackSpecies()).height);
     model.root.name = `creature:${id}`;
     return model;
   }

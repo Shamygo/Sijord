@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
 import type { Appearance } from '../../shared/types';
 import { createAvatar } from '../player/avatar';
-import { createCreatureModel } from '../creatures';
+import { createCreatureModel, creatureModelReady } from '../creatures';
 
 /**
  * Small rendered portraits of creatures for the HUD, party screen and battle menus, drawn once
@@ -58,6 +58,8 @@ export class Portraits {
   get(species: string): string {
     const hit = this.cache.get(species);
     if (hit !== undefined) return hit;
+    // Don't draw (and keep) a stand-in while the real model is still downloading.
+    if (!creatureModelReady(species)) return '';
     const r = this.ensure();
     if (!r) return '';
     const model = createCreatureModel(species);
