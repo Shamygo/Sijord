@@ -20,6 +20,21 @@ export class Follower {
   private provisional = false;
   /** Where it's rushing to intercept a charging wild creature, instead of following. */
   private rush: THREE.Vector3 | null = null;
+  /** The node it's helping to gather from (DESIGN §6.3), and the time to its next go at it. */
+  private work: { x: number; z: number; r: number; side: number } | null = null;
+  private workT = 0;
+
+  /** Help gather at a node (x, z and radius) the trainer is working from `from`, or null to go back to following. */
+  workAt(node: { x: number; z: number; r: number } | null, from?: { x: number; z: number }): void {
+    if (!node) { this.work = null; return; }
+    if (this.work && this.work.x === node.x && this.work.z === node.z) return;
+    // Beside the trainer rather than on top of them: off to whichever side it's already nearer.
+    const base = from ? Math.atan2(from.x - node.x, from.z - node.z) : 0;
+    const near = (a: number) => Math.hypot(this.mover.pos.x - node.x - Math.sin(a), this.mover.pos.z - node.z - Math.cos(a));
+    const side = near(base + 1.9) < near(base - 1.9) ? base + 1.9 : base - 1.9;
+    this.work = { ...node, side };
+    this.workT = 0.6;
+  }
 
   /** Sprint at a charging wild creature (DESIGN §5.3 interception); null goes back to following. */
   rushAt(target: THREE.Vector3 | null): void {
@@ -78,6 +93,20 @@ export class Follower {
     }
     if (this.rush) {
       this.mover.steer(dt, this.rush.x, this.rush.z, 13, world, 0.2);
+      this.root.position.copy(this.mover.pos);
+      this.root.rotation.y = this.mover.yaw;
+      this.model.update(dt, this.mover.speed);
+      return;
+    }
+    if (this.work) {
+      const w = this.work, gap = w.r + size + 0.25;
+      const rem = this.mover.steer(dt, w.x + Math.sin(w.side) * gap, w.z + Math.cos(w.side) * gap, 6, world, 0.3);
+      if (rem < 0.45) {
+        // At the node: face it and set about it every second or so.
+        this.mover.face(dt, Math.atan2(w.x - this.mover.pos.x, w.z - this.mover.pos.z));
+        this.workT -= dt;
+        if (this.workT <= 0) this.workT = Math.max(0.9, this.model.play('attack') + 0.25);
+      }
       this.root.position.copy(this.mover.pos);
       this.root.rotation.y = this.mover.yaw;
       this.model.update(dt, this.mover.speed);

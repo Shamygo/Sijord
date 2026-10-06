@@ -34,7 +34,7 @@ import { applyAtmosphere, createWorld } from '../world';
 import { DiscoveryProps, type DiscoverySpot } from '../world/discoveries';
 import { DISCOVERY_LABEL, discoveryCounts, tabletReward } from '../../shared/discoveries';
 import { applyCraft, canLearn, craftBlock, craftSpend, RECIPES, recipeById, techPoints, type Station } from '../../shared/crafting';
-import { gatherWay, NODE_RULES, pruneDepleted, rollYield, wearTool, type GatherWay, type ToolId } from '../../shared/gathering';
+import { CLEAN_WATER_TYPE, FIRE_COOK_TIME, gatherWay, NODE_RULES, partnerHelp, pruneDepleted, rollPartner, rollYield, wearTool, type GatherWay, type PartnerHelp, type ToolId } from '../../shared/gathering';
 import { earnedXp, trainerLevel, TRAINER_XP } from '../../shared/trainer-level';
 import type { ResourceNode } from '../world/resources';
 import { TOWN } from '../world/layout';
@@ -74,6 +74,8 @@ interface ActiveBattle {
 interface PartnerFollower {
   follower: Follower;
   lead: string | null;
+  /** The node their partner is helping them gather from. */
+  work: [number, number, number] | null;
   last: THREE.Vector3;
   speed: number;
 }
@@ -160,7 +162,7 @@ export class Game {
   private netCatch: { fx: BallCatchFx; until: number } | null = null;
   private lastCatch: { species: string; chance: number; unaware: boolean; caught?: boolean; reaction?: CatchReaction } | null = null;
   /** Gathering in progress (DESIGN §6.3): the node (or the water you're kneeling at), how, and seconds so far. */
-  private gathering: { node: ResourceNode | null; water?: WaterSpot; way: GatherWay; t: number } | null = null;
+  private gathering: { node: ResourceNode | null; water?: WaterSpot; way: GatherWay; t: number; helper?: { help: PartnerHelp; name: string } } | null = null;
   /** The wild side of the friend's battle we joined: levels seen and who fainted (prize money). */
   private remoteFoes: { id: string; levels: Map<string, number>; fainted: Set<string> } | null = null;
   private guestPrize = 0;
@@ -272,7 +274,7 @@ export class Game {
       levelCap: () => this.levelCap,
       trainer: () => this.trainer,
       stations: () => this.stationsNear(this.controller.position),
-      craftSeconds: (id) => (recipeById(id)?.seconds ?? 1) * classInfo(this.save.profile.playerClass).modifiers.craftTime,
+      craftSeconds: (id) => (recipeById(id)?.seconds ?? 1) * classInfo(this.save.profile.playerClass).modifiers.craftTime * (recipeById(id)?.station === 'campfire' && this.partnerOut(this.controller.position)?.types.includes('fire') ? FIRE_COOK_TIME : 1),
       craft: (id) => this.craft(id),
       toolUses: (id) => this.save.toolWear?.[id],
       eat: (id) => this.eat(id),
@@ -350,6 +352,7 @@ export class Game {
         }
         if (this.remoteBattleHost === id) this.receiveRemoteBattle(s.battleFrame);
         if (pf) pf.lead = s.lead && !s.battle && SPECIES[s.lead] ? s.lead : null;
+        if (pf) pf.work = Array.isArray(s.work) && s.work.length === 3 && s.work.every(Number.isFinite) ? s.work : null;
         // The partner's throws replay here (catching itself is decided on their side).
         if (s.ballThrow && ITEMS[s.ballThrow.ball] && this.throws.remoteThrow(id, s.ballThrow, THROW_CLIP.release)) this.partners.get(id)?.remote.avatar.gesture('throw');
         if (s.ballCatch && ITEMS[s.ballCatch.ball]) this.throws.remoteCatch(id, s.ballCatch);
@@ -618,7 +621,7 @@ export class Game {
     this.partners.set(id, { remote, profile });
     const follower = new Follower();
     this.scene.add(follower.root);
-    this.partnerFollowers.set(id, { follower, lead: null, last: new THREE.Vector3(), speed: 0 });
+    this.partnerFollowers.set(id, { follower, lead: null, work: null, last: new THREE.Vector3(), speed: 0 });
     this.updatePartnerStatus();
   }
 
@@ -1297,18 +1300,31 @@ export class Game {
     const p = this.controller.position;
     this.controller.yaw = Math.atan2(node.x - p.x, node.z - p.z);
     this.gathering = { node, way, t: 0 };
+    // A lead of the right type out of its ball lends a hand (DESIGN §6.3).
+    const partner = this.partnerOut(p), help = partner && partnerHelp(node.kind, partner.types);
+    if (partner && help) this.gathering.helper = { help, name: partner.name };
   }
 
-  private finishGather(g: { node: ResourceNode | null; water?: WaterSpot; way: GatherWay }): void {
+  /** The lead Pokemon, if it's out of its ball and close enough to lend a hand. */
+  private partnerOut(pos: THREE.Vector3): { name: string; types: readonly string[] } | null {
+    const lead = this.party.find(isUsable);
+    if (!lead || !this.follower.active || this.follower.species !== lead.species || this.follower.mover.pos.distanceTo(pos) > 14) return null;
+    return { name: displayName(lead), types: species(lead.species).types };
+  }
+
+  private finishGather(g: { node: ResourceNode | null; water?: WaterSpot; way: GatherWay; helper?: { help: PartnerHelp; name: string } }): void {
     this.gathering = null;
     if (g.water) return this.finishWater(g.water);
     if (!g.node) return;
     const bag = (this.save.bag ??= {});
     const got = rollYield(g.way, Math.random);
+    const extra = g.helper ? rollPartner(g.helper.help, Math.random) : 0;
+    if (g.helper && extra) got[g.helper.help.item] = (got[g.helper.help.item] ?? 0) + extra;
     for (const [id, n] of Object.entries(got)) bag[id] = (bag[id] ?? 0) + n;
     (this.save.depleted ??= {})[g.node.key] = Date.now() + NODE_RULES[g.node.kind].regrow * 1000;
     this.world.resources?.setEmpty(g.node.key, true);
     let note = Object.keys(got).map((id) => `${ITEMS[id]?.name ?? id} ×${bag[id]}`).join(' · ');
+    if (g.helper && extra) note = `${g.helper.name} ${g.helper.help.verb} · ${note}`;
     if (g.way.tool && wearTool(bag, (this.save.toolWear ??= {}), g.way.tool).broke) {
       note = `Your ${ITEMS[g.way.tool]?.name ?? 'tool'} broke${bag[g.way.tool] ? ' · you have a spare' : ''}`;
     }
@@ -1464,9 +1480,11 @@ export class Game {
     const bag = (this.save.bag ??= {}), m = this.meters;
     let title = '', sub = '', queasy = false;
     if (m.thirst < DRINK_BELOW) {
-      queasy = consume(m, OPEN_WATER, Math.random).queasy;
+      // A Water-type partner finds a clean spot to drink from.
+      const partner = this.partnerOut(this.controller.position), clean = !!partner?.types.includes(CLEAN_WATER_TYPE);
+      queasy = consume(m, clean ? { ...OPEN_WATER, queasy: 0 } : OPEN_WATER, Math.random).queasy;
       title = `You drank from the ${spot.name}`;
-      sub = queasy ? 'It didn\'t sit well. You feel queasy' : this.meterNote();
+      sub = queasy ? 'It didn\'t sit well. You feel queasy' : clean ? `${partner!.name} found you a clean spot · ${this.meterNote()}` : this.meterNote();
     }
     const room = canteenRoom(bag);
     if (room > 0) {
@@ -1929,7 +1947,11 @@ export class Game {
       else if (wildMon) this.hud.setPrompt(canFight ? `Battle the wild ${displayName(wildMon.creature)} · Lv. ${wildMon.creature.level}` : `Wild ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
       else if (this.gathering) this.hud.setPrompt(`${this.gathering.way.doing}…`, '');
       else if (water) this.hud.setPrompt(this.waterPrompt(water));
-      else if (gather) gather.way ? this.hud.setPrompt(gather.way.prompt) : this.hud.setPrompt(NODE_RULES[gather.node.kind].needs ?? null, '');
+      else if (gather) {
+        const partner = gather.way ? this.partnerOut(pos) : null;
+        const helps = partner && partnerHelp(gather.node.kind, partner.types);
+        gather.way ? this.hud.setPrompt(helps ? `${gather.way.prompt} · with ${partner.name}` : gather.way.prompt) : this.hud.setPrompt(NODE_RULES[gather.node.kind].needs ?? null, '');
+      }
       else if(this.controller.onLadder)this.hud.setPrompt(`${keyLabel(this.settings.keys.forward)} up · ${keyLabel(this.settings.keys.back)} down · ${keyLabel(this.settings.keys.jump)} let go`,'');
       else if(this.controller.onWall)this.hud.setPrompt(`${[this.settings.keys.forward,this.settings.keys.left,this.settings.keys.back,this.settings.keys.right].map(keyLabel).join(' ')} climb · ${keyLabel(this.settings.keys.jump)} leap · ${keyLabel(this.settings.keys.back)} + ${keyLabel(this.settings.keys.jump)} kick off · ${keyLabel(this.settings.keys.climb)} let go`,'');
       else if(this.controller.nearClimb(this.world))this.hud.setPrompt('Walk into the ladder to climb the lookout',keyLabel(this.settings.keys.forward));
@@ -1990,6 +2012,8 @@ export class Game {
     this.wild.setRemoteBusy(new Set(friends.flatMap((f) => f.busy)));
     this.wild.setFriendCells(friends.flatMap((f) => f.cells));
     this.wild.update(dt, this.controller.position, snap.speed, move.sprint && snap.speed > 5, busy);
+    const partnerWork = this.gathering?.helper ? this.gathering.node : null;
+    this.follower.workAt(partnerWork, this.controller.position);
     this.follower.update(dt, this.controller.position, this.controller.yaw, snap.speed, this.world);
     for (const [id, p] of this.partners) {
       p.remote.update(dt, now);
@@ -2000,6 +2024,7 @@ export class Game {
       pf.last.copy(rp);
       pf.follower.setSpecies(pf.lead);
       pf.follower.setVisible(!!pf.lead && p.remote.root.visible);
+      pf.follower.workAt(pf.work ? { x: pf.work[0], z: pf.work[1], r: pf.work[2] } : null, rp);
       pf.follower.update(dt, rp, p.remote.avatar.root.rotation.y, pf.speed, this.world);
     }
     this.throws.update(dt);
@@ -2011,7 +2036,8 @@ export class Game {
     const wildTaken = this.wild.sharedTaken;
     const wildBusy = this.wild.sharedBusy;
     const wildCells = this.wild.liveCells;
-    this.net.send({ ...snap, lead, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl, ballThrow, ballCatch, down: down > 0 ? Math.round(down * 100) / 100 : undefined, wildTaken: wildTaken.length ? wildTaken : undefined, wildBusy: wildBusy.length ? wildBusy : undefined, wildCells: wildCells.length ? wildCells : undefined }, now);
+    const work: [number, number, number] | undefined = partnerWork ? [partnerWork.x, partnerWork.z, partnerWork.r].map((v) => Math.round(v * 100) / 100) as [number, number, number] : undefined;
+    this.net.send({ ...snap, lead, work, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl, ballThrow, ballCatch, down: down > 0 ? Math.round(down * 100) / 100 : undefined, wildTaken: wildTaken.length ? wildTaken : undefined, wildBusy: wildBusy.length ? wildBusy : undefined, wildCells: wildCells.length ? wildCells : undefined }, now);
 
     // Also keeps the sun's shadow camera centred on the player.
     this.world.update(dt, this.elapsed, this.controller.position);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyCraft, canLearn, craftBlock, craftSpend, RECIPES, recipeById, techPoints } from '../src/shared/crafting';
 import { chargeDamage } from '../src/shared/trainer-vitals';
-import { gatherWay, NODE_RULES, pruneDepleted, rollYield, TOOL_USES, wearTool, type NodeKind } from '../src/shared/gathering';
+import { gatherWay, NODE_RULES, PARTNER_HELP, partnerHelp, pruneDepleted, rollPartner, rollYield, TOOL_USES, wearTool, type NodeKind } from '../src/shared/gathering';
 import { ITEMS } from '../src/shared/items';
 import { chopPitch, toolModel } from '../src/client/player/tools';
 import { earnedXp, trainerLevel, TRAINER_MAX_LEVEL, xpForLevel, xpToNext } from '../src/shared/trainer-level';
@@ -29,6 +29,24 @@ describe('trainer levels', () => {
 
 describe('gathering', () => {
   const none = () => false, all = () => true;
+
+  it('a partner Pokemon of the right type adds at most one of what the node gives', () => {
+    expect(partnerHelp('stones', ['rock', 'ground'])?.item).toBe('stone');
+    expect(partnerHelp('tree', ['grass', 'poison'])?.item).toBe('wood');
+    expect(partnerHelp('bush', ['fire'])).toBeNull();
+    expect(partnerHelp('copper', ['fighting'])).toBeNull();
+    for (const [kind, help] of Object.entries(PARTNER_HELP)) {
+      const r = NODE_RULES[kind as NodeKind];
+      const gives = new Set([...Object.keys(r.hand?.gives ?? {}), ...Object.keys(r.withTool?.gives ?? {})]);
+      expect(gives.has(help.item), `${kind} helper adds ${help.item}`).toBe(true);
+      expect(help.chance).toBeGreaterThan(0);
+      expect(help.chance).toBeLessThanOrEqual(1);
+    }
+    // Copper is scarce: a digger only sometimes turns up more ore.
+    expect(rollPartner(PARTNER_HELP.copper, () => 0.3)).toBe(1);
+    expect(rollPartner(PARTNER_HELP.copper, () => 0.4)).toBe(0);
+    expect(rollPartner(PARTNER_HELP.bush, () => 0.999)).toBe(1);
+  });
 
   it('every node can be worked one way or another and grows back', () => {
     for (const [kind, r] of Object.entries(NODE_RULES)) {

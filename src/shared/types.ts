@@ -49,6 +49,8 @@ export interface PlayerSnapshot {
   down?: number;
   /** Tool in hand while chopping or mining (an item id). */
   tool?: string;
+  /** The node (x, z, radius) this player's partner Pokemon is helping to gather from. */
+  work?: [number, number, number];
   /** Shared wild creatures this player caught or defeated recently (spawn keys). */
   wildTaken?: string[];
   /** Shared wild creatures this player is battling or catching right now. */
