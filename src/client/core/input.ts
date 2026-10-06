@@ -138,6 +138,7 @@ export class Input {
       sprint: this.keys.has(keys.sprint),
       jump: this.pressed.has(keys.jump),
       climb: this.keys.has(keys.climb),
+      dodge: this.pressed.has(keys.dodge),
     };
   }
 

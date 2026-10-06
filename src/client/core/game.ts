@@ -878,6 +878,8 @@ export class Game {
   /** A charging creature connected: knocked down, HP lost, maybe knocked out. */
   private onTrainerHit(m: WildCreature): void {
     if (this.battle || this.remoteBattleHost || this.talking || this.scripted) return;
+    // A well-timed dodge lets the lunge pass straight through.
+    if (this.controller.invulnerable) return;
     const dmg = chargeDamage(m.creature.level);
     const r = this.vitals.hit(dmg);
     if (r === 'ignored') return;
@@ -1248,7 +1250,7 @@ export class Game {
     // Aiming roots the trainer (they turn with the camera); a knockdown takes control away.
     if (this.talking || this.menu.isOpen || (this.scripted && !inBattle) || actionMode || knocked || this.aiming) {
       move.forward = move.right = 0;
-      move.jump = move.sprint = move.climb = false;
+      move.jump = move.sprint = move.climb = move.dodge = false;
     }
     this.controller.update(dt, move, this.cam.yaw, this.world);
     const snap = this.controller.snapshot();

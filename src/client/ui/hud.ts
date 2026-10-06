@@ -119,7 +119,7 @@ export class Hud {
       this.hot('🎒', 'bag', 'Bag', s),
     );
     this.help.replaceChildren(
-      k('forward'), k('left'), k('back'), k('right'), ' move  ', k('sprint'), ' sprint  ', k('jump'), ' jump  ', k('climb'), ' climb  ', k('interact'), ' talk / battle  ',
+      k('forward'), k('left'), k('back'), k('right'), ' move  ', k('sprint'), ' sprint  ', k('jump'), ' jump  ', k('dodge'), ' dodge  ', k('climb'), ' climb  ', k('interact'), ' talk / battle  ',
       k('throw'), ' hold: aim & throw  ', k('party'), ' party  ', k('map'), ' map  ', k('bag'), ' bag  ', h('span.key', {}, 'Esc'), ' menu',
     );
     this.help.style.display = s.showControlsHint ? '' : 'none';

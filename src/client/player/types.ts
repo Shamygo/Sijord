@@ -11,6 +11,8 @@ export interface MoveInput {
   jump: boolean;
   /** Hold to ascend a nearby ladder or a steep rock slope. */
   climb?: boolean;
+  /** Pressed this frame: hop out of the way. */
+  dodge?: boolean;
 }
 
 /** Terrain height at a world (x, z). */

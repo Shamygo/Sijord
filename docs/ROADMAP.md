@@ -18,7 +18,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 |---|---|---|---|
 | M1 | Hometown and co-op presence | Walk around Bramblewick with a friend and talk to Professor Hazel | Done |
 | M2 | First creatures and battles | Pick a starter and fight wild double battles near Bramblewick | Done |
-| M3 | Catching, party and the first route | Catch creatures (overworld and in battle) across the starter biome, with aggression | In progress (in-battle catching done) |
+| M3 | Catching, party and the first route | Catch creatures (overworld and in battle) across the starter biome, with aggression | In progress (catching in battle and overworld, aggression, trainer HP, party/PC, Dex, 45 species done) |
 | M4 | Survival and crafting core | Hunger, thirst and stamina, gathering, T0-T1 crafting, Poke Ball crafting, tools and armour | L |
 | M5 | Open world and settlements | Streamed 6x6 km terrain with 4-5 biomes, villages and towns, NPCs, shops | XL |
 | M6 | First gym slice | Two-player puzzle gym, co-op boss battle, competitive AI T1-T2, badges and level caps | XL |

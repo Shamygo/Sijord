@@ -307,3 +307,73 @@ describe('natural jump recovery', () => {
     expect(Math.abs(c.yaw)).toBeLessThan(.01);
   });
 });
+
+describe('dodge', () => {
+  const press = (i: MoveInput): MoveInput => ({ ...i, dodge: true });
+
+  it('hops a couple of metres sideways and keeps facing forward', () => {
+    const w = fakeWorld();
+    const c = spawn(w);
+    const right: MoveInput = { forward: 0, right: 1, sprint: false, jump: false };
+    c.update(DT, press(right), 0, w);
+    expect(c.dodging).toBe(true);
+    expect(c.invulnerable).toBe(true);
+    expect(c.grounded).toBe(false);
+    // Input doesn't steer a dodge, and a side step lands planted.
+    run(c, w, idle, 0.5);
+    expect(c.dodging).toBe(false);
+    // Camera yaw 0 faces +Z, so right is -X.
+    expect(c.position.x).toBeLessThan(-2);
+    expect(c.position.x).toBeGreaterThan(-4.5);
+    expect(Math.abs(c.yaw)).toBeLessThan(0.15);
+    expect(c.grounded).toBe(true);
+  });
+
+  it('backsteps with no direction held', () => {
+    const w = fakeWorld();
+    const c = spawn(w);
+    c.update(DT, press(idle), 0, w);
+    run(c, w, idle, 0.6);
+    expect(c.position.z).toBeLessThan(-1.5);
+  });
+
+  it('costs stamina, has a short cooldown and needs the key pressed again', () => {
+    const w = fakeWorld();
+    const c = spawn(w);
+    c.update(DT, press(idle), 0, w);
+    expect(c.stamina).toBeCloseTo(1 - PLAYER_TUNING.dodgeStamina, 2);
+    // Holding the key doesn't chain dodges.
+    run(c, w, press(idle), 1);
+    expect(c.dodging).toBe(false);
+    const before = c.stamina;
+    c.update(DT, idle, 0, w);
+    c.update(DT, press(idle), 0, w);
+    expect(c.dodging).toBe(true);
+    expect(c.stamina).toBeLessThan(before);
+  });
+
+  it('can only dodge from the ground and not while exhausted', () => {
+    const w = fakeWorld();
+    const c = spawn(w);
+    c.update(DT, { ...idle, jump: true }, 0, w);
+    run(c, w, idle, 0.1);
+    expect(c.grounded).toBe(false);
+    c.update(DT, press(idle), 0, w);
+    // The press is buffered briefly, but the jump lasts longer than that.
+    run(c, w, idle, 0.12);
+    expect(c.dodging).toBe(false);
+    run(c, w, idle, 1);
+    c.stamina = 0;
+    c.exhausted = true;
+    c.update(DT, press(idle), 0, w);
+    expect(c.dodging).toBe(false);
+  });
+
+  it('a hit can only pass through early in the dodge', () => {
+    const w = fakeWorld();
+    const c = spawn(w);
+    c.update(DT, press(fwd), 0, w);
+    run(c, w, fwd, PLAYER_TUNING.dodgeInvuln + 0.01);
+    expect(c.invulnerable).toBe(false);
+  });
+});
