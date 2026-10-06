@@ -119,6 +119,7 @@ export class Game {
   private aimTime = 0;
   private aimBall = 'poke-ball';
   private aimCamHold = 0;
+  private aimWanted = false;
   private throwCooldown = 0;
   /** Throw ids only ever grow, even across reloads, so the partner never mistakes a new throw for an old one. */
   private throwSeq = Date.now();
@@ -787,8 +788,12 @@ export class Game {
       if (input.consumeAimRelease() || input.consumeClick()) this.releaseThrow();
       return;
     }
-    if (!input.consumeAimPress()) return;
-    if (!able || this.throwCooldown > 0 || !this.controller.grounded) return;
+    // A press starts aiming as soon as the trainer can (landing from a jump, a throw cooling down)
+    // for as long as the key stays held.
+    if (input.consumeAimPress()) this.aimWanted = true;
+    if (!input.aimHeld) this.aimWanted = false;
+    if (!this.aimWanted || !able || this.throwCooldown > 0 || !this.controller.grounded) return;
+    this.aimWanted = false;
     if (!this.ballCount()) {
       this.hud.showToast('No Poke Balls', this.flags.has('got-balls') ? 'Professor Hazel can spare a few more' : 'Professor Hazel will give you some', 2.2);
       return;
