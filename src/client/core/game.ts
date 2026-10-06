@@ -1454,8 +1454,9 @@ export class Game {
       else if (pickup) this.hud.setPrompt(`Pick up the ${ITEMS[pickup.ball]?.name ?? 'ball'}`);
       else if (home) this.hud.setPrompt(`Rest at ${home.id === 'p1-house' ? 'home' : 'your friend’s house'}`);
       else if (wildMon) this.hud.setPrompt(canFight ? `Battle the wild ${displayName(wildMon.creature)} · Lv. ${wildMon.creature.level}` : `Wild ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
-      else if(this.controller.climbing)this.hud.setPrompt(`${keyLabel(this.settings.keys.climb)} ascend · ${keyLabel(this.settings.keys.back)} + ${keyLabel(this.settings.keys.climb)} descend · ${keyLabel(this.settings.keys.jump)} let go`,keyLabel(this.settings.keys.climb));
-      else if(this.controller.nearClimb(this.world))this.hud.setPrompt('Climb the lookout ladder',keyLabel(this.settings.keys.climb));
+      else if(this.controller.onLadder)this.hud.setPrompt(`${keyLabel(this.settings.keys.forward)} up · ${keyLabel(this.settings.keys.back)} down · ${keyLabel(this.settings.keys.jump)} let go`,'');
+      else if(this.controller.onWall)this.hud.setPrompt(`${[this.settings.keys.forward,this.settings.keys.left,this.settings.keys.back,this.settings.keys.right].map(keyLabel).join(' ')} climb · ${keyLabel(this.settings.keys.jump)} leap · ${keyLabel(this.settings.keys.back)} + ${keyLabel(this.settings.keys.jump)} kick off · ${keyLabel(this.settings.keys.climb)} let go`,'');
+      else if(this.controller.nearClimb(this.world))this.hud.setPrompt('Walk into the ladder to climb the lookout',keyLabel(this.settings.keys.forward));
       else this.hud.setPrompt(null);
       if (!knocked && input.consumeAction('interact')) {
         if (invite && canFight) this.joinRemoteBattle(invite[0],invite[1]);

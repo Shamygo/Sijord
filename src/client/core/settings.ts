@@ -12,7 +12,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   right: 'Move right',
   sprint: 'Sprint',
   jump: 'Jump',
-  climb: 'Climb',
+  climb: 'Let go of a wall',
   interact: 'Talk / interact',
   map: 'Open map',
   bag: 'Open bag',
@@ -21,7 +21,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   throw: 'Aim and throw a ball (hold)',
   partner: 'Call partner Pokemon',
   heal: 'Use a Potion on yourself',
-  dodge: 'Dodge',
+  dodge: 'Dodge roll',
 };
 
 export const DEFAULT_KEYS: Record<Action, string> = {

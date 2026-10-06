@@ -12,6 +12,7 @@ import type { Kit } from './buildings';
 import { GrassSystem, makeTownMask } from './grass';
 import { buildCliffs, type CliffResult } from './cliffs';
 import { createFauna } from './fauna';
+import { collidersNear, colliderContains, colliderTop } from '../core/collision';
 
 export { applyAtmosphere } from './sky';
 
@@ -158,7 +159,17 @@ export function createWorld(): World {
     root,
     heightAt,
     climbs:town.climbs,
-    surfaceHeightAt(x,z,feetY){let h=heightAt(x,z);for(const p of town.platforms)if(feetY>=p.y-.3&&x>=p.minX&&x<=p.maxX&&z>=p.minZ&&z<=p.maxZ)h=Math.max(h,p.y);return h;},
+    surfaceHeightAt(x,z,feetY){
+      let h=heightAt(x,z);
+      for(const p of town.platforms)if(feetY>=p.y-.3&&x>=p.minX&&x<=p.maxX&&z>=p.minZ&&z<=p.maxZ)h=Math.max(h,p.y);
+      // Rock you can climb is also rock you can stand on.
+      for(const c of collidersNear(x,z,0,colliders)){
+        if(!c.climb||c.maxY===undefined||!colliderContains(c,x,z))continue;
+        const top=colliderTop(c,x,z);
+        if(feetY>=top-.35)h=Math.max(h,top);
+      }
+      return h;
+    },
     waterLevel: WATER_LEVEL,
     colliders,
     regions: [town.region],

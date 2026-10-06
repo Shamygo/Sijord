@@ -573,8 +573,15 @@ export function scatterVegetation(ctx: ScatterContext): { group: THREE.Group; ba
       const v = 0.9 + rnd() * 0.2;
       const c = new THREE.Color(v, v * 0.99, v * 0.96);
       const k = blocky ? 3 + Math.floor(rnd() * 2) : Math.floor(rnd() * 3);
-      rockList.push({ kind: 'rock', k, x: px, y: y - sc * (blocky ? 0.35 : 0.15), z: pz, rot: rnd() * 6.28, sx: sc, sy: sc * (blocky ? 0.8 + rnd() * 0.9 : 0.7 + rnd() * 0.6), c });
-      if (sc > 0.9) ctx.colliders.push({ kind: 'circle', x: px, z: pz, r: sc * (blocky ? 0.95 : 0.85) });
+      const rock = { kind: 'rock', k, x: px, y: y - sc * (blocky ? 0.35 : 0.15), z: pz, rot: rnd() * 6.28, sx: sc, sy: sc * (blocky ? 0.8 + rnd() * 0.9 : 0.7 + rnd() * 0.6), c };
+      rockList.push(rock);
+      if (sc > 0.9) {
+        // Slabs top out at about 1.0 of their height scale, boulders at about 0.85 (see makeRockGeometry).
+        // Anything chest-high or taller can be climbed and stood on; boulders round off at the rim.
+        const top = rock.y + rock.sy * (blocky ? 0.98 : 0.82);
+        const climb = top - y > 0.7;
+        ctx.colliders.push({ kind: 'circle', x: px, z: pz, r: sc * (blocky ? 0.95 : 0.85), ...(climb ? { maxY: top, climb, dome: rock.sy * (blocky ? 0.12 : 0.3) } : {}) });
+      }
       if (big) {
         for (let n = 0; n < 3; n++) {
           const a = rnd() * 6.28, d = sc * (1.1 + rnd());

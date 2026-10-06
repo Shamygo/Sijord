@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { MoveAnim, PlayerSnapshot } from '../../shared/types';
 import { resolveCircle } from '../core/collision';
 import type { World, ClimbPoint } from '../world/types';
+import { findLedge, probeBody } from './climbing';
 import type { MoveInput } from './types';
 
 /** Movement tunables. Speeds in m/s, accelerations in m/s², angles in radians, times in s. */
@@ -60,7 +61,9 @@ export const PLAYER_TUNING = {
   /** Sprint lock-out after stamina empties (also needs some stamina back). */
   exhaustLockout: 1.4,
 
-  /** Dodge (DESIGN §5.3): a quick low hop along the input, or a backstep with none. */
+  /** Dodge (DESIGN §5.3): a roll along the input, or a short backstep hop with none. */
+  rollSpeed: 8.6,
+  rollTime: 0.5,
   dodgeSpeed: 9,
   dodgeHop: 3.4,
   dodgeTime: 0.34,
@@ -71,12 +74,34 @@ export const PLAYER_TUNING = {
   dodgeBuffer: 0.15,
   exhaustRecoverTo: 0.25,
 
+  /** Climbing (BotW-style): push into any steep slope, cliff face or big rock to grab on. */
+  climbSpeed: 1.25,
+  climbDownSpeed: 1.7,
+  climbSideSpeed: 1.2,
+  /** Stamina per second while moving on a wall, and while just hanging on. */
+  climbDrain: 0.075,
+  climbHoldDrain: 0.02,
+  /** Jump on a wall: a lunge this high, costing stamina. */
+  climbJumpHeight: 1.4,
+  climbJumpTime: 0.38,
+  climbJumpCost: 0.18,
+  /** How long to push into a wall from the ground before grabbing it. */
+  climbGrabDelay: 0.15,
+  /** Pulling up over a top, and the quick vault over chest-high rock while moving. */
+  mantleTime: 0.9,
+  vaultTime: 0.5,
+  vaultHeight: 1.3,
+
   /** Physics sub-step length and frame dt cap. */
   maxStep: 1 / 120,
   maxFrameDt: 0.1,
 };
 
 export type PlayerTuning = typeof PLAYER_TUNING;
+
+/** Heights above the feet probed for a wall: grabbing (shin, chest) and holding on (feet to head). */
+const GRAB_PROBES = [0.3, 1.1] as const;
+const CLIMB_PROBES = [0.25, 0.9, 1.5] as const;
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
@@ -118,7 +143,6 @@ export class PlayerController {
   readonly tuning: PlayerTuning;
 
   private activeClimb: ClimbPoint | null = null;
-  private terrainClimbing = false;
   private climbCooldown = 0;
   private yawVel = 0;
   private timeSinceGrounded = 0;
@@ -140,13 +164,24 @@ export class PlayerController {
   private dodgeZ = 0;
   private dodgeFace = 0;
   private dodgeAhead = false;
+  private dodgeRoll = false;
+  /** Climbing a wall: its outward normal. */
+  private wall: { x: number; z: number } | null = null;
+  private grabT = 0;
+  private climbJumpT = 0;
+  private climbJumpUp = 0;
+  private climbJumpSide = 0;
+  private climbSpeedNow = 0;
+  private letGoBufferT = 0;
+  private prevClimb = false;
+  private mantle: { x0: number; y0: number; z0: number; x1: number; y1: number; z1: number; t: number; dur: number; vault: boolean; carry: number } | null = null;
 
   constructor(tuning: Partial<PlayerTuning> = {}) {
     this.tuning = { ...PLAYER_TUNING, ...tuning };
   }
 
   teleport(pos: THREE.Vector3, yaw: number): void {
-    this.activeClimb=null;this.terrainClimbing=false;this.climbCooldown=0;
+    this.activeClimb=null;this.climbCooldown=0;this.wall=null;this.mantle=null;this.grabT=this.climbJumpT=0;
     this.position.copy(pos);
     this.velocity.set(0, 0, 0);
     this.yaw = yaw;
@@ -171,8 +206,9 @@ export class PlayerController {
     const dt = clamp(dtIn, 0, T.maxFrameDt);
     if (dt <= 0) return;
 
-    this.terrainClimbing=false;
     this.climbCooldown=Math.max(0,this.climbCooldown-dt);
+    if (input.climb && !this.prevClimb) this.letGoBufferT = 0.15;
+    this.prevClimb = !!input.climb;
     // Jump edge detection happens once per frame; the buffer carries it across sub-steps.
     if (input.jump && !this.prevJump) this.jumpBufferT = T.jumpBuffer;
     this.prevJump = input.jump;
@@ -188,24 +224,10 @@ export class PlayerController {
     const T = this.tuning;
     const pos = this.position;
     const vel = this.velocity;
-
-    if(this.activeClimb){
-      const ladder=this.activeClimb;
-      if(input.jump || this.stamina<=0){
-        this.activeClimb=null;this.climbCooldown=.6;this.grounded=false;
-        pos.x-=Math.sin(ladder.yaw)*.8;pos.z-=Math.cos(ladder.yaw)*.8;vel.y=input.jump?4:0;this.jumpBufferT=0;return;
-      }
-      const speed=input.climb?(input.forward<-.1?-1.5:1.5):0;
-      this.stamina=Math.max(0,this.stamina-Math.abs(speed)*.055*dt);
-      pos.x=ladder.bottom.x;pos.z=ladder.bottom.z;pos.y+=speed*dt;this.yaw=ladder.yaw;
-      vel.set(0,speed,0);this.grounded=false;this.sprinting=false;
-      if(pos.y>=ladder.top.y){pos.set(ladder.landing.x,ladder.landing.y,ladder.landing.z);vel.set(0,0,0);this.activeClimb=null;this.grounded=true;this.climbCooldown=.5;}
-      else if(pos.y<ladder.bottom.y){pos.y=ladder.bottom.y;pos.x-=Math.sin(ladder.yaw)*.65;pos.z-=Math.cos(ladder.yaw)*.65;vel.set(0,0,0);this.activeClimb=null;this.grounded=true;this.climbCooldown=.5;}
+    this.letGoBufferT = Math.max(0, this.letGoBufferT - dt);
+    if (this.mantle) {
+      this.stepMantle(dt);
       return;
-    }
-    if(input.climb && this.climbCooldown===0 && !this.exhausted){
-      const ladder=this.nearClimb(world);
-      if(ladder){this.activeClimb=ladder;pos.set(ladder.bottom.x,Math.max(pos.y,ladder.bottom.y),ladder.bottom.z);vel.set(0,0,0);this.yaw=ladder.yaw;this.grounded=false;return;}
     }
 
     // ---- Camera-relative wish direction ----------------------------------------------------
@@ -226,15 +248,35 @@ export class PlayerController {
     const dirX = hasInput ? wx / wishMag : 0;
     const dirZ = hasInput ? wz / wishMag : 0;
 
-    const slope=this.gradient(world,pos.x,pos.z);const steepness=Math.hypot(slope.x,slope.z);
-    if(input.climb && hasInput && this.grounded && !this.exhausted && steepness>Math.tan(T.maxSlope) && steepness<5.7 && (slope.x*dirX+slope.z*dirZ)>0.35 && this.stamina>0){
-      const horizontal=1.45/Math.sqrt(1+steepness*steepness);
-      const x=pos.x+dirX*horizontal*dt,z=pos.z+dirZ*horizontal*dt,h=world.heightAt(x,z);
-      const resolved=resolveCircle(x,z,T.radius,world.colliders,pos.y);
-      if(Math.hypot(resolved.x-x,resolved.z-z)<.001 && h>=world.waterLevel-T.maxWaterDepth && Math.abs(x)<world.halfSize-T.radius && Math.abs(z)<world.halfSize-T.radius){
-        const oldY=pos.y;pos.set(x,h,z);vel.set(dirX*horizontal,(h-oldY)/dt,dirZ*horizontal);this.yaw=Math.atan2(dirX,dirZ);this.terrainClimbing=true;this.sprinting=false;this.stamina=Math.max(0,this.stamina-.1*dt);return;
+    // ---- Ladders: hold climb or push into one ----------------------------------------------
+    if (this.activeClimb) {
+      const ladder = this.activeClimb;
+      if (this.jumpBufferT > 0 || this.stamina <= 0) {
+        this.activeClimb = null; this.climbCooldown = .6; this.grounded = false;
+        pos.x -= Math.sin(ladder.yaw) * .8; pos.z -= Math.cos(ladder.yaw) * .8; vel.set(0, this.jumpBufferT > 0 ? 4 : 0, 0); this.jumpBufferT = 0;
+        return;
+      }
+      const speed = input.forward < -.1 ? -1.5 : input.forward > .1 || input.climb ? 1.5 : 0;
+      this.stamina = Math.max(0, this.stamina - Math.abs(speed) * .055 * dt);
+      pos.x = ladder.bottom.x; pos.z = ladder.bottom.z; pos.y += speed * dt; this.yaw = ladder.yaw;
+      vel.set(0, speed, 0); this.climbSpeedNow = Math.abs(speed); this.grounded = false; this.sprinting = false; this.sinceSprint = 0;
+      if (pos.y >= ladder.top.y) { pos.set(ladder.landing.x, ladder.landing.y, ladder.landing.z); vel.set(0, 0, 0); this.activeClimb = null; this.grounded = true; this.climbCooldown = .5; }
+      else if (pos.y < ladder.bottom.y) { pos.y = ladder.bottom.y; pos.x -= Math.sin(ladder.yaw) * .65; pos.z -= Math.cos(ladder.yaw) * .65; vel.set(0, 0, 0); this.activeClimb = null; this.grounded = true; this.climbCooldown = .5; }
+      return;
+    }
+    if (this.climbCooldown === 0 && !this.exhausted && this.stamina > 0 && !this.wall) {
+      const ladder = this.nearClimb(world);
+      const towards = ladder && hasInput && dirX * Math.sin(ladder.yaw) + dirZ * Math.cos(ladder.yaw) > 0.6;
+      if (ladder && (input.climb || towards)) {
+        this.activeClimb = ladder; pos.set(ladder.bottom.x, Math.max(pos.y, ladder.bottom.y), ladder.bottom.z); vel.set(0, 0, 0); this.yaw = ladder.yaw; this.grounded = false;
+        return;
       }
     }
+    if (this.wall) {
+      this.stepWall(dt, input, world);
+      return;
+    }
+
     // ---- Stamina / sprint ------------------------------------------------------------------
     if (this.exhausted) {
       this.exhaustT -= dt;
@@ -261,19 +303,22 @@ export class PlayerController {
     if (this.dodgeBufferT > 0 && this.dodgeT === 0 && this.dodgeCooldownT === 0 && this.grounded && !this.onSteep && !this.exhausted && this.stamina > 0) {
       this.dodgeX = hasInput ? dirX : -Math.sin(this.yaw);
       this.dodgeZ = hasInput ? dirZ : -Math.cos(this.yaw);
-      // Forward-ish dodges turn into the hop; side and back steps keep facing the threat.
-      const ahead = this.dodgeX * Math.sin(this.yaw) + this.dodgeZ * Math.cos(this.yaw);
-      this.dodgeAhead = ahead > 0.5;
-      this.dodgeFace = this.dodgeAhead ? Math.atan2(this.dodgeX, this.dodgeZ) : this.yaw;
-      this.dodgeT = T.dodgeTime;
+      // With a direction held it's a roll that way, turning into it; with none, a backstep hop
+      // that keeps facing the threat.
+      this.dodgeRoll = hasInput;
+      this.dodgeAhead = hasInput;
+      this.dodgeFace = hasInput ? Math.atan2(dirX, dirZ) : this.yaw;
+      this.dodgeT = hasInput ? T.rollTime : T.dodgeTime;
       this.dodgeAge = 0;
       this.dodgeBufferT = 0;
       this.jumpBufferT = 0;
-      vel.y = T.dodgeHop;
-      this.grounded = false;
-      this.jumpedSinceGrounded = true;
-      this.timeSinceGrounded = T.coyoteTime + 1;
-      this.airSpeedLimit = T.walkSpeed;
+      if (!hasInput) {
+        vel.y = T.dodgeHop;
+        this.grounded = false;
+        this.jumpedSinceGrounded = true;
+        this.timeSinceGrounded = T.coyoteTime + 1;
+        this.airSpeedLimit = T.walkSpeed;
+      }
       this.sinceSprint = 0;
       this.stamina = Math.max(0, this.stamina - T.dodgeStamina);
       if (this.stamina <= 0) {
@@ -342,14 +387,14 @@ export class PlayerController {
     if (this.dodgeT > 0) {
       // Fast off the mark, easing towards the end; input doesn't steer a dodge.
       this.dodgeAge += dt;
-      const k = Math.min(1, this.dodgeAge / T.dodgeTime);
-      const s = T.dodgeSpeed * (1 - 0.55 * k * k);
+      const k = Math.min(1, this.dodgeAge / (this.dodgeRoll ? T.rollTime : T.dodgeTime));
+      const s = this.dodgeRoll ? T.rollSpeed * (1 - 0.6 * k * k) : T.dodgeSpeed * (1 - 0.55 * k * k);
       vel.x = this.dodgeX * s;
       vel.z = this.dodgeZ * s;
       this.dodgeT = Math.max(0, this.dodgeT - dt);
       if (this.dodgeT === 0) {
         this.dodgeCooldownT = T.dodgeCooldown;
-        // A forward dodge rolls on at a jog; a side or back step lands planted, still facing the threat.
+        // A roll carries on at a jog; a backstep lands planted, still facing the threat.
         const out = this.dodgeAhead ? Math.min(T.walkSpeed, s) : 0;
         vel.x = this.dodgeX * out;
         vel.z = this.dodgeZ * out;
@@ -386,7 +431,7 @@ export class PlayerController {
     // ---- Jump --------------------------------------------------------------------------------
     this.landingRecoveryT = Math.max(0, this.landingRecoveryT - dt);
     this.jumpBufferT = Math.max(0, this.jumpBufferT - dt);
-    const canJump = this.landingRecoveryT === 0 && !this.jumpedSinceGrounded && this.timeSinceGrounded <= T.coyoteTime && !this.onSteep;
+    const canJump = this.landingRecoveryT === 0 && !this.jumpedSinceGrounded && this.timeSinceGrounded <= T.coyoteTime && !this.onSteep && this.dodgeT === 0;
     if (this.jumpBufferT > 0 && canJump) {
       this.airSpeedLimit = Math.max(T.walkSpeed, this.horizontalSpeed);
       vel.y = T.jumpSpeed;
@@ -493,12 +538,196 @@ export class PlayerController {
       this.jumpedSinceGrounded = false;
       this.airTime = 0;
       const g = this.gradient(world, nx, nz);
-      this.onSteep = Math.hypot(g.x, g.z) > Math.tan(T.maxSlope);
+      this.onSteep = Math.hypot(g.x, g.z) > Math.tan(T.maxSlope) && this.groundAt(world, nx, nz, pos.y) <= world.heightAt(nx, nz) + 0.01;
     } else {
       this.timeSinceGrounded += dt;
       this.airTime += dt;
       this.onSteep = false;
     }
+    this.tryGrab(dt, hasInput, dirX, dirZ, world);
+  }
+
+  // ---- Climbing ----------------------------------------------------------------------------
+
+  /** Pushing into something climbable: pull up onto it if the top is in reach, else grab on. */
+  private tryGrab(dt: number, hasInput: boolean, dirX: number, dirZ: number, world: World): void {
+    const T = this.tuning, pos = this.position;
+    if (!hasInput || this.dodgeT > 0 || this.climbCooldown > 0 || this.exhausted || this.stamina <= 0) { this.grabT = 0; return; }
+    const body = probeBody(world, pos.x, pos.z, pos.y, dirX, dirZ, T.radius + 0.3, Math.tan(T.maxSlope), GRAB_PROBES);
+    const hit = body?.hit;
+    // Only walls you can't walk up, met head on; everything else is ordinary collision.
+    if (!hit || !hit.climbable || -(hit.nx * dirX + hit.nz * dirZ) < 0.5) { this.grabT = 0; return; }
+    this.grabT += dt;
+    // From the ground: a quick vault over anything chest-high, otherwise a moment's push first.
+    if (this.grounded && this.grabT < T.climbGrabDelay * 0.5) return;
+    const ledge = findLedge(world, pos.x, pos.z, pos.y, dirX, dirZ, Math.max(0, hit.dist), 1.9, T.radius, T.maxSlope);
+    const low = !!ledge && this.grounded && ledge.y - pos.y <= T.vaultHeight;
+    if (this.grounded && !low && this.grabT < T.climbGrabDelay) return;
+    this.grabT = 0;
+    if (ledge) {
+      this.startMantle(ledge, low);
+      return;
+    }
+    this.wall = { x: hit.nx, z: hit.nz };
+    this.grounded = false;
+    this.velocity.set(0, 0, 0);
+    this.climbJumpT = 0;
+    this.yaw = Math.atan2(-hit.nx, -hit.nz);
+    this.yawVel = 0;
+  }
+
+  private dropWall(push: number, up: number): void {
+    const n = this.wall ?? { x: 0, z: 0 };
+    this.wall = null;
+    this.velocity.set(n.x * push, up, n.z * push);
+    this.grounded = false;
+    this.climbCooldown = 0.5;
+    this.climbJumpT = 0;
+    this.airSpeedLimit = this.tuning.walkSpeed;
+    this.jumpedSinceGrounded = true;
+    this.timeSinceGrounded = this.tuning.coyoteTime + 1;
+    this.airTime = 0.2;
+  }
+
+  private stepWall(dt: number, input: MoveInput, world: World): void {
+    const T = this.tuning, pos = this.position, n = this.wall!;
+    const fx = -n.x, fz = -n.z, rx = n.z, rz = -n.x;
+    const up = clamp(input.forward, -1, 1), side = clamp(input.right, -1, 1);
+    this.sprinting = false;
+    this.sinceSprint = 0;
+    this.grounded = false;
+    this.airTime = 0;
+    if (this.letGoBufferT > 0) {
+      this.letGoBufferT = 0;
+      this.dropWall(1.2, 0);
+      return;
+    }
+    if (this.jumpBufferT > 0) {
+      this.jumpBufferT = 0;
+      if (up < -0.5) {
+        // Kick off the wall, turning away from it.
+        this.stamina = Math.max(0, this.stamina - T.climbJumpCost * 0.5);
+        this.yaw = Math.atan2(n.x, n.z);
+        this.dropWall(4.5, 5.5);
+        return;
+      }
+      if (this.climbJumpT === 0 && this.stamina > 0) {
+        const sideways = Math.abs(side) > 0.5 && up < 0.5;
+        const u = sideways ? 0.3 : 1, sd = sideways ? Math.sign(side) : 0, l = Math.hypot(u, sd);
+        this.climbJumpUp = u / l;
+        this.climbJumpSide = sd / l;
+        this.climbJumpT = T.climbJumpTime;
+        this.stamina = Math.max(0, this.stamina - T.climbJumpCost);
+      }
+    }
+    let vy: number, vs: number;
+    if (this.climbJumpT > 0) {
+      // A lunge that starts fast and slows, covering climbJumpHeight.
+      const s = ((2 * T.climbJumpHeight) / T.climbJumpTime) * (this.climbJumpT / T.climbJumpTime);
+      vy = this.climbJumpUp * s;
+      vs = this.climbJumpSide * s;
+      this.climbJumpT = Math.max(0, this.climbJumpT - dt);
+    } else {
+      vy = up > 0 ? up * T.climbSpeed : up * T.climbDownSpeed;
+      vs = side * T.climbSideSpeed;
+      const m = Math.hypot(vy, vs), cap = Math.max(T.climbSpeed, Math.abs(vy));
+      if (m > cap) { vy *= cap / m; vs *= cap / m; }
+    }
+    const moving = Math.hypot(vy, vs) > 0.05;
+    this.stamina = Math.max(0, this.stamina - (moving ? T.climbDrain : T.climbHoldDrain) * dt);
+    if (this.stamina <= 0) {
+      this.exhausted = true;
+      this.exhaustT = T.exhaustLockout;
+      this.dropWall(0.8, 0);
+      return;
+    }
+    let y = pos.y + vy * dt;
+    // Trees, posts and the like still block a sideways shuffle.
+    const r = resolveCircle(pos.x + rx * vs * dt, pos.z + rz * vs * dt, T.radius, world.colliders, y);
+    let x = r.x, z = r.z;
+    let body = probeBody(world, x, z, y, fx, fz, T.radius + 0.7, Math.tan(T.maxSlope), CLIMB_PROBES);
+    // Nothing to hold at head height while going up: the top. Pull up onto it if there's room.
+    if (!body || (vy > 0 && body.highest < CLIMB_PROBES[CLIMB_PROBES.length - 1])) {
+      const ledge = findLedge(world, x, z, y, fx, fz, body ? Math.max(0, body.hit.dist) : T.radius, 1.9, T.radius, T.maxSlope);
+      if (ledge) {
+        pos.set(x, y, z);
+        this.startMantle(ledge, false);
+        return;
+      }
+    }
+    // Past a step too narrow to stand on: reach across to the wall set back behind it.
+    if (!body && vy > 0) body = probeBody(world, x, z, y, fx, fz, T.radius + 1.6, Math.tan(T.maxSlope), CLIMB_PROBES);
+    if (!body || !body.hit.climbable) {
+      pos.set(x, y, z);
+      this.dropWall(0.3, 0);
+      return;
+    }
+    // Hold a hand's length off the surface, and turn with it.
+    const pull = clamp(body.hit.dist - (T.radius + 0.04), -3 * dt, 3 * dt);
+    x += fx * pull;
+    z += fz * pull;
+    const a = 1 - Math.exp(-10 * dt);
+    const nx = n.x + (body.hit.nx - n.x) * a, nz = n.z + (body.hit.nz - n.z) * a, nl = Math.hypot(nx, nz) || 1;
+    n.x = nx / nl;
+    n.z = nz / nl;
+    const lim = world.halfSize - T.radius;
+    x = clamp(x, -lim, lim);
+    z = clamp(z, -lim, lim);
+    // Back on walkable ground at the foot of the wall: stand up.
+    const ground = this.groundAt(world, x, z, y + 0.05);
+    if (y < ground) y = ground;
+    if (vy < 0 && y <= ground + 0.02) {
+      const g = this.gradient(world, x, z);
+      if (Math.hypot(g.x, g.z) <= Math.tan(T.maxSlope)) {
+        pos.set(x, y, z);
+        this.wall = null;
+        this.grounded = true;
+        this.velocity.set(0, 0, 0);
+        this.climbCooldown = 0.35;
+        return;
+      }
+    }
+    this.velocity.set((x - pos.x) / dt, vy, (z - pos.z) / dt);
+    pos.set(x, y, z);
+    this.climbSpeedNow = Math.hypot(vy, vs);
+    const face = Math.atan2(-n.x, -n.z);
+    this.yaw = wrapAngle(this.yaw + wrapAngle(face - this.yaw) * (1 - Math.exp(-12 * dt)));
+    this.yawVel = 0;
+  }
+
+  private startMantle(to: { x: number; y: number; z: number }, vault: boolean): void {
+    const T = this.tuning, p = this.position;
+    const carry = vault ? T.walkSpeed * 0.7 : 0;
+    this.mantle = { x0: p.x, y0: p.y, z0: p.z, x1: to.x, y1: to.y, z1: to.z, t: 0, dur: vault ? T.vaultTime : T.mantleTime, vault, carry };
+    if (Math.hypot(to.x - p.x, to.z - p.z) > 0.05) this.yaw = Math.atan2(to.x - p.x, to.z - p.z);
+    this.yawVel = 0;
+    this.wall = null;
+    this.velocity.set(0, 0, 0);
+    this.grounded = false;
+    this.climbJumpT = 0;
+  }
+
+  /** Kinematic pull-up: rise to the top first, then step forward onto it. */
+  private stepMantle(dt: number): void {
+    const m = this.mantle!, p = this.position;
+    m.t += dt;
+    const f = Math.min(1, m.t / m.dur);
+    const rise = m.vault ? smoothstep(0, 0.55, f) : smoothstep(0.05, 0.55, f);
+    const along = m.vault ? f : 0.15 * smoothstep(0, 0.4, f) + 0.85 * smoothstep(0.35, 0.95, f);
+    const hop = m.vault ? 0.25 * Math.sin(Math.PI * f) : 0;
+    const x = m.x0 + (m.x1 - m.x0) * along, z = m.z0 + (m.z1 - m.z0) * along, y = m.y0 + (m.y1 - m.y0) * rise + hop;
+    this.velocity.set((x - p.x) / dt, (y - p.y) / dt, (z - p.z) / dt);
+    p.set(x, y, z);
+    this.climbSpeedNow = 0;
+    this.sprinting = false;
+    if (f < 1) return;
+    this.mantle = null;
+    this.grounded = true;
+    this.airTime = 0;
+    this.timeSinceGrounded = 0;
+    this.jumpedSinceGrounded = false;
+    this.climbCooldown = 0.3;
+    this.velocity.set(Math.sin(this.yaw) * m.carry, 0, Math.cos(this.yaw) * m.carry);
   }
 
   /** Terrain rules for stepping from (ox, oz) to (nx, nz): bounds of slope and water. */
@@ -554,9 +783,14 @@ export class PlayerController {
     return this.dodgeT > 0 && this.dodgeAge < this.tuning.dodgeInvuln;
   }
 
-  get climbing():boolean {return !!this.activeClimb || this.terrainClimbing;}
+  get onLadder(): boolean { return !!this.activeClimb; }
+  get onWall(): boolean { return !!this.wall; }
+  /** On a ladder or a wall, or pulling up over the top. */
+  get climbing(): boolean { return !!this.activeClimb || !!this.wall || !!this.mantle; }
   get anim(): MoveAnim {
-    if(this.climbing)return 'climb';
+    if (this.mantle) return this.mantle.vault ? 'vault' : 'mantle';
+    if (this.climbing) return 'climb';
+    if (this.dodgeT > 0 && this.dodgeRoll && (this.grounded || this.airTime < 0.15)) return 'roll';
     // The slide out of a dodge hop plays the landing, not a run cycle going the wrong way.
     if (this.dodgeT > 0 && this.grounded) return 'idle';
     // Brief drops (stairs, bumps) keep the grounded animation.
@@ -574,7 +808,7 @@ export class PlayerController {
       y: this.position.y,
       z: this.position.z,
       yaw: this.yaw,
-      speed: this.climbing?Math.abs(this.velocity.y):this.horizontalSpeed,
+      speed: this.climbing ? this.climbSpeedNow : this.horizontalSpeed,
       anim: this.anim,
       // Animation hint (avatars play the out-of-breath pose); optional for receivers.
       tired: this.exhausted,
