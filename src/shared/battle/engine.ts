@@ -169,8 +169,8 @@ export type BattleEvent = EventBase &
     | { t: 'xp'; uid: string; owner: string; amount: number }
     | { t: 'level'; uid: string; owner: string; level: number; learned: string[] }
     | { t: 'run'; success: boolean }
-    | { t: 'throw'; pos: Pos; target: Pos; ball: string }
-    | { t: 'catch'; pos: Pos; target: Pos; uid: string; ball: string; shakes: number; caught: boolean }
+    | { t: 'throw'; pos: Pos; target: Pos; ball: string; owner: string }
+    | { t: 'catch'; pos: Pos; target: Pos; uid: string; ball: string; shakes: number; caught: boolean; owner: string }
     | { t: 'msg' }
     | { t: 'end'; winner: SideId | null; reason: 'faint' | 'run' | 'catch' }
   );
@@ -562,7 +562,7 @@ export class Battle {
       target = other;
       t = this.at(target)!;
     }
-    this.emit({ t: 'throw', pos, target, ball, text: `${trainer} threw a ${ballName}!` });
+    this.emit({ t: 'throw', pos, target, ball, owner: thrower.owner, text: `${trainer} threw a ${ballName}!` });
     const party = this.team(thrower.owner);
     const chance = catchChance({
       maxHp: t.maxHp,
@@ -578,7 +578,7 @@ export class Battle {
     });
     const roll = rollCatch(chance, this.rng);
     if (roll.caught) {
-      this.emit({ t: 'catch', pos, target, uid: t.uid, ball, shakes: roll.shakes, caught: true, text: `Gotcha! ${t.name} was caught!` });
+      this.emit({ t: 'catch', pos, target, uid: t.uid, ball, shakes: roll.shakes, caught: true, owner: thrower.owner, text: `Gotcha! ${t.name} was caught!` });
       t.caught = true;
       t.status = t.status === 'tox' ? 'psn' : t.status;
       this.awardExperience(t);
@@ -589,7 +589,7 @@ export class Battle {
       return;
     }
     const near = ['Oh no! It broke free!', 'Aww! It appeared to be caught!', 'Argh! Almost had it!', 'Gah! It was so close, too!'][roll.shakes];
-    this.emit({ t: 'catch', pos, target, uid: t.uid, ball, shakes: roll.shakes, caught: false, text: near });
+    this.emit({ t: 'catch', pos, target, uid: t.uid, ball, shakes: roll.shakes, caught: false, owner: thrower.owner, text: near });
     // Territorial and aggressive creatures don't take kindly to it (DESIGN §5.3).
     if ((t.species.temperament === 'territorial' || t.species.temperament === 'aggressive') && t.boosts.atk < 6) {
       t.boosts.atk++;
