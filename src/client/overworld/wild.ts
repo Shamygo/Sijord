@@ -482,9 +482,10 @@ export class WildManager {
   /**
    * A Treat landed at `at`, or bounced off `hit`. The creature it hit, else a furious one nearby,
    * else the nearest within reach, comes to eat it: an angry one calms down first (but stays
-   * wary), a calm one is too busy to notice the trainer. Returns the eater, if any yet.
+   * wary), a calm one is too busy to notice the trainer. Returns the eater, if any yet, and
+   * whether it was furious (charging the trainer) a moment ago.
    */
-  treat(at: { x: number; y: number; z: number }, hit: WildCreature | null): WildCreature | null {
+  treat(at: { x: number; y: number; z: number }, hit: WildCreature | null): { eater: WildCreature | null; calmed: boolean } {
     const x = hit ? hit.mover.pos.x : at.x;
     const z = hit ? hit.mover.pos.z : at.z;
     const mesh = makeTreat();
@@ -495,8 +496,9 @@ export class WildManager {
     const bait: Bait = { x, y, z, life: TREAT.life, left: TREAT.eat, eater: null, at: false, trot: 0, mesh };
     this.baits.push(bait);
     const eater = hit && this.canEat(hit) ? hit : this.pickEater(bait);
+    const calmed = !!eater && (eater.state === 'attack' || eater.state === 'charge');
     if (eater) this.startEating(eater, bait);
-    return eater;
+    return { eater, calmed };
   }
 
   /** Treats on the ground (tests and the text view). */

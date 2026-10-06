@@ -92,7 +92,7 @@ In dev builds the running game is exposed as `window.sijord` for debugging, with
 npm install
 npm run dev            # http://localhost:5173
 npm run typecheck
-npm test               # 252 tests as of 2026-10-06
+npm test               # 253 tests as of 2026-10-06
 npm run build          # dist/ (what GitHub Pages serves)
 npm run build:single   # dist-single/sijord.html, game code in a double-clickable file; imported art still needs internet
 ```

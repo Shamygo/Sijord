@@ -955,14 +955,13 @@ export class Game {
 
   /** A Treat landed, or bounced off a creature: whoever comes to eat it (DESIGN §5.3). */
   private onTreat(m: WildCreature | null, at: Vec3): void {
-    const furious = new Set(this.wild.creatures.filter((c) => c.state === 'attack' || c.state === 'charge'));
-    const eater = this.wild.treat(at, m);
+    const { eater, calmed } = this.wild.treat(at, m);
     if (!eater) {
       this.hud.showToast('The Treat landed', 'A Pokemon that wanders close will come and eat it', 2);
       return;
     }
     const name = displayName(eater.creature);
-    if (furious.has(eater)) this.hud.showToast(`The wild ${name} calmed down`, 'It went for the Treat instead of you', 2.4);
+    if (calmed) this.hud.showToast(`The wild ${name} calmed down`, 'It went for the Treat instead of you', 2.4);
     else this.hud.showToast(`The wild ${name} went for the Treat`, 'Busy eating, it won\'t notice you unless it\'s already wary', 2.4);
   }
 

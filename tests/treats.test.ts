@@ -35,7 +35,7 @@ describe('Treats', () => {
   it('a Treat that hits a calm Pokemon keeps it busy eating, then it settles and the Treat is gone', () => {
     const { w, herd } = setup();
     const m = herd[0];
-    expect(w.treat(at(m), m)).toBe(m);
+    expect(w.treat(at(m), m)).toEqual({ eater: m, calmed: false });
     expect(m.state).toBe('eat');
     expect(w.treats.length).toBe(1);
     step(w, TREAT.eat - 1);
@@ -54,7 +54,7 @@ describe('Treats', () => {
     // Lands right next to the calm one, a few metres from the angry one.
     const spot = at(calm, 0.3, 0);
     expect(Math.hypot(spot.x - angry.mover.pos.x, spot.z - angry.mover.pos.z)).toBeLessThan(TREAT.lure);
-    expect(w.treat(spot, null)).toBe(angry);
+    expect(w.treat(spot, null)).toEqual({ eater: angry, calmed: true });
     expect(angry.state).toBe('eat');
     expect(angry.attack).toBeUndefined();
     expect(angry.alert).toBeGreaterThan(0);
@@ -62,10 +62,18 @@ describe('Treats', () => {
     expect(unaware(angry)).toBe(false);
   });
 
+  it('one that hits a charging Pokemon calms it on the spot', () => {
+    const { w, herd } = setup();
+    const m = herd[0];
+    w.breakOut(m, 'charge');
+    expect(w.treat(at(m), m)).toEqual({ eater: m, calmed: true });
+    expect(m.state).toBe('eat');
+  });
+
   it('one that lands out of reach waits for a Pokemon to wander close, and is lost after a while', () => {
     const { w, herd } = setup();
     const m = herd[0];
-    expect(w.treat(at(m, TREAT.lure + 6, 0), null)).toBeNull();
+    expect(w.treat(at(m, TREAT.lure + 6, 0), null).eater).toBeNull();
     expect(w.treats.length).toBe(1);
     // Walk it over to the Treat by hand: it notices.
     m.mover.place(m.mover.pos.x + TREAT.lure + 3, m.mover.pos.z, fakeWorld(), 0);
