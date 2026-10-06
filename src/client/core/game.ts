@@ -19,7 +19,7 @@ import { P2PClient } from '../net/p2p';
 import { Professor } from '../npc/professor';
 import { Rival } from '../npc/rival';
 import { Follower } from '../overworld/follower';
-import { WildManager, type WildCreature } from '../overworld/wild';
+import { seedFromName, WildManager, type WildCreature } from '../overworld/wild';
 import { OverworldThrows } from '../overworld/throw';
 import { launchElevation, launchVelocity, solveLaunch, type Vec3 } from '../overworld/ball-flight';
 import { THROW_CLIP } from '../player/imported-trainer';
@@ -128,6 +128,8 @@ export class Game {
   private catchRng = new Rng(randomSeed());
   /** A creature that broke out and will start a battle once it has popped back out. */
   private pendingBattle: { m: WildCreature; t: number } | null = null;
+  /** Per friend: shared wild creatures they're battling or catching (hidden here meanwhile), and their herds' cells. */
+  private partnerWild = new Map<string, { busy: string[]; cells: string[] }>();
   /** The latest throw and catch, repeated in snapshots for a moment so the partner sees them. */
   private netThrow: { fx: BallThrowFx; until: number } | null = null;
   private netCatch: { fx: BallCatchFx; until: number } | null = null;
@@ -176,11 +178,12 @@ export class Game {
     this.scene.add(this.rival.root);
     this.updateNpcState();
     this.scene.add(this.follower.root);
-    this.wild = new WildManager(this.world, randomSeed());
+    // Herds come from the world's name, so both friends meet the same ones.
+    this.wild = new WildManager(this.world, randomSeed(), seedFromName(save.room));
     this.scene.add(this.wild.root);
     this.throws = new OverworldThrows({
       world: this.world,
-      targets: () => this.wild.creatures.filter((m) => m.state !== 'battle' && m.state !== 'ball' && m.state !== 'gone'),
+      targets: () => this.wild.creatures.filter((m) => m.state !== 'battle' && m.state !== 'ball' && m.state !== 'gone' && !m.remoteBusy),
       onHit: (m, ball, id, at) => this.overworldCatchRoll(m, ball, id, at),
       onResult: (m, ball, roll) => this.overworldCatchResult(m, ball, roll),
       // A ball thudding down nearby puts creatures on their guard.
@@ -288,9 +291,15 @@ export class Game {
         // The partner's throws replay here (catching itself is decided on their side).
         if (s.ballThrow && ITEMS[s.ballThrow.ball] && this.throws.remoteThrow(id, s.ballThrow, THROW_CLIP.release)) this.partners.get(id)?.remote.avatar.gesture('throw');
         if (s.ballCatch && ITEMS[s.ballCatch.ball]) this.throws.remoteCatch(id, s.ballCatch);
+        // Shared herds: what the friend caught or beat fades here; what they're fighting hides.
+        const keys = (v: unknown, max: number) => (Array.isArray(v) ? v.filter((k): k is string => typeof k === 'string' && k.length < 48).slice(0, max) : []);
+        const taken = keys(s.wildTaken, 64);
+        if (taken.length) this.wild.applyTaken(taken);
+        this.partnerWild.set(id, { busy: keys(s.wildBusy, 16), cells: keys(s.wildCells, 16) });
       },
       onPeerLeft: (id) => {
         this.partnerBattles.delete(id); this.battle?.director.partnerLeft(id);
+        this.partnerWild.delete(id);
         if (this.remoteBattleHost === id) { this.finishRemoteBattle(); this.hud.showToast('Partner disconnected', 'The shared battle ended on this device.'); }
         const p = this.partners.get(id);
         if (!p) return;
@@ -1390,6 +1399,9 @@ export class Game {
 
     this.professor.update(dt);
     this.rival.update(dt);
+    const friends = [...this.partnerWild.values()];
+    this.wild.setRemoteBusy(new Set(friends.flatMap((f) => f.busy)));
+    this.wild.setFriendCells(friends.flatMap((f) => f.cells));
     this.wild.update(dt, this.controller.position, snap.speed, move.sprint && snap.speed > 5, busy);
     this.follower.update(dt, this.controller.position, this.controller.yaw, snap.speed, this.world);
     for (const [id, p] of this.partners) {
@@ -1409,7 +1421,10 @@ export class Game {
     const lead = this.follower.active ? this.follower.species ?? undefined : undefined;
     const ballThrow = this.netThrow && now < this.netThrow.until ? this.netThrow.fx : undefined;
     const ballCatch = this.netCatch && now < this.netCatch.until ? this.netCatch.fx : undefined;
-    this.net.send({ ...snap, lead, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl, ballThrow, ballCatch, down: down > 0 ? Math.round(down * 100) / 100 : undefined }, now);
+    const wildTaken = this.wild.sharedTaken;
+    const wildBusy = this.wild.sharedBusy;
+    const wildCells = this.wild.liveCells;
+    this.net.send({ ...snap, lead, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl, ballThrow, ballCatch, down: down > 0 ? Math.round(down * 100) / 100 : undefined, wildTaken: wildTaken.length ? wildTaken : undefined, wildBusy: wildBusy.length ? wildBusy : undefined, wildCells: wildCells.length ? wildCells : undefined }, now);
 
     // Also keeps the sun's shadow camera centred on the player.
     this.world.update(dt, this.elapsed, this.controller.position);
