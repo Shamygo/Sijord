@@ -1,5 +1,7 @@
 # Sijord: Regional Dex Plan
 
+> **Current state (2026-10-05).** The game now uses canonical Kanto Pokémon, not original species: the 21 original save ids are kept but each is now its Pokémon with real types, stats and learnsets (`fernfawn` = Bulbasaur, `cindlet` = Charmander, `splashpup` = Squirtle, `finchlet` = Pidgey, `nibblet` = Rattata, `dewmite` = Caterpie, `cloveret` = Clefairy, `hjordpup` = Growlithe and their evolutions; see `src/shared/pokemon-visuals.ts`), and newer species use the Pokémon's own name as id. The plan below (original species, original art) predates the owner's switch to imported Pokémon models and is kept for the regional-dex structure, not as the current roster.
+
 How mainline Pokemon games build a regional dex, and how Sijord copies that pattern: **about 400 returning species plus 100 new species**, for a regional dex of about 500 (plus regional forms).
 
 Related: [DESIGN.md](DESIGN.md) (riding §8, catching §5, story §10).

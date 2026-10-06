@@ -28,19 +28,32 @@ describe('species, moves and abilities data', () => {
     for (const sp of Object.values(SPECIES)) {
       const levels = sp.learnset.map((e) => e.level);
       expect([...levels].sort((a, b) => a - b), sp.id).toEqual(levels);
+      // Abra is the one exception, as in the mainline games: it only knows Teleport.
+      if (sp.id === 'abra') {
+        expect(defaultMoves(sp.id, 15)).toEqual(['teleport']);
+        continue;
+      }
       expect(defaultMoves(sp.id, 2).some((m) => MOVES[m].category !== 'status'), sp.id).toBe(true);
     }
   });
 
-  it('follows the dex plan stat totals for the starters (318 / 405 / 530)', () => {
+  it('uses the canonical base stat totals', () => {
     const bst = (id: string) => STATS.reduce((a, s) => a + SPECIES[id].baseStats[s], 0);
-    for (const s of STARTERS) {
-      expect(bst(s)).toBe(318);
-      const mid = SPECIES[s].evolution!.into;
-      expect(bst(mid)).toBe(405);
-      expect(bst(SPECIES[mid].evolution!.into)).toBe(530);
+    const lines: [string, number][][] = [
+      [['fernfawn', 318], ['bramblebuck', 405], ['elkwarden', 525]],
+      [['cindlet', 309], ['pyrolynx', 405], ['forgelynx', 534]],
+      [['splashpup', 314], ['sealkin', 405], ['selkira', 530]],
+    ];
+    for (const [i, s] of STARTERS.entries()) {
+      expect(lines[i][0][0]).toBe(s);
+      for (const [id, total] of lines[i]) expect(bst(id), id).toBe(total);
+      expect(SPECIES[s].evolution).toEqual({ into: lines[i][1][0], level: 16 });
+      expect(SPECIES[lines[i][1][0]].evolution).toEqual({ into: lines[i][2][0], level: s === 'fernfawn' ? 32 : 36 });
     }
-    expect(bst('skjaldhawk')).toBe(490);
+    expect(bst('skjaldhawk')).toBe(479);
+    expect(bst('pikachu')).toBe(320);
+    expect(bst('abra')).toBe(310);
+    expect(SPECIES.nibblet.baseStats).toEqual({ hp: 30, atk: 56, def: 35, spa: 25, spd: 35, spe: 72 });
   });
 
   it('gives evolved forms everything their earlier form learns by then', () => {
@@ -54,9 +67,11 @@ describe('species, moves and abilities data', () => {
   });
 
   it('has valid numbers on every move', () => {
+    // Fixed-damage and variable-power moves list no base power, as in the games.
+    const noPower = new Set(['seismic-toss', 'super-fang', 'electro-ball']);
     for (const m of Object.values(MOVES)) {
       expect(m.pp).toBeGreaterThan(0);
-      if (m.category === 'status') expect(m.power).toBe(0);
+      if (m.category === 'status' || noPower.has(m.special ?? '')) expect(m.power, m.id).toBe(0);
       else expect(m.power, m.id).toBeGreaterThan(0);
       if (m.accuracy !== true) expect(m.accuracy).toBeLessThanOrEqual(100);
     }
@@ -66,20 +81,20 @@ describe('species, moves and abilities data', () => {
 describe('creatures', () => {
   it('creates a creature with the four latest moves and full HP', () => {
     const c = createCreature('fernfawn', 10, new Rng(1));
-    expect(c.moves.map((m) => m.id)).toEqual(['growl', 'leafage', 'leech-seed', 'quick-attack']);
+    expect(c.moves.map((m) => m.id)).toEqual(['growl', 'vine-whip', 'growth', 'leech-seed']);
     expect(c.hp).toBe(maxHp(c));
     expect(c.xp).toBe(xpForLevel('medium-slow', 10));
   });
 
   it('levels up, learns moves into free slots and queues the rest', () => {
-    const c = createCreature('cindlet', 5, new Rng(2), { moves: ['scratch', 'leer'] });
-    const res = gainXp(c, xpForLevel('medium-slow', 7) - c.xp, 15);
-    expect(c.level).toBe(7);
+    const c = createCreature('cindlet', 6, new Rng(2), { moves: ['scratch', 'growl'] });
+    const res = gainXp(c, xpForLevel('medium-slow', 8) - c.xp, 15);
+    expect(c.level).toBe(8);
     expect(res.levelsGained).toBe(2);
-    expect(res.learned).toEqual(['quick-attack']);
-    const full = createCreature('cindlet', 8, new Rng(3), { moves: ['scratch', 'leer', 'ember', 'quick-attack'] });
-    const r2 = gainXp(full, xpForLevel('medium-slow', 9) - full.xp, 15);
-    expect(r2.pendingMoves).toEqual(['bite']);
+    expect(res.learned).toEqual(['smokescreen']);
+    const full = createCreature('cindlet', 11, new Rng(3), { moves: ['scratch', 'growl', 'ember', 'smokescreen'] });
+    const r2 = gainXp(full, xpForLevel('medium-slow', 12) - full.xp, 15);
+    expect(r2.pendingMoves).toEqual(['dragon-breath']);
   });
 
   it('stops at the level cap and banks at most one level of experience', () => {
@@ -100,8 +115,8 @@ describe('creatures', () => {
   });
 
   it('flags and performs evolution', () => {
-    const c = createCreature('dewmite', 7, new Rng(5));
-    const res = gainXp(c, xpForLevel('medium-fast', 8) - c.xp, 15);
+    const c = createCreature('dewmite', 6, new Rng(5));
+    const res = gainXp(c, xpForLevel('medium-fast', 7) - c.xp, 15);
     expect(res.evolveInto).toBe('cocoonch');
     const hpBefore = c.hp;
     evolve(c, 'cocoonch');

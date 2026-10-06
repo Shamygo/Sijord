@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import { createCreature } from '../../shared/battle/creature';
 import { Rng } from '../../shared/battle/rng';
 import type { Creature } from '../../shared/battle/types';
+import { MOVES } from '../../shared/data/moves';
 import { SPECIES } from '../../shared/data/species';
-import { createCreatureModel, type CreatureModel } from '../creatures';
-import { MESAS, TOWN } from '../world/layout';
+import { createCreatureModel, creatureModelReady, type CreatureModel } from '../creatures';
+import { MESAS, POND, RIVER_IN, RIVER_OUT, TOWN, distToPolyline, lakeDist } from '../world/layout';
 import type { World } from '../world/types';
 import { Mover } from './mover';
 
@@ -86,51 +87,123 @@ interface Herd {
   members: WildCreature[];
 }
 
-interface ZoneEntry {
+/** Where a species lives: by water (the lake, river and pond) or among the stone mesas. */
+export type Habitat = 'water' | 'rock';
+
+export interface ZoneEntry {
   species: string;
   weight: number;
   min: number;
   max: number;
   herd: [number, number];
+  habitat?: Habitat;
 }
 
-/** Spawn tables by distance from Bramblewick. Further out means stronger creatures. */
-const ZONES: { maxDist: number; entries: ZoneEntry[] }[] = [
+/**
+ * Spawn tables by distance from Bramblewick. Further out means stronger creatures. Common
+ * creatures roam in pairs and flocks (so most fights are two at once); the rare ones (Pikachu,
+ * Eevee, Abra) are met alone or in pairs. Levels stay under the first level cap (15).
+ */
+export const ZONES: { maxDist: number; entries: ZoneEntry[] }[] = [
   {
+    // Hearthmeadow, just outside the town fence: levels 2-6.
     maxDist: 190,
     entries: [
-      { species: 'nibblet', weight: 30, min: 2, max: 4, herd: [2, 3] },
-      { species: 'finchlet', weight: 25, min: 2, max: 4, herd: [2, 4] },
-      { species: 'dewmite', weight: 20, min: 2, max: 4, herd: [2, 4] },
-      { species: 'cloveret', weight: 14, min: 3, max: 5, herd: [2, 2] },
-      { species: 'hjordpup', weight: 11, min: 3, max: 5, herd: [2, 3] },
+      { species: 'nibblet', weight: 20, min: 2, max: 4, herd: [2, 3] },
+      { species: 'finchlet', weight: 20, min: 2, max: 4, herd: [2, 4] },
+      { species: 'dewmite', weight: 15, min: 2, max: 4, herd: [2, 4] },
+      { species: 'weedle', weight: 15, min: 2, max: 4, herd: [2, 3] },
+      { species: 'spearow', weight: 6, min: 3, max: 5, herd: [2, 3] },
+      { species: 'nidoran-f', weight: 5, min: 3, max: 5, herd: [2, 2] },
+      { species: 'nidoran-m', weight: 5, min: 3, max: 5, herd: [2, 2] },
+      { species: 'oddish', weight: 5, min: 3, max: 5, herd: [2, 3] },
+      { species: 'bellsprout', weight: 4, min: 3, max: 5, herd: [2, 2] },
+      { species: 'cloveret', weight: 3, min: 3, max: 5, herd: [1, 2] },
+      { species: 'hjordpup', weight: 3, min: 3, max: 5, herd: [2, 2] },
+      { species: 'poliwag', weight: 8, min: 3, max: 5, herd: [2, 2], habitat: 'water' },
+      { species: 'psyduck', weight: 5, min: 4, max: 6, herd: [1, 2], habitat: 'water' },
+      { species: 'pikachu', weight: 1.5, min: 3, max: 5, herd: [1, 2] },
+      { species: 'eevee', weight: 1, min: 3, max: 5, herd: [1, 1] },
+      { species: 'abra', weight: 1, min: 4, max: 6, herd: [1, 1] },
     ],
   },
   {
+    // Route 1: levels 4-9.
     maxDist: 360,
     entries: [
-      { species: 'nibblet', weight: 22, min: 4, max: 8, herd: [2, 3] },
-      { species: 'finchlet', weight: 20, min: 4, max: 8, herd: [2, 4] },
-      { species: 'dewmite', weight: 10, min: 4, max: 7, herd: [2, 3] },
-      { species: 'cocoonch', weight: 10, min: 8, max: 10, herd: [2, 2] },
-      { species: 'cloveret', weight: 16, min: 5, max: 8, herd: [2, 2] },
-      { species: 'hjordpup', weight: 16, min: 5, max: 8, herd: [2, 3] },
-      { species: 'stashquill', weight: 6, min: 8, max: 9, herd: [2, 2] },
+      { species: 'nibblet', weight: 14, min: 4, max: 7, herd: [2, 3] },
+      { species: 'finchlet', weight: 14, min: 4, max: 7, herd: [2, 4] },
+      { species: 'dewmite', weight: 6, min: 4, max: 6, herd: [2, 3] },
+      { species: 'cocoonch', weight: 5, min: 7, max: 9, herd: [2, 2] },
+      { species: 'weedle', weight: 6, min: 4, max: 6, herd: [2, 3] },
+      { species: 'kakuna', weight: 5, min: 7, max: 9, herd: [2, 2] },
+      { species: 'spearow', weight: 10, min: 5, max: 8, herd: [2, 3] },
+      { species: 'ekans', weight: 7, min: 5, max: 8, herd: [1, 2] },
+      { species: 'nidoran-f', weight: 5, min: 5, max: 8, herd: [2, 2] },
+      { species: 'nidoran-m', weight: 5, min: 5, max: 8, herd: [2, 2] },
+      { species: 'oddish', weight: 6, min: 5, max: 8, herd: [2, 3] },
+      { species: 'bellsprout', weight: 5, min: 5, max: 8, herd: [2, 2] },
+      { species: 'mankey', weight: 6, min: 5, max: 8, herd: [2, 3] },
+      { species: 'meowth', weight: 6, min: 5, max: 8, herd: [1, 2] },
+      { species: 'jigglypuff', weight: 3, min: 5, max: 7, herd: [1, 2] },
+      { species: 'vulpix', weight: 3, min: 5, max: 7, herd: [1, 2] },
+      { species: 'ponyta', weight: 3, min: 6, max: 8, herd: [2, 3] },
+      { species: 'hjordpup', weight: 4, min: 6, max: 8, herd: [2, 3] },
+      { species: 'cloveret', weight: 3, min: 6, max: 8, herd: [1, 2] },
+      { species: 'poliwag', weight: 8, min: 5, max: 8, herd: [2, 3], habitat: 'water' },
+      { species: 'psyduck', weight: 6, min: 5, max: 8, herd: [1, 2], habitat: 'water' },
+      { species: 'pikachu', weight: 1.5, min: 5, max: 7, herd: [1, 2] },
+      { species: 'eevee', weight: 1, min: 5, max: 7, herd: [1, 1] },
+      { species: 'abra', weight: 1, min: 6, max: 8, herd: [1, 1] },
     ],
   },
   {
+    // The far reaches and the mesas: levels 8-14.
     maxDist: Infinity,
     entries: [
-      { species: 'nibblet', weight: 14, min: 8, max: 12, herd: [2, 3] },
-      { species: 'finchlet', weight: 12, min: 8, max: 12, herd: [2, 3] },
-      { species: 'fjordling', weight: 10, min: 10, max: 14, herd: [2, 3] },
-      { species: 'cocoonch', weight: 12, min: 9, max: 13, herd: [2, 2] },
-      { species: 'cloveret', weight: 12, min: 8, max: 12, herd: [2, 2] },
-      { species: 'hjordpup', weight: 18, min: 8, max: 13, herd: [2, 3] },
-      { species: 'stashquill', weight: 14, min: 10, max: 14, herd: [2, 2] },
+      { species: 'nibblet', weight: 8, min: 8, max: 12, herd: [2, 3] },
+      { species: 'stashquill', weight: 6, min: 10, max: 14, herd: [2, 2] },
+      { species: 'finchlet', weight: 8, min: 8, max: 12, herd: [2, 3] },
+      { species: 'fjordling', weight: 4, min: 12, max: 14, herd: [2, 3] },
+      { species: 'spearow', weight: 8, min: 9, max: 13, herd: [2, 3] },
+      { species: 'cocoonch', weight: 5, min: 9, max: 12, herd: [2, 2] },
+      { species: 'kakuna', weight: 5, min: 9, max: 12, herd: [2, 2] },
+      { species: 'ekans', weight: 7, min: 9, max: 13, herd: [1, 2] },
+      { species: 'nidoran-f', weight: 4, min: 9, max: 13, herd: [2, 2] },
+      { species: 'nidoran-m', weight: 4, min: 9, max: 13, herd: [2, 2] },
+      { species: 'oddish', weight: 5, min: 9, max: 13, herd: [2, 3] },
+      { species: 'bellsprout', weight: 5, min: 9, max: 13, herd: [2, 2] },
+      { species: 'mankey', weight: 6, min: 9, max: 13, herd: [2, 3] },
+      { species: 'meowth', weight: 5, min: 9, max: 13, herd: [1, 2] },
+      { species: 'jigglypuff', weight: 4, min: 9, max: 12, herd: [1, 2] },
+      { species: 'vulpix', weight: 4, min: 9, max: 12, herd: [1, 2] },
+      { species: 'ponyta', weight: 5, min: 9, max: 13, herd: [2, 3] },
+      { species: 'hjordpup', weight: 6, min: 8, max: 13, herd: [2, 3] },
+      { species: 'cloveret', weight: 4, min: 8, max: 12, herd: [1, 2] },
+      { species: 'zubat', weight: 6, min: 9, max: 13, herd: [2, 4] },
+      { species: 'geodude', weight: 10, min: 9, max: 13, herd: [2, 3], habitat: 'rock' },
+      { species: 'poliwag', weight: 6, min: 9, max: 13, herd: [2, 3], habitat: 'water' },
+      { species: 'psyduck', weight: 6, min: 9, max: 13, herd: [1, 2], habitat: 'water' },
+      { species: 'pikachu', weight: 2, min: 9, max: 12, herd: [1, 2] },
+      { species: 'eevee', weight: 1, min: 9, max: 12, herd: [1, 1] },
+      { species: 'abra', weight: 1, min: 9, max: 12, herd: [1, 1] },
     ],
   },
 ];
+
+/** Whether a spot suits a habitat: close to water, or among the stone mesas. */
+function habitatAt(x: number, z: number, habitat: Habitat): boolean {
+  if (habitat === 'water') {
+    const water = Math.min(distToPolyline(x, z, RIVER_IN), distToPolyline(x, z, RIVER_OUT), lakeDist(x, z), Math.hypot(x - POND.x, z - POND.z) - POND.r);
+    return water < 35;
+  }
+  return MESAS.some((m) => Math.hypot(x - m.x, z - m.z) < m.r + 60);
+}
+
+/** A wild creature that spent Teleport's PP blinked away at the end of the battle. */
+function teleported(c: Creature): boolean {
+  return c.moves.some((m) => MOVES[m.id]?.special === 'teleport' && m.pp < MOVES[m.id].pp);
+}
 
 const MAX_HERDS = 7;
 const SPAWN_MIN = 55;
@@ -476,7 +549,7 @@ export class WildManager {
       if (caught.has(m.creature.uid)) {
         m.state = 'gone';
         m.fade = 1;
-      } else if (fainted.has(m.creature.uid)) {
+      } else if (fainted.has(m.creature.uid) || teleported(m.creature)) {
         m.state = 'gone';
         m.fade = 0;
       } else {
@@ -528,7 +601,7 @@ export class WildManager {
   spawnHerd(x: number, z: number, forceSpecies?: string, forceLevel?: number): Herd {
     const d = Math.hypot(x - TOWN.x, z - TOWN.z);
     const zone = ZONES.find((zn) => d < zn.maxDist) ?? ZONES[ZONES.length - 1];
-    const entry = forceSpecies ? zone.entries.find((e) => e.species === forceSpecies) ?? { species: forceSpecies, weight: 1, min: 3, max: 5, herd: [2, 2] as [number, number] } : this.pickEntry(zone.entries);
+    const entry = forceSpecies ? zone.entries.find((e) => e.species === forceSpecies) ?? { species: forceSpecies, weight: 1, min: 3, max: 5, herd: [2, 2] as [number, number] } : this.pickEntry(this.candidates(zone.entries, x, z));
     const herd: Herd = { id: this.nextId++, species: entry.species, cx: x, cz: z, members: [] };
     const n = this.rng.int(entry.herd[0], entry.herd[1]);
     for (let i = 0; i < n; i++) {
@@ -551,6 +624,15 @@ export class WildManager {
     }
     this.herds.push(herd);
     return herd;
+  }
+
+  /**
+   * Entries that can spawn at a spot: the habitat fits, and the species' model has finished
+   * loading (models outside the gameplay pack stream in after the world is built).
+   */
+  private candidates(entries: ZoneEntry[], x: number, z: number): ZoneEntry[] {
+    const ok = entries.filter((e) => (!e.habitat || habitatAt(x, z, e.habitat)) && creatureModelReady(e.species));
+    return ok.length ? ok : entries.filter((e) => !e.habitat);
   }
 
   private pickEntry(entries: ZoneEntry[]): ZoneEntry {

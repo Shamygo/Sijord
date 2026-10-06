@@ -1,3 +1,4 @@
+import { normalizeCreature } from '../../shared/battle/creature';
 import type { Creature } from '../../shared/battle/types';
 import type { PlayerProfile } from '../../shared/types';
 
@@ -33,6 +34,15 @@ export function loadSave(): SaveData | null {
     const data = JSON.parse(raw) as SaveData;
     if (!data?.profile?.appearance) return null;
     if (!data.visualVersion && data.profile.appearance.trainerModel === 'red') data.profile.appearance.trainerModel = 'rei';
+    // Species data moved to the canonical Pokemon: fix abilities and experience that no longer
+    // fit. A creature that can't be normalised is kept as it is rather than losing the save.
+    for (const c of [...(Array.isArray(data.party) ? data.party : []), ...(Array.isArray(data.box) ? data.box : [])]) {
+      try {
+        normalizeCreature(c);
+      } catch {
+        // keep it unchanged
+      }
+    }
     return { ...data, visualVersion:2, flags:data.flags ?? [] };
   } catch {
     return null;

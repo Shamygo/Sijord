@@ -92,11 +92,23 @@ function scoreMove(b: Battle, pos: Pos, move: MoveData, targets: Pos[]): number 
     }
     if (move.recoil) score *= 0.9;
     if (move.selfBoosts && Object.values(move.selfBoosts).some((v) => v < 0)) score *= 0.9;
+    // Exploding is a last resort.
+    if (move.special === 'self-destruct') score *= mon.hp / mon.maxHp < 0.25 ? 1 : 0.05;
+    if (move.special === 'sucker-punch') score *= 0.8;
     return score;
   }
   // Status moves.
   const hpFrac = mon.hp / mon.maxHp;
   switch (move.special) {
+    case 'teleport':
+      // A wild creature alone on its side slips away; elsewhere Teleport does nothing.
+      return b.kind === 'wild' && b.teamSetup(b.slotOwner(pos))?.ai === 'wild' && !b.allyOf(pos) ? 0.5 : 0;
+    case 'focus-energy':
+      return !mon.focusEnergy && hpFrac > 0.6 ? 0.15 : 0;
+    case 'rest':
+      return hpFrac < 0.35 && mon.status !== 'slp' ? 0.6 : 0;
+    case 'soak':
+      return 0.03;
     case 'protect':
       return mon.protectChain ? 0 : 0.12;
     case 'helping-hand':
@@ -119,7 +131,7 @@ function scoreMove(b: Battle, pos: Pos, move: MoveData, targets: Pos[]): number 
     const acc = move.accuracy === true ? 1 : move.accuracy / 100;
     return (move.status === 'slp' ? 0.5 : 0.35) * acc;
   }
-  if (move.selfBoosts && move.target === 'self') {
+  if (move.selfBoosts && (move.target === 'self' || move.target === 'ally-side')) {
     const total = Object.values(mon.boosts).reduce((a, v) => a + Math.max(0, v), 0);
     return hpFrac > 0.6 && total < 2 ? 0.25 : 0.02;
   }
