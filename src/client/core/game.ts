@@ -39,6 +39,8 @@ import { writeSave, type SaveData } from './save';
 import { keyLabel, loadSettings, saveSettings, type Action, type Settings } from './settings';
 
 const TALK_RADIUS = 2.6;
+/** Standing this close to a house door offers a rest. */
+const HOME_RADIUS = 3;
 
 /** A battle in progress, or one whose ring is still fading out. */
 interface ActiveBattle {
@@ -590,6 +592,27 @@ export class Game {
   private healParty(): void {
     for (const c of this.party) healCreature(c);
     this.onPartyChanged();
+  }
+
+  /** The house door the trainer is standing at, if any (either player's home will do). */
+  private nearHome(pos: THREE.Vector3): { id: string; label: string } | null {
+    return this.world.anchors.landmarks.find((l) => (l.id === 'p1-house' || l.id === 'p2-house') && Math.hypot(pos.x - l.position.x, pos.z - l.position.z) < HOME_RADIUS) ?? null;
+  }
+
+  /** Rest at home: a fade, then the whole team and the trainer are back to full. */
+  private async restAtHome(): Promise<void> {
+    this.cancelAim();
+    this.beginScene();
+    this.scripted = true;
+    await this.hud.fade(true);
+    for (const c of this.party) healCreature(c);
+    this.vitals.restore();
+    this.save.trainerHp = this.vitals.hp;
+    this.onPartyChanged();
+    await sleep(700);
+    await this.hud.fade(false);
+    this.endScene();
+    this.hud.showToast('You rested at home', this.party.length ? 'You and your team are back to full health' : 'You feel much better', 2.5);
   }
 
   /** Start talking: freeze the player and free the mouse for dialogue choices. */
@@ -1307,6 +1330,7 @@ export class Game {
       const nearProf = pos.distanceTo(this.professor.position) < TALK_RADIUS;
       const nearRival = this.rival.visible && pos.distanceTo(this.rival.position) < TALK_RADIUS;
       const pickup = !nearProf && !nearRival && !this.aiming ? this.throws.nearestPickup(pos) : null;
+      const home = !nearProf && !nearRival && !pickup ? this.nearHome(pos) : null;
       const wildMon = !nearProf && !nearRival ? this.wild.nearestEngageable(pos) : null;
       const canFight = this.party.some(isUsable);
       const invite = [...this.partnerBattles].find(([,f]) => f.joinable && Math.hypot(pos.x-f.center[0],pos.z-f.center[2]) < 14);
@@ -1316,6 +1340,7 @@ export class Game {
       else if (nearProf) this.hud.setPrompt(`Talk to ${this.professor.name}`);
       else if (nearRival) this.hud.setPrompt(`Talk to ${this.rival.name}`);
       else if (pickup) this.hud.setPrompt(`Pick up the ${ITEMS[pickup.ball]?.name ?? 'ball'}`);
+      else if (home) this.hud.setPrompt(`Rest at ${home.id === 'p1-house' ? 'home' : 'your friend’s house'}`);
       else if (wildMon) this.hud.setPrompt(canFight ? `Battle the wild ${displayName(wildMon.creature)} · Lv. ${wildMon.creature.level}` : `Wild ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
       else if(this.controller.climbing)this.hud.setPrompt(`${keyLabel(this.settings.keys.climb)} ascend · ${keyLabel(this.settings.keys.back)} + ${keyLabel(this.settings.keys.climb)} descend · ${keyLabel(this.settings.keys.jump)} let go`,keyLabel(this.settings.keys.climb));
       else if(this.controller.nearClimb(this.world))this.hud.setPrompt('Climb the lookout ladder',keyLabel(this.settings.keys.climb));
@@ -1325,6 +1350,7 @@ export class Game {
         else if (nearProf) void this.talkToProfessor();
         else if (nearRival) void this.talkToRival();
         else if (pickup) this.pickupBall(pickup.id);
+        else if (home) void this.restAtHome();
         else if (wildMon && canFight) void this.startWildBattle(wildMon, false);
       }
       // A creature that broke out of a ball and wants a fight starts it once it has popped out.
@@ -1345,7 +1371,7 @@ export class Game {
         else {
           charger.state = 'graze';
           charger.calm = 20;
-          this.hud.showToast(`The wild ${displayName(charger.creature)} lost interest`, 'Your team needs healing at Hazel\'s lab', 2.5);
+          this.hud.showToast(`The wild ${displayName(charger.creature)} lost interest`, 'Rest at home or see Hazel at the lab', 2.5);
         }
       }
     } else if (this.menu.isOpen || inBattle) {
