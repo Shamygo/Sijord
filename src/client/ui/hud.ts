@@ -119,7 +119,7 @@ export class Hud {
       this.hot('🎒', 'bag', 'Bag', s),
     );
     this.help.replaceChildren(
-      k('forward'), k('left'), k('back'), k('right'), ' move  ', k('sprint'), ' sprint  ', k('jump'), ' jump  ', k('dodge'), ' dodge  ', k('climb'), ' climb  ', k('interact'), ' talk / battle  ',
+      k('forward'), k('left'), k('back'), k('right'), ' move  ', k('sprint'), ' sprint  ', k('jump'), ' jump  ', k('dodge'), ' roll  ', k('climb'), ' let go of a wall  ', k('interact'), ' talk / battle  ',
       k('throw'), ' hold: aim & throw  ', k('party'), ' party  ', k('map'), ' map  ', k('bag'), ' bag  ', h('span.key', {}, 'Esc'), ' menu',
     );
     this.help.style.display = s.showControlsHint ? '' : 'none';
@@ -208,7 +208,7 @@ export class Hud {
 
   setPrompt(text: string | null, key = 'E'): void {
     this.prompt.classList.toggle('show', !!text);
-    if (text) this.prompt.replaceChildren(h('span.key', {}, key), text);
+    if (text) this.prompt.replaceChildren(...(key ? [h('span.key', {}, key)] : []), text);
   }
 
   setNetStatus(text: string): void {

@@ -1,9 +1,16 @@
 import type * as THREE from 'three';
 
-/** Static obstacles on the ground plane. Players are resolved as circles against these. */
+/**
+ * Static obstacles on the ground plane. Players are resolved as circles against these.
+ * `maxY` is the top: anything with its feet above it passes over. `climb` marks rock the player
+ * can climb and stand on (cliff columns, boulders); `dome` is how far a rounded top falls away
+ * towards its edge.
+ */
 export type Collider = (
   | { kind: 'circle'; x: number; z: number; r: number }
-  | { kind: 'box'; minX: number; maxX: number; minZ: number; maxZ: number }) & {maxY?:number};
+  | { kind: 'box'; minX: number; maxX: number; minZ: number; maxZ: number }
+  /** A box turned by `yaw` about its centre: half-width `hw` across, half-depth `hd` along (sin yaw, cos yaw). */
+  | { kind: 'obox'; x: number; z: number; hw: number; hd: number; yaw: number }) & { maxY?: number; climb?: boolean; dome?: number };
 
 export type SettlementTier = 'small' | 'medium' | 'large';
 

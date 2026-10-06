@@ -32,4 +32,4 @@ assert hashlib.sha256(data).hexdigest() == trainer['sha256'] and len(data) == tr
 gltf = json.loads(data[20:20 + struct.unpack_from('<I', data, 12)[0]])
 assert sorted(a['name'] for a in gltf['animations']) == sorted(a['name'] for a in trainer['animations'])
 assert len(gltf['skins'][0]['joints']) == trainer['joints']
-print(f'Verified {len(models)} models, {clips} Pokémon clips, {len(items)} items, {len(icons)} portraits, and Rei with 8 retargeted clips.')
+print(f'Verified {len(models)} models, {clips} Pokémon clips, {len(items)} items, {len(icons)} portraits, and Rei with {len(trainer["animations"])} clips.')

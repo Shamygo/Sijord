@@ -9,11 +9,10 @@ import { makeStoneMaterial } from './materials';
  * Layered stone cliffs for the mesas: every steep riser of a mesa's terraced heightfield is faced
  * with tall, irregular rock columns (columnar jointing). Columns vary in how far they stand out,
  * where they stop at the top (notches, the odd spire) and lean back slightly; tall faces get a
- * stepped ledge whose top grows moss. Purely visual over the (unclimbable) slope; the lowest
- * ring gets colliders so the player stops at the rock face.
+ * stepped ledge whose top grows moss. Every block is a climbable collider the player can stand on
+ * top of, so the rock face, not the slope behind it, is what stops and carries the player.
  */
 const ROCK = new THREE.Color(0xc0b9ad);
-const COLLIDER_SPACING = 3;
 
 export interface CliffResult {
   group: THREE.Group;
@@ -98,13 +97,15 @@ export function buildCliffs(terrain: TerrainQuery, colliders: Collider[]): Cliff
         col.copy(ROCK).multiplyScalar(v);
         col.r *= 0.97 + warm * 0.07; col.b *= 1.03 - warm * 0.09;
         const lean = 0.25 + rnd() * 0.75;
-        const addBlock = (b0: number, b1: number, prot: number, wScale: number, tint: number, ln: number) => {
+        const addBlock = (b0: number, b1: number, prot: number, wScale: number, tint: number, ln: number, top: boolean) => {
           const hh = b1 - b0;
           if (hh < 0.8) return;
           const g = columnGeometry(w * wScale, hh, depth, ln, rnd);
           e.set((rnd() - 0.5) * 0.05, yaw0 + (rnd() - 0.5) * 0.08, (rnd() - 0.5) * 0.05, 'YXZ');
           q.setFromEuler(e);
           const bx = fx + nx * (prot - depth / 2), bz = fz + nz * (prot - depth / 2);
+          // The top's outer edge is chamfered down and the column leans back, so stand a little low.
+          colliders.push({ kind: 'obox', x: bx, z: bz, hw: (w * wScale) / 2, hd: depth / 2, yaw: e.y, maxY: b1 - (top ? 0.25 : 0.05), climb: true });
           tmpM.compose(new THREE.Vector3(bx, b0 + hh / 2, bz), q, new THREE.Vector3(1, 1, 1));
           g.applyMatrix4(tmpM);
           const n = g.attributes.position.count;
@@ -125,14 +126,12 @@ export function buildCliffs(terrain: TerrainQuery, colliders: Collider[]): Cliff
         const splits = [bottom];
         for (let k = 1; k < nSeg; k++) splits.push(bottom + h * ((k + (rnd() - 0.5) * 0.6) / nSeg));
         splits.push(top);
-        let maxProt = protrude;
         const plinth = rnd() < 0.4 ? 0.5 + rnd() * 0.8 : 0;
         for (let k = 0; k < nSeg; k++) {
           const isTop = k === nSeg - 1;
           const p = protrude + (k === 0 ? plinth : 0) + (rnd() - 0.5) * 0.5 * (isTop ? 0.5 : 1);
-          maxProt = Math.max(maxProt, p);
           const b1 = isTop ? splits[k + 1] : splits[k + 1] + 0.12;
-          addBlock(splits[k] - (k ? 0.12 : 0), b1, p, 1 + (rnd() - 0.5) * 0.1, 0.92 + rnd() * 0.14, isTop ? lean * ((b1 - splits[k]) / h + 0.3) : rnd() * 0.25);
+          addBlock(splits[k] - (k ? 0.12 : 0), b1, p, 1 + (rnd() - 0.5) * 0.1, 0.92 + rnd() * 0.14, isTop ? lean * ((b1 - splits[k]) / h + 0.3) : rnd() * 0.25, isTop);
         }
         // greenery spilling over the rim
         if (rnd() < 0.42) {
@@ -140,15 +139,6 @@ export function buildCliffs(terrain: TerrainQuery, colliders: Collider[]): Cliff
           const bx = m.x + cx * rr, bz = m.z + cz * rr;
           const sc = 0.9 + rnd() * 1.2;
           rimBushes.push({ x: bx, y: terrain.heightAt(bx, bz) - 0.25, z: bz, s: sc * 1.15, sy: sc * (0.75 + rnd() * 0.35) });
-        }
-        if (level === 0) {
-          // a row of overlapping circles along the column's face
-          const nc = Math.max(1, Math.round(cw / COLLIDER_SPACING));
-          const R = Math.max(1.8, (cw / nc) * 0.7);
-          for (let k = 0; k < nc; k++) {
-            const off = ((k + 0.5) / nc - 0.5) * cw;
-            colliders.push({ kind: 'circle', x: fx + nx * (maxProt - R) - nz * off, z: fz + nz * (maxProt - R) + nx * off, r: R });
-          }
         }
         level++;
       }

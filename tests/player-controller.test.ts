@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { PLAYER_TUNING, PlayerController } from '../src/client/player/controller';
 import type { MoveInput } from '../src/client/player/types';
 import type { Collider, World } from '../src/client/world/types';
+import { colliderContains, colliderTop } from '../src/client/core/collision';
 
 function fakeWorld(opts: { heightAt?: (x: number, z: number) => number; colliders?: Collider[]; waterLevel?: number } = {}): World {
   return {
@@ -119,13 +120,14 @@ describe('PlayerController', () => {
     expect(c.horizontalSpeed).toBeLessThan(0.5);
   });
 
-  it('cannot climb a steep slope but walks up a gentle one', () => {
+  it('cannot walk up a steep slope (it has to be climbed) but walks up a gentle one', () => {
     // 63° cliff starting at z = 5.
     const steep = fakeWorld({ heightAt: (_x, z) => Math.max(0, z - 5) * 2 });
     const c = spawn(steep);
     run(c, steep, sprint, 4);
-    expect(c.position.y).toBeLessThan(0.6);
-    expect(c.position.z).toBeLessThan(5.4);
+    expect(c.climbing).toBe(true);
+    expect(c.position.y).toBeLessThan(PLAYER_TUNING.climbSpeed * 3.5);
+    expect(c.position.z).toBeLessThan(5 + c.position.y / 2);
 
     // 20° ramp: climbs fine.
     const gentle = fakeWorld({ heightAt: (_x, z) => Math.max(0, z - 5) * Math.tan((20 * Math.PI) / 180) });
@@ -256,14 +258,131 @@ describe('climbing',()=>{
   it('falls after walking off the raised platform',()=>{
     const w=ladderWorld(),c=spawn(w);run(c,w,{...idle,climb:true},4);run(c,w,fwd,2);run(c,w,idle,1);expect(c.position.z).toBeGreaterThan(3.1);expect(c.position.y).toBeCloseTo(0);
   });
-  it('climbs a steep slope with the held climb key, while preserving the ordinary slope limit',()=>{
-    const w=fakeWorld({heightAt:(_x,z)=>z*1.6});const c=spawn(w);run(c,w,{...fwd,climb:true},2);expect(c.position.z).toBeGreaterThan(1);expect(c.position.y).toBeCloseTo(c.position.z*1.6);expect(c.anim).toBe('climb');const ordinary=spawn(w);run(ordinary,w,fwd,2);expect(ordinary.position.z).toBeLessThan(c.position.z);
+  it('grabs a steep slope when pushed into and climbs it, hugging the surface',()=>{
+    const w=fakeWorld({heightAt:(_x,z)=>z*1.6});const c=spawn(w);run(c,w,fwd,2.5);
+    expect(c.climbing).toBe(true);expect(c.anim).toBe('climb');expect(c.position.y).toBeGreaterThan(1.5);
+    expect(Math.abs(c.position.y-c.position.z*1.6)).toBeLessThan(1);expect(c.stamina).toBeLessThan(1);
+    // Exhausted climbers can't grab on.
+    const tired=spawn(w);tired.stamina=0;tired.exhausted=true;run(tired,w,fwd,1);expect(tired.climbing).toBe(false);expect(tired.position.y).toBeLessThan(.5);
   });
   it('drops from a ladder when stamina runs out',()=>{
     const w=ladderWorld(),c=spawn(w);c.stamina=.02;run(c,w,{...idle,climb:true},.5);expect(c.climbing).toBe(false);run(c,w,idle,1);expect(c.position.y).toBeCloseTo(0);expect(c.grounded).toBe(true);
   });
+  it('never grabs a slope that can be walked up',()=>{
+    const w=fakeWorld({heightAt:(_x,z)=>Math.max(0,z)*.5});const c=spawn(w);run(c,w,fwd,2);expect(c.climbing).toBe(false);expect(c.position.z).toBeGreaterThan(3);
+  });
   it('cannot climb through a solid wall',()=>{
     const w=fakeWorld({heightAt:(_x,z)=>z*1.6,colliders:[{kind:'box',minX:-4,maxX:4,minZ:.4,maxZ:1}]});const c=spawn(w);run(c,w,{...fwd,climb:true},3);expect(c.position.z).toBeLessThan(.4);
+  });
+});
+
+describe('climbing rock', () => {
+  /** Flat ground with climbable rock you can stand on, as the real world wires it. */
+  function rockWorld(colliders: Collider[]): World {
+    const w = fakeWorld({ colliders });
+    w.surfaceHeightAt = (x, z, feet) => {
+      let h = 0;
+      for (const c of colliders) if (c.climb && c.maxY !== undefined && colliderContains(c, x, z) && feet >= colliderTop(c, x, z) - 0.35) h = Math.max(h, colliderTop(c, x, z));
+      return h;
+    };
+    return w;
+  }
+  const cliff: Collider = { kind: 'obox', x: 0, z: 3, hw: 3, hd: 2, yaw: 0, maxY: 5, climb: true };
+
+  it('climbs a cliff face to the top and pulls up onto it', () => {
+    const w = rockWorld([cliff]), c = spawn(w);
+    run(c, w, fwd, 1);
+    expect(c.climbing).toBe(true);
+    expect(c.position.z).toBeGreaterThan(0.5);
+    expect(c.position.z).toBeLessThan(1);
+    run(c, w, fwd, 3.2);
+    run(c, w, idle, 1.5);
+    expect(c.climbing).toBe(false);
+    expect(c.grounded).toBe(true);
+    expect(c.position.y).toBeCloseTo(5, 1);
+    expect(c.position.z).toBeGreaterThan(1.2);
+  });
+
+  it('plays the pull-up while mantling, and spends stamina only on the wall', () => {
+    const w = rockWorld([cliff]), c = spawn(w);
+    const anims = new Set<string>();
+    let atTop = -1;
+    for (let i = 0; i < 5 * 60; i++) {
+      c.update(DT, fwd, 0, w);
+      anims.add(c.anim);
+      if (c.anim === 'mantle' && atTop < 0) atTop = c.stamina;
+      if (c.anim === 'mantle') expect(c.stamina).toBe(atTop);
+    }
+    expect(anims.has('climb')).toBe(true);
+    // 3.5 m of wall at climbing speed.
+    expect(atTop).toBeLessThan(1 - 0.9 * 3.5 * PLAYER_TUNING.climbDrain / PLAYER_TUNING.climbSpeed);
+  });
+
+  it('climbs on past a step too narrow to stand on, onto the wall behind it', () => {
+    // The wall behind sits just out of a normal reach, too close to leave room to stand.
+    const step: Collider = { kind: 'obox', x: 0, z: 1.835, hw: 3, hd: 0.335, yaw: 0, maxY: 2, climb: true };
+    const upper: Collider = { kind: 'obox', x: 0, z: 4.17, hw: 3, hd: 2, yaw: 0, maxY: 6, climb: true };
+    const w = rockWorld([step, upper]), c = spawn(w);
+    let lowest = Infinity, wasUp = false;
+    for (let i = 0; i < 5.2 * 60; i++) {
+      c.update(DT, fwd, 0, w);
+      if (c.position.y > 1.5) wasUp = true;
+      if (wasUp) lowest = Math.min(lowest, c.position.y);
+    }
+    run(c, w, idle, 1.5);
+    expect(lowest).toBeGreaterThan(1.4);
+    expect(c.grounded).toBe(true);
+    expect(c.position.y).toBeCloseTo(6, 1);
+  });
+
+  it('vaults straight onto chest-high rock', () => {
+    const w = rockWorld([{ kind: 'circle', x: 0, z: 2, r: 1.2, maxY: 1.1, climb: true }]), c = spawn(w);
+    const anims = new Set<string>();
+    for (let i = 0; i < 45; i++) { c.update(DT, fwd, 0, w); anims.add(c.anim); }
+    run(c, w, idle, 0.5);
+    expect(anims.has('vault')).toBe(true);
+    expect(anims.has('climb')).toBe(false);
+    expect(c.position.y).toBeCloseTo(1.1, 1);
+  });
+
+  it('lets go with the climb key and on running out of stamina', () => {
+    const tall: Collider = { ...cliff, maxY: 40 };
+    const w = rockWorld([tall]), c = spawn(w);
+    run(c, w, fwd, 2);
+    expect(c.climbing).toBe(true);
+    c.update(DT, { ...idle, climb: true }, 0, w);
+    expect(c.climbing).toBe(false);
+    run(c, w, idle, 2);
+    expect(c.position.y).toBeCloseTo(0);
+
+    const d = spawn(w);
+    d.stamina = 0.3;
+    run(d, w, fwd, 0.5);
+    expect(d.climbing).toBe(true);
+    for (let i = 0; i < 20 * 60 && d.climbing; i++) d.update(DT, fwd, 0, w);
+    expect(d.exhausted).toBe(true);
+    expect(d.position.y).toBeGreaterThan(3);
+    run(d, w, idle, 2);
+    expect(d.position.y).toBeLessThan(0.5);
+  });
+
+  it('a climb jump lunges up for extra stamina', () => {
+    const tall: Collider = { ...cliff, maxY: 40 };
+    const w = rockWorld([tall]), c = spawn(w);
+    run(c, w, fwd, 1.2);
+    const y = c.position.y, st = c.stamina;
+    c.update(DT, { ...idle, jump: true }, 0, w);
+    run(c, w, idle, PLAYER_TUNING.climbJumpTime);
+    expect(c.position.y - y).toBeGreaterThan(PLAYER_TUNING.climbJumpHeight * 0.8);
+    expect(st - c.stamina).toBeGreaterThan(PLAYER_TUNING.climbJumpCost);
+    expect(c.climbing).toBe(true);
+  });
+
+  it('does not climb walls that are not rock', () => {
+    const w = rockWorld([{ kind: 'box', minX: -3, maxX: 3, minZ: 1, maxZ: 3 }]), c = spawn(w);
+    run(c, w, fwd, 2);
+    expect(c.climbing).toBe(false);
+    expect(c.position.y).toBeCloseTo(0);
   });
 });
 
@@ -311,21 +430,31 @@ describe('natural jump recovery', () => {
 describe('dodge', () => {
   const press = (i: MoveInput): MoveInput => ({ ...i, dodge: true });
 
-  it('hops a couple of metres sideways and keeps facing forward', () => {
+  it('rolls a few metres along the input, turning into the roll and staying on the ground', () => {
     const w = fakeWorld();
     const c = spawn(w);
     const right: MoveInput = { forward: 0, right: 1, sprint: false, jump: false };
     c.update(DT, press(right), 0, w);
     expect(c.dodging).toBe(true);
     expect(c.invulnerable).toBe(true);
-    expect(c.grounded).toBe(false);
-    // Input doesn't steer a dodge, and a side step lands planted.
-    run(c, w, idle, 0.5);
+    expect(c.grounded).toBe(true);
+    expect(c.anim).toBe('roll');
+    // Input doesn't steer a roll.
+    run(c, w, idle, 0.7);
     expect(c.dodging).toBe(false);
-    // Camera yaw 0 faces +Z, so right is -X.
-    expect(c.position.x).toBeLessThan(-2);
+    // Camera yaw 0 faces +Z, so right is -X, which is yaw -PI/2.
+    expect(c.position.x).toBeLessThan(-2.5);
     expect(c.position.x).toBeGreaterThan(-4.5);
-    expect(Math.abs(c.yaw)).toBeLessThan(0.15);
+    expect(Math.abs(c.yaw + Math.PI / 2)).toBeLessThan(0.2);
+    expect(c.grounded).toBe(true);
+  });
+
+  it('cannot jump out of a roll', () => {
+    const w = fakeWorld();
+    const c = spawn(w);
+    c.update(DT, press(fwd), 0, w);
+    c.update(DT, { ...fwd, jump: true }, 0, w);
+    run(c, w, fwd, 0.1);
     expect(c.grounded).toBe(true);
   });
 

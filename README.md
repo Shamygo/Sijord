@@ -29,11 +29,12 @@ For development, `npm run dev` serves the game at http://localhost:5173.
 | Mouse | Look around (click the game to capture the mouse, Esc to release) |
 | W A S D | Move |
 | Shift | Sprint (uses stamina) |
-| Space | Jump / let go while climbing |
-| C / S+C | Climb up / climb down; release C to hang |
+| Space | Jump; on a wall, leap up (or sideways with A/D); S+Space kicks off |
+| (walk into rock) | Climb cliffs, big rocks, steep slopes and ladders; W A S D move on the wall, pull-up at the top is automatic |
+| C | Let go of a wall |
 | E | Talk / interact, advance dialogue, battle a nearby wild Pokémon |
 | Q (hold) or right mouse | Aim a Poke Ball or Treat; release to throw, wheel to pick, E to cancel |
-| V | Dodge |
+| V | Dodge roll (backstep with no direction held) |
 | H | Use a Potion on yourself |
 | F | Call or recall your partner, or send it at a Pokémon charging you |
 | M / B / P / J | Map, bag, party, quests |
@@ -83,4 +84,4 @@ Battles offer a free-roam trainer mode with the original turn-based commands, an
 
 The bag, party, map and battle panels follow the supplied dark/cyan interface references. Medicines can heal a selected Pokémon from the bag; the Pokédex searches the full model collection. Catching, fast travel and additional world encounters remain separate gameplay work.
 
-The latest polish update fixes pointer capture over menus, animates panel/tab/selection transitions with reduced-motion support, improves empty-party onboarding and the Pokémon explorer, and adds matte world-lit character materials. Rei replaces the previous default trainer without resetting progression. Bramblewick has larger detailed street façades, covered porches, market stalls and two climbable lookout platforms. Shop fronts are decorative. Hold C on a ladder or while moving into a steep slope; S+C descends a ladder, and Space lets go. Original Arceus player motion files were unavailable; the included keyframes are separately sourced CC0 animations retargeted to Rei.
+The latest polish update fixes pointer capture over menus, animates panel/tab/selection transitions with reduced-motion support, improves empty-party onboarding and the Pokémon explorer, and adds matte world-lit character materials. Rei replaces the previous default trainer without resetting progression. Bramblewick has larger detailed street façades, covered porches, market stalls and two climbable lookout platforms. Shop fronts are decorative. Walk into a cliff, a big rock, a steep slope or a ladder to grab it, climb with W A S D, and Rei pulls up over the top on their own; climbing costs stamina, and C lets go. Original Arceus player motion files were unavailable; the included keyframes are separately sourced CC0 animations retargeted to Rei.

@@ -4,6 +4,8 @@ Every milestone ends in a **playable build** that two people can open in a brows
 
 **2026-10-05 cross-milestone update:** M2 remains complete and M3 catching is still next. At the user's request, imported Pokémon/Rei, public hosting, both shared free-roam battle variants, UI polish and climbing have landed ahead of later milestones. These additions do not complete M3 catching or M6 gyms. See [POLISH_HANDOFF.md](POLISH_HANDOFF.md).
 
+**2026-10-06 movement update:** after Jordan's feedback (choppy running, wanted a dodge roll and BotW/Palworld climbing), Rei blends walk, jog and run on one shared stride, V is a dodge roll, and cliffs, big rocks and steep slopes are climbable anywhere with stamina, a climb jump and an automatic pull-up. This pulls M9's "climbing for players" forward; swimming and gliding are still M9.
+
 **Guiding principles**
 - **Playable at every step.** No milestone ends with "the systems are in but you can't do anything."
 - **Battle engine early.** It's the deepest system and everything (gyms, catching, AI) depends on it.
@@ -150,7 +152,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 - Mount controller for land, water (surface and dive) and air (flight and glide), with stats derived from body plan, Speed and weight (§8.2).
 - Saddle crafting. Two-seat mounts. Glider and grapple tools.
 - 10 rideable species spread across tiers D-S.
-- Swimming and climbing for players.
+- Swimming for players (climbing landed early, 2026-10-06).
 
 **Exit criterion:** a "race across the map" test. A player on an S-tier land mount clearly outpaces a D-tier one, water and air travel open the Fjordlands and the archipelago, and both players can share a two-seat mount.
 

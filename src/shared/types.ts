@@ -24,7 +24,7 @@ export interface PlayerProfile {
 }
 
 /** Locomotion state a remote avatar needs to animate itself. */
-export type MoveAnim = 'idle' | 'walk' | 'run' | 'jump' | 'fall' | 'climb';
+export type MoveAnim = 'idle' | 'walk' | 'run' | 'jump' | 'fall' | 'climb' | 'roll' | 'mantle' | 'vault';
 
 export interface PlayerSnapshot {
   x: number;
