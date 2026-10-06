@@ -197,6 +197,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .quest-row.done { opacity: .55; }
 .quest-kind { font-size: 12px; font-weight: 900; padding: 3px 10px; border-radius: 999px; background: var(--accent); color: #3b2500; }
 .quest-state { font-size: 13px; color: var(--muted); font-weight: 800; }
+.disc-head { margin: 18px 0 4px; font-size: 15px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.disc-counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.disc-count { display: flex; flex-direction: column; gap: 2px; padding: 12px 16px; border-radius: 12px; background: rgba(255,255,255,.05); border-left: 4px solid #c98a4b; }
+.disc-count b { font-size: 20px; }
+.disc-count span { font-size: 13px; color: var(--muted); font-weight: 800; }
+.disc-count.disc-tablet { border-left-color: #7fe3ff; }
+.disc-count.disc-note { border-left-color: #f4ecd8; }
+.disc-pages { display: flex; flex-direction: column; gap: 8px; }
+.disc-page { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; border-radius: 12px; background: rgba(255,255,255,.05); }
+.disc-page p { margin: 0; flex: 1; line-height: 1.5; }
+.disc-page.disc-tablet .quest-kind { background: #7fe3ff; color: #0d3442; }
+.disc-page.disc-note .quest-kind { background: #f4ecd8; color: #3a2e20; }
+.legend-find { color: #c98a4b; }
+@media (max-width: 640px) { .disc-counts { grid-template-columns: 1fr; } }
 
 .settings { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
 .set-row { display: grid; grid-template-columns: 1fr auto 64px; align-items: center; gap: 12px; padding: 7px 0; font-weight: 700; font-size: 15px; }

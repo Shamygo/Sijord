@@ -20,7 +20,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 |---|---|---|---|
 | M1 | Hometown and co-op presence | Walk around Bramblewick with a friend and talk to Professor Hazel | Done |
 | M2 | First creatures and battles | Pick a starter and fight wild double battles near Bramblewick | Done |
-| M3 | Catching, party and the first route | Catch creatures (overworld and in battle) across the starter biome, with aggression | Nearly done (catching in battle and overworld, aggression, trainer HP, dodge, Treats, partner interceptions, resting, party/PC, Dex, 45 species, shared herds done; Hearthmeadow density and POIs left) |
+| M3 | Catching, party and the first route | Catch creatures (overworld and in battle) across the starter biome, with aggression | Done 2026-10-06 apart from its two-browser exit check (catching in battle and overworld, aggression, trainer HP, dodge, Treats, partner interceptions, resting, party/PC, Dex, 45 species, shared herds, Hearthmeadow supply caches, tablets and field notes) |
 | M4 | Survival and crafting core | Hunger, thirst and stamina, gathering, T0-T1 crafting, Poke Ball crafting, tools and armour | L |
 | M5 | Open world and settlements | Streamed 6x6 km terrain with 4-5 biomes, villages and towns, NPCs, shops | XL |
 | M6 | First gym slice | Two-player puzzle gym, co-op boss battle, competitive AI T1-T2, badges and level caps | XL |
@@ -65,13 +65,14 @@ Every milestone ends in a **playable build** that two people can open in a brows
 
 ---
 
-## M3: Catching, party and the first route *(nearly done 2026-10-06: everything below except the Hearthmeadow density target and its first POIs)*
+## M3: Catching, party and the first route *(done 2026-10-06 apart from the two-browser exit check)*
 
 **Scope**
 - Overworld throw (aim and arc) and in-battle throw. The catch formula with levelMod (§5.2).
 - Temperaments and failed-catch aggression: flee, forced battle or charge the player. Player HP, dodge roll, knockdown and respawn at bed (§5.3-5.4).
 - Party of 6 and a PC box (in the lab). Healing at home and at Hazel's lab.
 - 40 species. The Hearthmeadow biome slice (about 1 km²) to the density target, with its first POIs.
+  - *Status 2026-10-06:* 45 species. 17 supply caches (minor POIs, about 12 per km², the best on rock and mesa tops), 10 Lysfolk tablets and 9 field notes (collectibles, about 13 per km² against ~20), placed so 95% of the vale is within 45 s of walking of one (`src/shared/discoveries.ts`). An Alpha, quirky NPCs, roaming trainers and side quests from the §12.3 table are still to come; they move to later milestones (M13 audits the full table).
 - Dex UI (seen and caught).
 
 **Exit criterion:** a player can catch 10+ species, gets charged by an aggressive creature after a bad throw and survives it or is knocked down, and manages a party. Two players catch side by side in separate battles without desync.

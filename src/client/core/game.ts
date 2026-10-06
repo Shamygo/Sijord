@@ -31,6 +31,8 @@ import { Hud, type Quest } from '../ui/hud';
 import { GameMenu, type MenuTab } from '../ui/menu';
 import { Portraits } from '../ui/portraits';
 import { applyAtmosphere, createWorld } from '../world';
+import { DiscoveryProps, type DiscoverySpot } from '../world/discoveries';
+import { DISCOVERY_LABEL, discoveryCounts, tabletReward } from '../../shared/discoveries';
 import { TOWN } from '../world/layout';
 import type { World } from '../world/types';
 import { Input } from './input';
@@ -119,6 +121,8 @@ export class Game {
   private knockedOut = false;
   /** Overworld throws: aim preview, flights, catches and missed balls lying around. */
   private throws: OverworldThrows;
+  /** Supply caches, Lysfolk tablets and field notes out in Hearthmeadow. */
+  private discoveries: DiscoveryProps;
   private aiming = false;
   private aimTime = 0;
   private aimBall = 'poke-ball';
@@ -158,6 +162,8 @@ export class Game {
     this.world = createWorld();
     applyAtmosphere(this.scene);
     this.scene.add(this.world.root);
+    this.discoveries = new DiscoveryProps(this.world, save.found ?? []);
+    this.scene.add(this.discoveries.root);
 
     this.input = new Input(canvas, () => this.settings, (a) => this.onInstant(a), () =>
       !this.menu?.isOpen && !this.talking && (!this.scripted || !!(this.battle && this.battle.closing === null) || !!this.remoteBattleHost) &&
@@ -216,6 +222,7 @@ export class Game {
       destination: () => this.destination,
       setDestination: p => {this.destination = p;},
       quests: () => this.quests,
+      found: () => this.save.found ?? [],
       bag: () => this.save.bag ?? {},
       party: () => this.party,
       box: () => (this.save.box ??= []),
@@ -648,6 +655,51 @@ export class Game {
     this.scripted = false;
   }
 
+  /** Open a supply cache, read a Lysfolk tablet or take a field note (DESIGN §12.3). */
+  private async openDiscovery(spot: DiscoverySpot): Promise<void> {
+    const d = spot.def, found = (this.save.found ??= []);
+    if (found.includes(d.id)) return;
+    found.push(d.id);
+    this.discoveries.markFound(d.id);
+    const count = discoveryCounts(found)[d.kind];
+    const tally = `${DISCOVERY_LABEL[d.kind].many} found: ${count.found} of ${count.total}`;
+    if (d.kind === 'cache') {
+      const bag = (this.save.bag ??= {});
+      const got = Object.entries(d.loot ?? {}).map(([id, n]) => {
+        bag[id] = (bag[id] ?? 0) + n;
+        const name = ITEMS[id]?.name ?? id;
+        return n > 1 ? `${n} ${name}s` : `a ${name}`;
+      });
+      this.hud.showToast(`Found ${got.join(' and ')}`, tally, 3);
+    } else {
+      this.beginScene();
+      const speaker = DISCOVERY_LABEL[d.kind].one;
+      await this.hud.dialogue.play((d.text ?? []).map((text) => ({ speaker, text })));
+      this.endScene();
+      const owed = d.kind === 'tablet' && tabletReward(found, this.save.tabletsReported ?? 0).balls > 0;
+      this.hud.showToast(tally, owed ? 'Professor Hazel will want to see a rubbing of these' : d.kind === 'note' ? 'Read it again from your quest log (J)' : '', 3);
+    }
+    writeSave(this.save);
+    if (this.menu?.isOpen) this.menu.refresh();
+  }
+
+  /** Hazel pays a Great Ball for every few Lysfolk tablets, and knows her own lost notes. */
+  private async reportFinds(): Promise<void> {
+    const found = this.save.found ?? [];
+    const reward = tabletReward(found, this.save.tabletsReported ?? 0);
+    if (reward.balls > 0) {
+      await this.hud.dialogue.play(this.professor.tabletLines(reward.balls));
+      const bag = (this.save.bag ??= {});
+      bag['great-ball'] = (bag['great-ball'] ?? 0) + reward.balls;
+    }
+    this.save.tabletsReported = reward.reported;
+    if (!this.flags.has('hazel-notes') && discoveryCounts(found).note.found > 0) {
+      await this.hud.dialogue.play(this.professor.fieldNoteLines());
+      this.setFlag('hazel-notes');
+    }
+    writeSave(this.save);
+  }
+
   private async talkToProfessor(): Promise<void> {
     this.beginScene();
     this.professor.lookAt(this.controller.position);
@@ -673,6 +725,7 @@ export class Game {
     else if (!this.ballCount()) await this.giveBalls(3, false);
     if (!this.flags.has('got-treats')) await this.giveTreats(3, true);
     else if (!this.save.bag?.[TREAT_ITEM]) await this.giveTreats(2, false);
+    await this.reportFinds();
     this.professor.lookAt(null);
     this.endScene();
   }
@@ -1348,7 +1401,7 @@ export class Game {
   debugAdvance(ms: number): void { for (let t = 0; t < ms; t += 1000 / 60) this.frame(1 / 60); }
 
   debugText(): string {
-    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
+    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, found:this.save.found?.length ?? 0, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
       trainerHp: { hp: Math.round(this.vitals.hp * 10) / 10, max: this.vitals.max, down: this.vitals.knockedDown },
       throwing: { aiming: this.aiming, ball: this.aimBall, balls: Object.fromEntries(this.throwKinds().map((b) => [b, this.save.bag?.[b] ?? 0])), treats: this.wild.treats.length, intercept: this.intercept ? displayName(this.intercept.m.creature) : null, inFlight: this.throws.busy, dropped: this.throws.droppedCount, lastCatch: this.lastCatch },
       wildCreatures: this.wild.creatures.map((m) => ({ species: m.creature.species, level: m.creature.level, state: m.state, alert: Math.round(m.alert), attack: m.attack?.phase, position: [m.mover.pos.x, m.mover.pos.z].map((v) => Math.round(v * 10) / 10) })) });
@@ -1439,7 +1492,8 @@ export class Game {
       const nearProf = pos.distanceTo(this.professor.position) < TALK_RADIUS;
       const nearRival = this.rival.visible && pos.distanceTo(this.rival.position) < TALK_RADIUS;
       const pickup = !nearProf && !nearRival && !this.aiming ? this.throws.nearestPickup(pos) : null;
-      const home = !nearProf && !nearRival && !pickup ? this.nearHome(pos) : null;
+      const find = !nearProf && !nearRival && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
+      const home = !nearProf && !nearRival && !pickup && !find ? this.nearHome(pos) : null;
       const wildMon = !nearProf && !nearRival ? this.wild.nearestEngageable(pos) : null;
       const canFight = this.party.some(isUsable);
       const invite = [...this.partnerBattles].find(([,f]) => f.joinable && Math.hypot(pos.x-f.center[0],pos.z-f.center[2]) < 14);
@@ -1452,6 +1506,7 @@ export class Game {
       else if (nearProf) this.hud.setPrompt(`Talk to ${this.professor.name}`);
       else if (nearRival) this.hud.setPrompt(`Talk to ${this.rival.name}`);
       else if (pickup) this.hud.setPrompt(`Pick up the ${ITEMS[pickup.ball]?.name ?? 'ball'}`);
+      else if (find) this.hud.setPrompt(DISCOVERY_LABEL[find.def.kind].prompt);
       else if (home) this.hud.setPrompt(`Rest at ${home.id === 'p1-house' ? 'home' : 'your friend’s house'}`);
       else if (wildMon) this.hud.setPrompt(canFight ? `Battle the wild ${displayName(wildMon.creature)} · Lv. ${wildMon.creature.level}` : `Wild ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
       else if(this.controller.onLadder)this.hud.setPrompt(`${keyLabel(this.settings.keys.forward)} up · ${keyLabel(this.settings.keys.back)} down · ${keyLabel(this.settings.keys.jump)} let go`,'');
@@ -1463,6 +1518,7 @@ export class Game {
         else if (nearProf) void this.talkToProfessor();
         else if (nearRival) void this.talkToRival();
         else if (pickup) this.pickupBall(pickup.id);
+        else if (find) void this.openDiscovery(find);
         else if (home) void this.restAtHome();
         else if (wildMon && canFight) void this.startWildBattle(wildMon, false);
       }
@@ -1534,6 +1590,7 @@ export class Game {
 
     // Also keeps the sun's shadow camera centred on the player.
     this.world.update(dt, this.elapsed, this.controller.position);
+    this.discoveries.update(dt, this.elapsed, this.controller.position);
 
     const partner = [...this.partners.values()][0]?.remote.root.position;
     this.hud.update(

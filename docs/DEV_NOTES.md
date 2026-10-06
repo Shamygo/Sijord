@@ -9,8 +9,8 @@ Things about the code and testing that aren't obvious from reading it. Most of t
 - The minimap rotates by camYaw + PI. The full map in `ui/menu.ts` is north-up and drawn with scale(-s, -s), so screen-right is east.
 
 **Colliders** (`core/collision.ts`). The spatial grid is built lazily, keyed by the colliders array (WeakMap), the first time the array is resolved against.
-- Anything pushed into `world.colliders` after the first movement update is silently ignored. The professor's collider is pushed in the Game constructor for that reason.
-- Dynamic colliders need a separate list or a grid rebuild.
+- The grid rebuilds when the array's length changes, so colliders pushed later (the professor's, the discovery props') are picked up. Replacing or moving a collider in place is not noticed.
+- Colliders that move every frame need a separate list rather than a rebuild per frame.
 - Box colliders also act as camera occluders up to 7 m high (`player/camera.ts` insideWall), so the camera never ends up inside a house.
 - Kinds are `circle`, axis-aligned `box` and rotated `obox` (the mesa cliff columns). Any collider can carry `maxY` (it stops blocking once the feet are above it; pass the feet height to `resolveCircle`), `climb: true` (the player can grab it and stand on its top) and, for circles, `dome` (the top falls off towards the edge). `colliderContains`, `colliderTop` and `colliderNormal` are the helpers climbing uses.
 

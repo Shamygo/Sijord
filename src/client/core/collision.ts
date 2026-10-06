@@ -7,8 +7,11 @@ class ColliderGrid {
   private cells = new Map<number, Collider[]>();
   private out: Collider[] = [];
   private seen = new Set<Collider>();
+  /** How many colliders the list held when the grid was built. */
+  readonly count: number;
 
   constructor(colliders: readonly Collider[]) {
+    this.count = colliders.length;
     for (const c of colliders) {
       const [minX, maxX, minZ, maxZ] = bounds(c);
       for (let cx = Math.floor(minX / CELL); cx <= Math.floor(maxX / CELL); cx++) {
@@ -52,8 +55,8 @@ function key(cx: number, cz: number): number {
   return (cx + 32768) * 65536 + (cz + 32768);
 }
 
-// Large lists (the world has thousands of colliders) get a grid, built once per list.
-// A list must not change after it is first resolved against.
+// Large lists (the world has thousands of colliders) get a grid, built once per list and again
+// whenever the list's length changes. Editing a collider in place is not noticed.
 const grids = new WeakMap<readonly Collider[], ColliderGrid>();
 const GRID_THRESHOLD = 64;
 
@@ -61,7 +64,7 @@ const GRID_THRESHOLD = 64;
 export function collidersNear(x: number, z: number, r: number, all: readonly Collider[]): readonly Collider[] {
   if (all.length <= GRID_THRESHOLD) return all;
   let grid = grids.get(all);
-  if (!grid) grids.set(all, (grid = new ColliderGrid(all)));
+  if (!grid || grid.count !== all.length) grids.set(all, (grid = new ColliderGrid(all)));
   return grid.query(x, z, r);
 }
 
