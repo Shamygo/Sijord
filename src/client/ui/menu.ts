@@ -14,6 +14,7 @@ import { ITEMS, ITEM_CATEGORIES, type ItemCategory } from '../../shared/items';
 import { craftBlock, RECIPES, STATION_LABEL, type Recipe, type Station } from '../../shared/crafting';
 import { TOOL_USES, type ToolId } from '../../shared/gathering';
 import { CANTEEN_DRINKS, type Meters } from '../../shared/survival';
+import { buyPrice, formatMoney, SELL_RATE, sellPrice, type Shop } from '../../shared/economy';
 import { TYPE_COLORS } from '../battle/fx';
 import { STATUS_LABEL } from '../battle/ui';
 import { ACTION_LABELS, DEFAULT_SETTINGS, keyLabel, rebind, type Action, type Settings } from '../core/settings';
@@ -22,7 +23,7 @@ import { h } from './dom';
 import type { Quest } from './hud';
 import type { Minimap } from './minimap';
 
-export type MenuTab = 'map' | 'bag' | 'craft' | 'party' | 'quests' | 'settings' | 'pokedex';
+export type MenuTab = 'map' | 'bag' | 'craft' | 'shop' | 'party' | 'quests' | 'settings' | 'pokedex';
 
 export interface MenuDeps {
   world: World;
@@ -61,6 +62,14 @@ export interface MenuDeps {
   eat(id: string): boolean;
   /** Hunger, thirst and queasiness right now. */
   meters(): Meters;
+  /** Pokedollars in hand. */
+  money(): number;
+  /** The shop the trainer is standing at, if any. */
+  shop(): Shop | null;
+  /** Buy `n` of a shop's item; false if it can't be done. */
+  buy(id: string, n: number): boolean;
+  /** Sell `n` of an item; the money made (0 if none). */
+  sell(id: string, n: number): number;
   settings: Settings;
   onSettings(s: Settings): void;
   onSave(): void;
@@ -72,6 +81,7 @@ const TABS: { id: MenuTab; label: string; action?: Action }[] = [
   { id: 'map', label: 'Map', action: 'map' },
   { id: 'bag', label: 'Bag', action: 'bag' },
   { id: 'craft', label: 'Craft', action: 'craft' },
+  { id: 'shop', label: 'Shop' },
   { id: 'party', label: 'Party', action: 'party' },
   { id: 'quests', label: 'Quests', action: 'quests' },
   { id: 'pokedex', label: 'Pokédex' },
@@ -144,7 +154,7 @@ export class GameMenu {
 
   /** Redraw after the data behind the open tab changed. */
   refresh(): void {
-    if (this.open_ && (this.tab === 'party' || this.tab === 'pokedex' || this.tab === 'quests' || this.tab === 'craft' || this.tab === 'bag')) this.render();
+    if (this.open_ && (this.tab === 'party' || this.tab === 'pokedex' || this.tab === 'quests' || this.tab === 'craft' || this.tab === 'bag' || this.tab === 'shop')) this.render();
   }
 
   /** Called each frame while open so the map shows live positions. */
@@ -184,8 +194,11 @@ export class GameMenu {
   }
 
   private render(): void {
+    // The Shop tab only exists while you're standing at a shop.
+    const shop = this.deps.shop();
+    if (this.tab === 'shop' && !shop) this.tab = 'bag';
     this.tabBar.replaceChildren(
-      ...TABS.map((t) =>
+      ...TABS.filter((t) => t.id !== 'shop' || shop).map((t) =>
         h(
           'button.menu-tab' + (t.id === this.tab ? '.on' : ''),
           { onclick: () => this.open(t.id) },
@@ -207,6 +220,9 @@ export class GameMenu {
         break;
       case 'craft':
         this.body.replaceChildren(this.renderCraft());
+        break;
+      case 'shop':
+        this.body.replaceChildren(this.renderShop(shop!));
         break;
       case 'party':
         this.body.replaceChildren(this.renderParty());
@@ -234,6 +250,7 @@ export class GameMenu {
       h(
         'div.bag-cats',
         {},
+        h('span.purse', { title: 'Your money' }, formatMoney(this.deps.money())),
         ...ITEM_CATEGORIES.map((c) =>
           h('button.chip' + (c.id === this.bagCategory ? '.on' : ''), {
             onclick: () => {
@@ -334,6 +351,44 @@ export class GameMenu {
       ),
       // The station you're standing at comes first, so its recipes aren't below the fold.
       ...order.flatMap((st) => section(st, st === 'hand' ? 'anywhere' : stations.includes(st) ? 'you are here' : NOTES[st])),
+    );
+  }
+
+  /** Buy from the counter on the left, sell from your bag on the right. */
+  private renderShop(shop: Shop): HTMLElement {
+    const bag = this.deps.bag(), money = this.deps.money();
+    const buyCard = (id: string) => {
+      const price = buyPrice(id) ?? 0;
+      const btn = (n: number) => h('button.btn.craft-go', {
+        disabled: money < price * n,
+        onclick: () => { this.deps.buy(id, n); this.render(); },
+      }, n > 1 ? `Buy ${n}` : 'Buy');
+      return h('div.craft-card' + (money < price ? '.blocked' : ''), {},
+        h('div.craft-head', {}, this.itemArt(id), h('div', {}, h('b', {}, ITEMS[id].name), h('small', {}, `You have ${bag[id] ?? 0}`))),
+        h('p.shop-desc', {}, ITEMS[id].description ?? ''),
+        h('div.craft-foot', {}, h('b.price', {}, formatMoney(price)), h('div.shop-btns', {}, btn(1), btn(5))),
+      );
+    };
+    const sellable = Object.entries(bag).filter(([id, n]) => n > 0 && ITEMS[id] && ITEMS[id].category !== 'key' && sellPrice(id) !== null);
+    const sellRow = ([id, n]: [string, number]) => {
+      const each = sellPrice(id)!;
+      return h('div.sell-row', {},
+        this.itemArt(id),
+        h('div.sell-name', {}, h('b', {}, ITEMS[id].name), h('small', {}, `×${n} · ${formatMoney(each)} each`)),
+        h('button.act', { onclick: () => { this.deps.sell(id, 1); this.render(); } }, 'Sell 1'),
+        n > 1 ? h('button.act', { onclick: () => { this.deps.sell(id, n); this.render(); } }, `All ${formatMoney(each * n)}`) : null,
+      );
+    };
+    return h('div.shop', {},
+      h('div.craft-top', {},
+        h('div.craft-level', {}, h('b', {}, 'Your purse'), h('span.purse.big', {}, formatMoney(money))),
+        h('div.craft-where', {}, h('b', {}, shop.name), h('small', {}, `“${shop.greeting}”`)),
+      ),
+      h('div.shop-cols', {},
+        h('div', {}, h('h3', {}, 'For sale'), h('div.craft-grid', {}, ...shop.stock.map(buyCard))),
+        h('div', {}, h('h3', {}, 'Sell', h('span.craft-note', {}, `they pay ${Math.round(SELL_RATE * 100)}% of the price`)),
+          h('div.sell-list', {}, ...(sellable.length ? sellable.map(sellRow) : [h('p.empty', {}, 'Nothing to sell.')]))),
+      ),
     );
   }
 

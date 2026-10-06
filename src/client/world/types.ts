@@ -1,4 +1,5 @@
 import type * as THREE from 'three';
+import type { ShopId } from '../../shared/economy';
 import type { ResourceField } from './resources';
 
 /**
@@ -37,6 +38,8 @@ export interface WorldAnchors {
   landmarks: { id: string; label: string; position: THREE.Vector3 }[];
   /** Crafting stations (DESIGN §6.4): where to stand to use them. */
   stations?: CraftStationSpot[];
+  /** Shop doorways (DESIGN §6.7): where to stand to buy and sell. */
+  shops?: { id: ShopId; position: THREE.Vector3 }[];
 }
 
 export interface CraftStationSpot {
