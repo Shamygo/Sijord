@@ -59,6 +59,16 @@ export const PLAYER_TUNING = {
   staminaRegenDelay: 0.6,
   /** Sprint lock-out after stamina empties (also needs some stamina back). */
   exhaustLockout: 1.4,
+
+  /** Dodge (DESIGN §5.3): a quick low hop along the input, or a backstep with none. */
+  dodgeSpeed: 9,
+  dodgeHop: 3.4,
+  dodgeTime: 0.34,
+  dodgeStamina: 0.16,
+  dodgeCooldown: 0.3,
+  /** Hits pass through for this long from the start of a dodge. */
+  dodgeInvuln: 0.3,
+  dodgeBuffer: 0.15,
   exhaustRecoverTo: 0.25,
 
   /** Physics sub-step length and frame dt cap. */
@@ -121,6 +131,15 @@ export class PlayerController {
   private landingRecoveryT = 0;
   private airSpeedLimit = PLAYER_TUNING.walkSpeed;
   private onSteep = false;
+  private dodgeT = 0;
+  private dodgeAge = 0;
+  private dodgeCooldownT = 0;
+  private dodgeBufferT = 0;
+  private prevDodge = false;
+  private dodgeX = 0;
+  private dodgeZ = 0;
+  private dodgeFace = 0;
+  private dodgeAhead = false;
 
   constructor(tuning: Partial<PlayerTuning> = {}) {
     this.tuning = { ...PLAYER_TUNING, ...tuning };
@@ -140,6 +159,7 @@ export class PlayerController {
     this.landingRecoveryT = 0;
     this.jumpedSinceGrounded = false;
     this.prevJump = false;
+    this.dodgeT = this.dodgeCooldownT = this.dodgeBufferT = 0;
   }
 
   get horizontalSpeed(): number {
@@ -156,6 +176,8 @@ export class PlayerController {
     // Jump edge detection happens once per frame; the buffer carries it across sub-steps.
     if (input.jump && !this.prevJump) this.jumpBufferT = T.jumpBuffer;
     this.prevJump = input.jump;
+    if (input.dodge && !this.prevDodge) this.dodgeBufferT = T.dodgeBuffer;
+    this.prevDodge = !!input.dodge;
 
     const steps = Math.max(1, Math.ceil(dt / T.maxStep - 1e-6));
     const h = dt / steps;
@@ -233,6 +255,33 @@ export class PlayerController {
       if (this.sinceSprint >= T.staminaRegenDelay) this.stamina = Math.min(1, this.stamina + T.staminaRegen * dt);
     }
 
+    // ---- Dodge -------------------------------------------------------------------------------
+    this.dodgeCooldownT = Math.max(0, this.dodgeCooldownT - dt);
+    this.dodgeBufferT = Math.max(0, this.dodgeBufferT - dt);
+    if (this.dodgeBufferT > 0 && this.dodgeT === 0 && this.dodgeCooldownT === 0 && this.grounded && !this.onSteep && !this.exhausted && this.stamina > 0) {
+      this.dodgeX = hasInput ? dirX : -Math.sin(this.yaw);
+      this.dodgeZ = hasInput ? dirZ : -Math.cos(this.yaw);
+      // Forward-ish dodges turn into the hop; side and back steps keep facing the threat.
+      const ahead = this.dodgeX * Math.sin(this.yaw) + this.dodgeZ * Math.cos(this.yaw);
+      this.dodgeAhead = ahead > 0.5;
+      this.dodgeFace = this.dodgeAhead ? Math.atan2(this.dodgeX, this.dodgeZ) : this.yaw;
+      this.dodgeT = T.dodgeTime;
+      this.dodgeAge = 0;
+      this.dodgeBufferT = 0;
+      this.jumpBufferT = 0;
+      vel.y = T.dodgeHop;
+      this.grounded = false;
+      this.jumpedSinceGrounded = true;
+      this.timeSinceGrounded = T.coyoteTime + 1;
+      this.airSpeedLimit = T.walkSpeed;
+      this.sinceSprint = 0;
+      this.stamina = Math.max(0, this.stamina - T.dodgeStamina);
+      if (this.stamina <= 0) {
+        this.exhausted = true;
+        this.exhaustT = T.exhaustLockout;
+      }
+    }
+
     // ---- Horizontal velocity -----------------------------------------------------------------
     const ground = this.grounded && !this.onSteep;
     const control = ground ? 1 : T.airControl;
@@ -290,6 +339,22 @@ export class PlayerController {
     }
     vel.x = vdx * speed;
     vel.z = vdz * speed;
+    if (this.dodgeT > 0) {
+      // Fast off the mark, easing towards the end; input doesn't steer a dodge.
+      this.dodgeAge += dt;
+      const k = Math.min(1, this.dodgeAge / T.dodgeTime);
+      const s = T.dodgeSpeed * (1 - 0.55 * k * k);
+      vel.x = this.dodgeX * s;
+      vel.z = this.dodgeZ * s;
+      this.dodgeT = Math.max(0, this.dodgeT - dt);
+      if (this.dodgeT === 0) {
+        this.dodgeCooldownT = T.dodgeCooldown;
+        // A forward dodge rolls on at a jog; a side or back step lands planted, still facing the threat.
+        const out = this.dodgeAhead ? Math.min(T.walkSpeed, s) : 0;
+        vel.x = this.dodgeX * out;
+        vel.z = this.dodgeZ * out;
+      }
+    }
 
     // Slide down slopes that are too steep to stand on.
     if (this.grounded && this.onSteep) {
@@ -301,7 +366,8 @@ export class PlayerController {
 
     // ---- Facing: damped spring towards the move direction, rate-limited -----------------------
     let faceTarget: number | null = null;
-    if (speed > 0.4) faceTarget = Math.atan2(vel.x, vel.z);
+    if (this.dodgeT > 0) faceTarget = this.dodgeFace;
+    else if (speed > 0.4) faceTarget = Math.atan2(vel.x, vel.z);
     else if (hasInput) faceTarget = Math.atan2(dirX, dirZ);
     else if (speed > 1.0) faceTarget = Math.atan2(vel.x, vel.z);
     if (faceTarget !== null) {
@@ -478,6 +544,16 @@ export class PlayerController {
   nearClimb(world:World):ClimbPoint | null {
     return world.climbs?.find(c=>Math.hypot(this.position.x-c.bottom.x,this.position.z-c.bottom.z)<1.35 && Math.abs(this.position.y-c.bottom.y)<1.1) ?? null;
   }
+  /** Mid-dodge. */
+  get dodging(): boolean {
+    return this.dodgeT > 0;
+  }
+
+  /** Early in a dodge, when hits pass through. */
+  get invulnerable(): boolean {
+    return this.dodgeT > 0 && this.dodgeAge < this.tuning.dodgeInvuln;
+  }
+
   get climbing():boolean {return !!this.activeClimb || this.terrainClimbing;}
   get anim(): MoveAnim {
     if(this.climbing)return 'climb';

@@ -3,6 +3,7 @@ import { PLAYER_CLASSES } from '../../shared/classes';
 import type { PlayerProfile } from '../../shared/types';
 import type { World } from '../world/types';
 import { keyLabel, type Action, type Settings } from '../core/settings';
+import { AimHud } from './aim-hud';
 import { DialogueBox } from './dialogue';
 import { h } from './dom';
 import { Minimap } from './minimap';
@@ -39,6 +40,7 @@ const COMPASS_SPAN = 180;
 export class Hud {
   readonly el: HTMLDivElement;
   readonly dialogue = new DialogueBox();
+  readonly aim = new AimHud();
   private compass = h('div.compass');
   private clock = h('div.clock');
   private quests = h('div.quests');
@@ -50,6 +52,12 @@ export class Hud {
   private fpsTime = 0;
   private stamina = h('i');
   private staminaBar = h('div.bar.stamina', {}, this.stamina);
+  private hpFill = h('i');
+  private hpBar = h('div.bar', {}, this.hpFill);
+  private hpText = h('small');
+  private vitals!: HTMLElement;
+  private hurtFlash = h('div.hurt-flash');
+  private lastHp = '';
   private prompt = h('div.prompt');
   private net = h('div.net');
   private toast = h('div.toast');
@@ -73,7 +81,7 @@ export class Hud {
       h('div.minimap', {}, this.minimap.canvas),
       this.quests,
       this.party,
-      h(
+      (this.vitals = h(
         'div.vitals',
         {},
         h('div.badge', { style: `background:${cls.color}` }, cls.name[0]),
@@ -81,13 +89,16 @@ export class Hud {
           'div.info',
           {},
           h('div.name', {}, `${profile.name} · ${cls.name} · Lv. 1`),
-          h('div.bar', {}, h('i', { style: 'width:100%' })),
+          // The trainer's own HP only shows once something has hurt them.
+          h('div.trainer-hp', { title: 'Your HP' }, this.hpBar, this.hpText),
           this.staminaBar,
         ),
-      ),
+      )),
       this.hotbar,
       this.help,
       this.fps,
+      this.hurtFlash,
+      this.aim.el,
       this.prompt,
       this.net,
       this.toast,
@@ -102,14 +113,14 @@ export class Hud {
     this.lastSettings = s;
     const k = (a: Action) => h('span.key', {}, keyLabel(s.keys[a]));
     this.hotbar.replaceChildren(
-      this.hot('◓', 'throw', 'Throw a ball (catching arrives in the next update)', s, true),
+      this.hot('◓', 'throw', `Hold ${keyLabel(s.keys.throw)} or right mouse to aim a ball, release to throw`, s, !this.hasParty),
       this.hot('🐾', 'partner', this.hasParty ? 'Call or recall your partner' : 'No partner Pokemon yet', s, !this.hasParty),
       this.hot('🗺', 'map', 'Map', s),
       this.hot('🎒', 'bag', 'Bag', s),
     );
     this.help.replaceChildren(
-      k('forward'), k('left'), k('back'), k('right'), ' move  ', k('sprint'), ' sprint  ', k('jump'), ' jump  ', k('climb'), ' climb  ', k('interact'), ' talk / battle  ',
-      k('party'), ' party  ', k('map'), ' map  ', k('bag'), ' bag  ', h('span.key', {}, 'Esc'), ' menu',
+      k('forward'), k('left'), k('back'), k('right'), ' move  ', k('sprint'), ' sprint  ', k('jump'), ' jump  ', k('dodge'), ' dodge  ', k('climb'), ' climb  ', k('interact'), ' talk / battle  ',
+      k('throw'), ' hold: aim & throw  ', k('party'), ' party  ', k('map'), ' map  ', k('bag'), ' bag  ', h('span.key', {}, 'Esc'), ' menu',
     );
     this.help.style.display = s.showControlsHint ? '' : 'none';
     this.fps.classList.toggle('show', s.showFps);
@@ -153,6 +164,34 @@ export class Hud {
   fade(on: boolean): Promise<void> {
     this.fadeEl.classList.toggle('show', on);
     return new Promise((r) => setTimeout(r, 450));
+  }
+
+  /** Trainer HP: the bar appears only while below full. */
+  setTrainerHp(hp: number, max: number): void {
+    const shown = Math.ceil(hp);
+    const key = `${shown}/${max}`;
+    if (key === this.lastHp) return;
+    this.lastHp = key;
+    const r = max ? Math.max(0, Math.min(1, hp / max)) : 0;
+    this.vitals.classList.toggle('hurt', shown < max);
+    this.hpFill.style.width = `${Math.round(r * 100)}%`;
+    this.hpBar.classList.toggle('low', r <= 0.25);
+    this.hpText.textContent = `${shown}/${max} HP`;
+  }
+
+  /** A hit landed on the trainer: red edge flash and a shake of the vitals panel. */
+  hurt(): void {
+    this.hurtFlash.classList.add('show');
+    this.vitals.classList.remove('hit');
+    void this.vitals.offsetWidth;
+    this.vitals.classList.add('hit');
+    setTimeout(() => this.hurtFlash.classList.remove('show'), 90);
+  }
+
+  /** Aiming a throw: hide the hotbar, hints, prompt and quests so the overlay has room. */
+  setAiming(on: boolean): void {
+    this.el.classList.toggle('aiming', on);
+    if (!on) this.aim.hide();
   }
 
   /** Hide the overworld HUD pieces that would clutter a battle. */

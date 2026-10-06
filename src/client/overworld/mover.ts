@@ -55,6 +55,13 @@ export class Mover {
     this.integrate(dt, 0, 0, world);
   }
 
+  /** Move at a fixed velocity right away (a lunge), still respecting colliders and water. */
+  dash(dt: number, vx: number, vz: number, world: World): void {
+    this.vx = vx;
+    this.vz = vz;
+    this.integrate(dt, vx, vz, world);
+  }
+
   /** Turn on the spot to face a yaw. */
   face(dt: number, yaw: number): void {
     const d = wrapAngle(yaw - this.yaw);

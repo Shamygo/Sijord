@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Appearance, MoveAnim, PlayerProfile, PlayerSnapshot } from '../../shared/types';
 import { createAvatar } from './avatar';
 import type { Avatar, GroundFn } from './types';
+import { KNOCKDOWN_ANGLE } from '../../shared/trainer-vitals';
 
 /** Interpolation tunables for remote players. */
 export const REMOTE_TUNING = {
@@ -89,6 +90,8 @@ export class RemotePlayer {
   private anim: MoveAnim = 'idle';
   private speed = 0;
   private tired = false;
+  /** Knockdown pose from the partner's snapshots (0 standing, 1 down). */
+  private down = 0;
   private readonly tmp = new THREE.Vector3();
 
   constructor(profile: PlayerProfile | { name: string; appearance: Appearance }) {
@@ -99,6 +102,8 @@ export class RemotePlayer {
     this.nameTag.position.y = REMOTE_TUNING.nameTagHeight;
     this.root.add(this.nameTag);
     this.root.visible = false;
+    // Yaw first, then tip over around the trainer's own left-right axis when knocked down.
+    this.avatar.root.rotation.order = 'YXZ';
   }
 
   /** World position currently rendered. */
@@ -156,6 +161,7 @@ export class RemotePlayer {
       this.speed = a.s.speed;
       this.anim = a.s.anim;
       this.tired = isTired(a.s);
+      this.down = a.s.down ?? 0;
     } else if (renderT <= b.t) {
       const k = (renderT - a.t) / (b.t - a.t);
       target.set(a.s.x + (b.s.x - a.s.x) * k, a.s.y + (b.s.y - a.s.y) * k, a.s.z + (b.s.z - a.s.z) * k);
@@ -163,6 +169,7 @@ export class RemotePlayer {
       this.speed = a.s.speed + (b.s.speed - a.s.speed) * k;
       this.anim = k < 0.5 ? a.s.anim : b.s.anim;
       this.tired = isTired(k < 0.5 ? a.s : b.s);
+      this.down = (a.s.down ?? 0) + ((b.s.down ?? 0) - (a.s.down ?? 0)) * k;
     } else {
       // Past the newest sample: extrapolate briefly along the last velocity, then hold.
       const span = Math.max(1, b.t - a.t);
@@ -172,6 +179,7 @@ export class RemotePlayer {
       yaw = b.s.yaw;
       this.anim = b.s.anim;
       this.tired = isTired(b.s);
+      this.down = b.s.down ?? 0;
       // Ease the animation speed down once we've stopped hearing from them.
       const stale = Math.min(1, (renderT - b.t) / T.maxExtrapolateMs);
       this.speed = b.s.speed * (1 - 0.6 * stale);
@@ -210,6 +218,7 @@ export class RemotePlayer {
   private apply(): void {
     this.root.position.copy(this.displayPos);
     this.avatar.root.rotation.y = this.displayYaw;
+    this.avatar.root.rotation.x = -this.down * KNOCKDOWN_ANGLE;
   }
 
   dispose(): void {

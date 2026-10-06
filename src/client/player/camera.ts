@@ -44,6 +44,11 @@ export const CAMERA_TUNING = {
   recentreDelay: 2.5,
   recentreRate: 1.1,
   recentreMinSpeed: 1.5,
+  /** Aiming a throw: pull in over the shoulder and narrow the view a touch. */
+  aimDistance: 3.1,
+  aimShoulder: 0.85,
+  aimFovDrop: 7,
+  aimRate: 9,
 };
 
 export type CameraTuning = typeof CAMERA_TUNING;
@@ -114,6 +119,9 @@ export class ThirdPersonCamera {
   private moveVelY = 0;
   private hasTarget = false;
   private idleMouse = 0;
+  /** 0 normal follow, 1 fully in the aiming view. */
+  private aimBlend = 0;
+  private aimTarget = 0;
 
   private readonly tmpFwd = new THREE.Vector3();
   private readonly tmpRight = new THREE.Vector3();
@@ -164,6 +172,17 @@ export class ThirdPersonCamera {
     // Normalise pixel / line deltas: ~100 per notch.
     const notches = clamp(deltaY / 100, -3, 3);
     this.targetDistance = clamp(this.targetDistance + notches * T.zoomStep, T.minDistance, T.maxDistance);
+  }
+
+  /** Point the view straight away (scripted tests and cut-ins). */
+  setLook(yaw: number, pitch: number): void {
+    this.yaw = this.targetYaw = yaw;
+    this.pitch = this.targetPitch = clamp(pitch, this.tuning.minPitch, this.tuning.maxPitch);
+  }
+
+  /** Over-the-shoulder aiming view for throws (eased in and out). */
+  setAim(on: boolean): void {
+    this.aimTarget = on ? 1 : 0;
   }
 
   /** Jump the camera behind a facing yaw immediately (spawns, teleports). */
@@ -225,6 +244,8 @@ export class ThirdPersonCamera {
     this.targetYaw = this.yaw + wrapAngle(this.targetYaw - this.yaw);
     this.pitch = damp(this.pitch, this.targetPitch, T.lookRate, dt);
     this.distance = damp(this.distance, this.targetDistance, T.zoomRate, dt);
+    this.aimBlend = damp(this.aimBlend, this.aimTarget, T.aimRate, dt);
+    if (Math.abs(this.aimBlend - this.aimTarget) < 1e-3) this.aimBlend = this.aimTarget;
 
     // Weighted follow of the pivot: lags behind fast movement, then settles.
     const lead = (2 / T.followFreq) * T.followLead;
@@ -251,7 +272,8 @@ export class ThirdPersonCamera {
     }
 
     // FOV widens a touch while sprinting.
-    const fov = damp(this.camera.fov, this.baseFov + (sprinting ? this.sprintFovBoost : 0), T.fovRate, dt);
+    const fovTarget = this.baseFov + (sprinting ? this.sprintFovBoost : 0) - this.aimBlend * T.aimFovDrop;
+    const fov = damp(this.camera.fov, fovTarget, this.aimTarget || this.aimBlend ? T.aimRate : T.fovRate, dt);
     if (Math.abs(fov - this.camera.fov) > 1e-4) {
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
@@ -266,23 +288,25 @@ export class ThirdPersonCamera {
     const cp = Math.cos(this.pitch);
     const fwd = this.tmpFwd.set(Math.sin(this.yaw) * cp, -Math.sin(this.pitch), Math.cos(this.yaw) * cp);
     const right = this.tmpRight.set(-Math.cos(this.yaw), 0, Math.sin(this.yaw));
-    // Boom origin: pivot shifted over the shoulder.
-    const origin = this.tmpLook.copy(this.pivot).addScaledVector(right, T.shoulderOffset);
+    // Boom origin: pivot shifted over the shoulder (further while aiming).
+    const aim = this.aimBlend;
+    const origin = this.tmpLook.copy(this.pivot).addScaledVector(right, T.shoulderOffset + (T.aimShoulder - T.shoulderOffset) * aim);
+    const distance = aim > 0 ? this.distance + (Math.min(T.aimDistance, this.distance) - this.distance) * aim : this.distance;
 
-    let want = this.distance;
+    let want = distance;
     if (world) {
       // Pull in if terrain or a building blocks the line of sight from the pivot to the camera.
       const n = T.losSamples;
-      const walls = collidersNear(origin.x, origin.z, this.distance + 1, world.colliders);
+      const walls = collidersNear(origin.x, origin.z, distance + 1, world.colliders);
       for (let i = 1; i <= n; i++) {
         const t = i / n;
-        const d = this.distance * t;
+        const d = distance * t;
         const px = origin.x - fwd.x * d;
         const py = origin.y - fwd.y * d;
         const pz = origin.z - fwd.z * d;
         const ground = world.heightAt(px, pz);
         if (py < ground + T.groundClearance || insideWall(px, py - ground, pz, walls)) {
-          want = Math.max(0.6, d - this.distance / n);
+          want = Math.max(0.6, d - distance / n);
           break;
         }
       }

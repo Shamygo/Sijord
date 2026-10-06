@@ -30,7 +30,7 @@ export const ITEMS: Record<string, ItemInfo> = {
   },
   'bandage': {
     id: 'bandage', name: 'Potion', category: 'items', icon: '🩹', sprite:'potion', heal:20,
-    description: 'A spray medicine that restores 20 HP to one Pokémon.',
+    description: 'A spray medicine that restores 20 HP to one Pokémon. In a pinch it also patches up a trainer (30 HP).',
   },
   'poke-ball': {
     id: 'poke-ball', name: 'Poke Ball', category: 'balls', icon: '◓', sprite:'poke-ball',
