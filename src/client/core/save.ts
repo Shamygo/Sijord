@@ -1,5 +1,6 @@
 import { normalizeCreature } from '../../shared/battle/creature';
 import type { Creature } from '../../shared/battle/types';
+import type { ArmourSlot } from '../../shared/items';
 import type { Meters } from '../../shared/survival';
 import type { PlayerProfile } from '../../shared/types';
 
@@ -42,6 +43,10 @@ export interface SaveData {
   meters?: Meters;
   /** Pokedollars (DESIGN §6.7). Missing on older saves: they start with the new-trainer amount. */
   money?: number;
+  /** Recipes learned with Technology Points (DESIGN §6.4). */
+  learned?: string[];
+  /** Armour worn, by slot (item ids that are also in the bag). */
+  equipped?: Partial<Record<ArmourSlot, string>>;
 }
 
 export function loadSave(): SaveData | null {

@@ -8,7 +8,7 @@ import { moveData } from '../../shared/data/moves';
 import { SPECIES, species, STARTERS } from '../../shared/data/species';
 import { BattleDirector, arenaSpots, type BattleOutcome, type BattleStart } from '../battle/director';
 import { classInfo } from '../../shared/classes';
-import { ITEMS, PARTY_MAX, STARTING_BAG } from '../../shared/items';
+import { ITEMS, PARTY_MAX, STARTING_BAG, type ArmourSlot } from '../../shared/items';
 import type { BattleControl, BattleFrame } from '../../shared/battle/session';
 import { RemoteBattle } from '../battle/remote';
 import type { BallCatchFx, BallThrowFx, MoveAnim, PlayerProfile, PlayerSnapshot } from '../../shared/types';
@@ -33,7 +33,7 @@ import { Portraits } from '../ui/portraits';
 import { applyAtmosphere, createWorld } from '../world';
 import { DiscoveryProps, type DiscoverySpot } from '../world/discoveries';
 import { DISCOVERY_LABEL, discoveryCounts, tabletReward } from '../../shared/discoveries';
-import { applyCraft, craftBlock, craftSpend, RECIPES, recipeById, type Station } from '../../shared/crafting';
+import { applyCraft, canLearn, craftBlock, craftSpend, RECIPES, recipeById, techPoints, type Station } from '../../shared/crafting';
 import { gatherWay, NODE_RULES, pruneDepleted, rollYield, wearTool, type GatherWay, type ToolId } from '../../shared/gathering';
 import { earnedXp, trainerLevel, TRAINER_XP } from '../../shared/trainer-level';
 import type { ResourceNode } from '../world/resources';
@@ -276,6 +276,12 @@ export class Game {
       craft: (id) => this.craft(id),
       toolUses: (id) => this.save.toolWear?.[id],
       eat: (id) => this.eat(id),
+      learned: () => this.save.learned ?? [],
+      techPoints: () => this.techPoints,
+      learn: (id) => this.learnRecipe(id),
+      equipped: () => this.save.equipped ?? {},
+      wear: (id, on) => this.wear(id, on),
+      defence: () => this.defence,
       meters: () => this.meters,
       money: () => this.save.money ?? 0,
       shop: () => this.shopNear(this.controller.position),
@@ -741,7 +747,9 @@ export class Game {
       await this.hud.dialogue.play((d.text ?? []).map((text) => ({ speaker, text })));
       this.endScene();
       const owed = d.kind === 'tablet' && tabletReward(found, this.save.tabletsReported ?? 0).balls > 0;
-      this.hud.showToast(tally, owed ? 'Professor Hazel will want to see a rubbing of these' : d.kind === 'note' ? 'Read it again from your quest log (J)' : '', 3);
+      const sub = owed ? 'Professor Hazel will want to see a rubbing of these' : d.kind === 'note' ? 'Read it again from your quest log (J)' : '';
+      // Each tablet teaches a little of the Lysfolk craft: a Technology Point (DESIGN §6.4).
+      this.hud.showToast(tally, d.kind === 'tablet' ? [sub, '+1 Technology Point'].filter(Boolean).join(' · ') : sub, 3);
     }
     writeSave(this.save);
     if (this.menu?.isOpen) this.menu.refresh();
@@ -1138,7 +1146,7 @@ export class Game {
     if (this.battle || this.remoteBattleHost || this.talking || this.scripted) return;
     // A well-timed dodge lets the lunge pass straight through.
     if (this.controller.invulnerable) return;
-    const dmg = chargeDamage(m.creature.level);
+    const dmg = chargeDamage(m.creature.level, undefined, this.defence);
     const r = this.vitals.hit(dmg);
     if (r === 'ignored') return;
     this.cancelAim();
@@ -1205,9 +1213,48 @@ export class Game {
     const max = trainerMaxHp(now.level, mods.maxHp);
     this.vitals.setMax(max);
     this.vitals.heal(max);
-    const unlocked = RECIPES.filter((r) => r.level > before && r.level <= now.level).map((r) => ITEMS[r.out]?.name ?? r.id);
+    const unlocked = RECIPES.filter((r) => !r.tp && r.level > before && r.level <= now.level).map((r) => ITEMS[r.out]?.name ?? r.id);
+    const tp = this.techPoints.left;
+    const sub = [unlocked.length ? `New recipes: ${unlocked.join(', ')}` : `Max HP is now ${max}`, `${tp} Technology Point${tp === 1 ? '' : 's'} to spend (K)`].join(' · ');
     // After whatever toast the find or catch put up.
-    setTimeout(() => this.hud.showToast(`Trainer level ${now.level}!`, unlocked.length ? `New recipes: ${unlocked.join(', ')}` : `Max HP is now ${max}`, 3.5), 2400);
+    setTimeout(() => this.hud.showToast(`Trainer level ${now.level}!`, sub, 3.5), 2400);
+  }
+
+  /** Technology Points: one a level and one a tablet, spent learning recipes. */
+  private get techPoints(): { earned: number; spent: number; left: number } {
+    return techPoints(this.trainer.level, discoveryCounts(this.save.found ?? []).tablet.found, this.save.learned ?? []);
+  }
+
+  private learnRecipe(id: string): boolean {
+    const r = recipeById(id), learned = (this.save.learned ??= []);
+    if (!r || !canLearn(r, this.trainer.level, this.techPoints.left, learned)) return false;
+    learned.push(r.id);
+    writeSave(this.save);
+    const left = this.techPoints.left;
+    this.hud.showToast(`Learned: ${ITEMS[r.out]?.name ?? r.id}`, `${left} Technology Point${left === 1 ? '' : 's'} left`, 2);
+    return true;
+  }
+
+  /** Total Defence of the armour worn. */
+  private get defence(): number {
+    return Object.values(this.save.equipped ?? {}).reduce((n, id) => n + (id && this.save.bag?.[id] ? ITEMS[id]?.armour?.defence ?? 0 : 0), 0);
+  }
+
+  /** Put on a piece of armour (swapping out whatever was in its slot), or take it off. */
+  private wear(id: string, on: boolean): boolean {
+    const a = ITEMS[id]?.armour, eq = (this.save.equipped ??= {});
+    if (!a || (on && !this.save.bag?.[id])) return false;
+    if (on) eq[a.slot] = id;
+    else if (eq[a.slot] === id) delete eq[a.slot];
+    writeSave(this.save);
+    return true;
+  }
+
+  /** Armour you no longer carry comes off. */
+  private checkEquipped(): void {
+    const eq = this.save.equipped;
+    if (!eq) return;
+    for (const slot of Object.keys(eq) as ArmourSlot[]) if (!this.save.bag?.[eq[slot]!]) delete eq[slot];
   }
 
   /** Crafting stations the trainer is standing at. */
@@ -1224,7 +1271,7 @@ export class Game {
   private craft(id: string): boolean {
     const r = recipeById(id);
     const bag = (this.save.bag ??= {});
-    if (!r || craftBlock(r, bag, this.trainer.level, this.stationsNear(this.controller.position))) return false;
+    if (!r || craftBlock(r, bag, this.trainer.level, this.stationsNear(this.controller.position), this.save.learned ?? [])) return false;
     const spend = craftSpend(r, classInfo(this.save.profile.playerClass).modifiers.craftCost, Math.random);
     applyCraft(r, bag, spend);
     const saved = Object.entries(r.cost).filter(([i, n]) => (spend[i] ?? 0) < n).map(([i]) => ITEMS[i]?.name ?? i);
@@ -1292,6 +1339,7 @@ export class Game {
     const got = sell(wallet, (this.save.bag ??= {}), id, n);
     if (!got) return 0;
     this.save.money = wallet.money;
+    this.checkEquipped();
     writeSave(this.save);
     return got;
   }
@@ -1809,7 +1857,7 @@ export class Game {
     if (gathering) {
       gathering.t += dt;
       snap.anim = gathering.way.anim as MoveAnim;
-      if (gathering.way.anim === 'chop') snap.tool = gathering.way.tool;
+      if (gathering.way.tool) snap.tool = gathering.way.tool;
     }
     this.avatar.hold?.(snap.tool ?? null);
     this.avatar.animate(dt, snap);

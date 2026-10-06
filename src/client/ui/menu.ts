@@ -10,8 +10,8 @@ import { SPECIES_IDS, species } from '../../shared/data/species';
 import { PARTY_MAX } from '../../shared/items';
 import { DISCOVERIES, DISCOVERY_LABEL, discoveryCounts, type DiscoveryKind } from '../../shared/discoveries';
 import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
-import { ITEMS, ITEM_CATEGORIES, type ItemCategory } from '../../shared/items';
-import { craftBlock, RECIPES, STATION_LABEL, type Recipe, type Station } from '../../shared/crafting';
+import { ITEMS, ITEM_CATEGORIES, type ArmourSlot, type ItemCategory } from '../../shared/items';
+import { canLearn, craftBlock, RECIPES, STATION_LABEL, type Recipe, type Station } from '../../shared/crafting';
 import { TOOL_USES, type ToolId } from '../../shared/gathering';
 import { CANTEEN_DRINKS, type Meters } from '../../shared/survival';
 import { buyPrice, formatMoney, SELL_RATE, sellPrice, type Shop } from '../../shared/economy';
@@ -60,6 +60,17 @@ export interface MenuDeps {
   toolUses(id: string): number | undefined;
   /** Eat or drink an item; false if it did nothing. */
   eat(id: string): boolean;
+  /** Recipes learned with Technology Points. */
+  learned(): string[];
+  techPoints(): { earned: number; spent: number; left: number };
+  /** Spend Technology Points on a recipe; false if it can't be learned. */
+  learn(id: string): boolean;
+  /** Armour worn, by slot. */
+  equipped(): Partial<Record<ArmourSlot, string>>;
+  /** Put a piece of armour on or take it off. */
+  wear(id: string, on: boolean): boolean;
+  /** Total Defence of the armour worn. */
+  defence(): number;
   /** Hunger, thirst and queasiness right now. */
   meters(): Meters;
   /** Pokedollars in hand. */
@@ -242,6 +253,7 @@ export class GameMenu {
   private renderBag(): HTMLElement {
     const bag = this.deps.bag();
     const entries = Object.entries(bag).filter(([id, n]) => n > 0 && ITEMS[id]?.category === this.bagCategory);
+    const worn = new Set(Object.values(this.deps.equipped()));
     const selected = this.selectedItem && ITEMS[this.selectedItem]?.category === this.bagCategory ? this.selectedItem : entries[0]?.[0] ?? null;
     const info = selected ? ITEMS[selected] : null;
     return h(
@@ -274,7 +286,7 @@ export class GameMenu {
                     this.selectedItem = id;
                     this.render();
                   },
-                }, this.itemArt(id), h('span.bag-count', {}, `×${n}`)),
+                }, this.itemArt(id), h('span.bag-count', {}, `×${n}`), worn.has(id) ? h('span.bag-worn', {}, 'Worn') : null),
               )
             : [h('p.empty', {}, 'Nothing here yet.')]),
         ),
@@ -286,10 +298,22 @@ export class GameMenu {
           selected && selected in TOOL_USES ? h('p.tool-wear', {}, `${this.deps.toolUses(selected) ?? TOOL_USES[selected as ToolId]} of ${TOOL_USES[selected as ToolId]} uses left on the one in hand`) : null,
           selected === 'canteen' ? h('p.tool-wear', {}, `Carrying ${bag['river-water'] ?? 0} of ${bag.canteen * CANTEEN_DRINKS} drinks of river water`) : null,
           info?.food && selected ? this.foodPanel(selected) : null,
+          info?.armour && selected ? this.gearPanel(selected) : null,
           info?.heal && selected ? h('button.btn', {onclick: () => {this.itemTarget = !this.itemTarget; this.render();}}, 'Use on Pokémon') : null,
           this.itemTarget && info?.heal && selected ? h('div.item-targets', {}, ...this.deps.party().map(c => h('button.act', {disabled:c.hp <= 0 || c.hp >= maxHp(c), onclick: () => {this.deps.useItem(selected,c.uid); this.itemTarget = false; this.render();}}, h('img', {src:this.deps.portrait(c.species),alt:''}), `${displayName(c)} · ${c.hp}/${maxHp(c)}`))) : null,
         ),
       ),
+    );
+  }
+
+  /** Defence, the slot, and the button to put it on or take it off. */
+  private gearPanel(id: string): HTMLElement {
+    const a = ITEMS[id].armour!, worn = this.deps.equipped()[a.slot] === id;
+    const SLOT: Record<ArmourSlot, string> = { head: 'head', body: 'body', legs: 'legs' };
+    return h('div.food-info', {},
+      h('p.food-gives', {}, `Defence ${a.defence} · worn on your ${SLOT[a.slot]}${worn ? ' · wearing it' : ''}`),
+      h('p.food-now', {}, `Your Defence: ${this.deps.defence()} (hits from charging Pokémon do ${Math.round(100 - 10000 / (100 + this.deps.defence()))}% less)`),
+      h('button.btn', { onclick: () => { this.deps.wear(id, !worn); this.render(); } }, worn ? 'Take off' : 'Wear'),
     );
   }
 
@@ -312,28 +336,33 @@ export class GameMenu {
   /** Recipes by station: what you can make, what you're short of, and why a recipe is locked. */
   private renderCraft(): HTMLElement {
     const bag = this.deps.bag(), tr = this.deps.trainer(), stations = this.deps.stations();
+    const learned = this.deps.learned(), tp = this.deps.techPoints();
     const where = stations.includes('workbench') ? 'At the workbench' : stations.includes('campfire') ? 'At the campfire' : 'Crafting by hand';
     const card = (r: Recipe) => {
-      const block = craftBlock(r, bag, tr.level, stations);
+      const block = craftBlock(r, bag, tr.level, stations, learned);
       const busy = this.crafting?.id === r.id;
-      const reason = block === 'level' ? `Needs trainer Lv. ${r.level}` : block === 'station' ? `Needs the ${STATION_LABEL[r.station].toLowerCase()}` : block === 'materials' ? 'Not enough materials' : '';
+      const reason = block === 'level' ? `Needs trainer Lv. ${r.level}` : block === 'learn' ? 'Not learned yet' : block === 'station' ? `Needs the ${STATION_LABEL[r.station].toLowerCase()}` : block === 'materials' ? 'Not enough materials' : '';
       const bar = h('i');
       const button = h('button.btn.craft-go', {
         disabled: !!block || !!this.crafting,
         onclick: () => {
-          if (this.crafting || craftBlock(r, this.deps.bag(), this.deps.trainer().level, this.deps.stations())) return;
+          if (this.crafting || craftBlock(r, this.deps.bag(), this.deps.trainer().level, this.deps.stations(), this.deps.learned())) return;
           const now = performance.now();
           this.crafting = { id: r.id, start: now, end: now + this.deps.craftSeconds(r.id) * 1000, bar };
           this.render();
         },
       }, busy ? 'Making…' : 'Craft');
       if (busy && this.crafting) this.crafting.bar = bar;
+      const learnButton = h('button.btn.craft-go.learn', {
+        disabled: !canLearn(r, tr.level, tp.left, learned),
+        onclick: () => { this.deps.learn(r.id); this.render(); },
+      }, `Learn · ${r.tp} TP`);
       return h(
         'div.craft-card' + (block ? '.blocked' : ''),
         {},
         h('div.craft-head', {}, this.itemArt(r.out), h('div', {}, h('b', {}, ITEMS[r.out].name + (r.count > 1 ? ` ×${r.count}` : '')), h('small', {}, `You have ${bag[r.out] ?? 0}`))),
         h('div.craft-cost', {}, ...Object.entries(r.cost).map(([id, n]) => h('span.cost' + ((bag[id] ?? 0) < n ? '.short' : ''), { title: ITEMS[id].name }, this.itemArt(id), `${bag[id] ?? 0}/${n}`))),
-        h('div.craft-foot', {}, reason ? h('small.craft-why', {}, reason) : h('small', {}, `${this.deps.craftSeconds(r.id).toFixed(1)} s`), busy ? h('div.craft-progress', {}, bar) : button),
+        h('div.craft-foot', {}, reason ? h('small.craft-why', {}, reason) : h('small', {}, `${this.deps.craftSeconds(r.id).toFixed(1)} s`), busy ? h('div.craft-progress', {}, bar) : block === 'learn' ? learnButton : button),
       );
     };
     const NOTES: Record<Station, string> = { hand: '', campfire: 'the campfire at the campsite, north-west of Bramblewick', workbench: 'on the Craft Workshop porch in Bramblewick · trainer Lv. 3' };
@@ -347,7 +376,8 @@ export class GameMenu {
       {},
       h('div.craft-top', {},
         h('div.craft-level', {}, h('b', {}, `Trainer Lv. ${tr.level}`), h('div.xp-bar', {}, h('i', { style: `width:${tr.need ? Math.round((tr.into / tr.need) * 100) : 100}%` })), h('small', {}, tr.need ? `${tr.need - tr.into} XP to Lv. ${tr.level + 1}` : 'Top level')),
-        h('div.craft-where', {}, h('b', {}, where), h('small', {}, 'Catching, battling, finding things and crafting something new all give trainer experience.')),
+        h('div.craft-level.tp', { title: 'One for each trainer level and each Lysfolk tablet you read' }, h('b', {}, `${tp.left} Technology Point${tp.left === 1 ? '' : 's'}`), h('small', {}, `${tp.earned} earned · ${tp.spent} spent`)),
+        h('div.craft-where', {}, h('b', {}, where), h('small', {}, 'Catching, battling, finding things and crafting something new all give trainer experience. Each level and each Lysfolk tablet gives a Technology Point to learn new recipes.')),
       ),
       // The station you're standing at comes first, so its recipes aren't below the fold.
       ...order.flatMap((st) => section(st, st === 'hand' ? 'anywhere' : stations.includes(st) ? 'you are here' : NOTES[st])),

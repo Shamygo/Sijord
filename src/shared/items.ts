@@ -1,6 +1,9 @@
 import type { FoodValue } from './survival';
 
-export type ItemCategory = 'items' | 'food' | 'balls' | 'battle' | 'materials' | 'tools' | 'key';
+export type ItemCategory = 'items' | 'food' | 'balls' | 'battle' | 'materials' | 'tools' | 'gear' | 'key';
+
+/** Where a piece of armour is worn (DESIGN §6.2; the two accessory slots come later). */
+export type ArmourSlot = 'head' | 'body' | 'legs';
 
 export interface ItemInfo {
   id: string;
@@ -13,6 +16,8 @@ export interface ItemInfo {
   heal?: number;
   /** Eaten or drunk by the trainer (hunger and thirst, DESIGN §6.1). */
   food?: FoodValue;
+  /** Worn by the trainer: softens hits from charging Pokemon (DESIGN §5.4). */
+  armour?: { slot: ArmourSlot; defence: number };
 }
 
 export const ITEM_CATEGORIES: { id: ItemCategory; label: string }[] = [
@@ -22,6 +27,7 @@ export const ITEM_CATEGORIES: { id: ItemCategory; label: string }[] = [
   { id: 'battle', label: 'Battle' },
   { id: 'materials', label: 'Materials' },
   { id: 'tools', label: 'Tools' },
+  { id: 'gear', label: 'Gear' },
   { id: 'key', label: 'Key items' },
 ];
 
@@ -78,6 +84,10 @@ export const ITEMS: Record<string, ItemInfo> = {
     id: 'fiber', name: 'Plant Fiber', category: 'materials', icon: '🌾',
     description: 'Pulled from bushes. Twisted into rope and springs for tools and Poke Balls.',
   },
+  'woven-cloth': {
+    id: 'woven-cloth', name: 'Woven Cloth', category: 'materials', icon: '🧵',
+    description: 'Plant fibre twisted and woven by hand into a coarse cloth. Sewn into clothes at the workbench.',
+  },
   'red-apricorn': {
     id: 'red-apricorn', name: 'Red Apricorn', category: 'materials', icon: '🍎', sprite: 'red-apricorn',
     description: 'A hard red fruit from apricorn trees. Hollowed out, it becomes the shell of a Poke Ball.',
@@ -93,6 +103,22 @@ export const ITEMS: Record<string, ItemInfo> = {
   'stone-pick': {
     id: 'stone-pick', name: 'Stone Pick', category: 'tools', icon: '⛏',
     description: 'A heavy stone point on a handle. Mines copper veins and breaks stone off boulders. Wears out after 30 uses.',
+  },
+  'stone-sickle': {
+    id: 'stone-sickle', name: 'Stone Sickle', category: 'tools', icon: '🌙',
+    description: 'A curved flake of stone on a short handle. Cuts 2-3 Plant Fiber from a bush instead of 1-2, and quicker. Wears out after 30 uses.',
+  },
+  'cloth-cap': {
+    id: 'cloth-cap', name: 'Cloth Cap', category: 'gear', icon: '🧢', armour: { slot: 'head', defence: 3 },
+    description: 'A padded cloth cap. Takes a little of the sting out of a charging Pokémon. Defence 3.',
+  },
+  'cloth-tunic': {
+    id: 'cloth-tunic', name: 'Cloth Tunic', category: 'gear', icon: '👕', armour: { slot: 'body', defence: 7 },
+    description: 'A quilted tunic of woven cloth, worn under your jacket. Defence 7.',
+  },
+  'cloth-trousers': {
+    id: 'cloth-trousers', name: 'Cloth Trousers', category: 'gear', icon: '👖', armour: { slot: 'legs', defence: 5 },
+    description: 'Hard-wearing trousers with padded knees. Defence 5.',
   },
   'canteen': {
     id: 'canteen', name: 'Canteen', category: 'tools', icon: '🍶',

@@ -87,7 +87,22 @@ function pick(): THREE.Group {
   return g;
 }
 
-const BUILDERS: Record<string, () => THREE.Group> = { 'stone-hatchet': hatchet, 'stone-pick': pick };
+function sickle(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(haft(0.3, 0.05));
+  // A long curved flake of stone, hooked forward from the top of the handle.
+  const geo = new THREE.TorusGeometry(0.1, 0.014, 4, 12, Math.PI * 1.05);
+  geo.scale(1, 1, 0.45);
+  geo.rotateY(Math.PI / 2);
+  const blade = new THREE.Mesh(knapped(geo, 7.7, 0.004), mats().stone);
+  // Centred ahead of the handle's tip, so the arc starts at the lashing and hooks forward and down.
+  blade.position.set(0, 0.25, 0.1);
+  blade.castShadow = true;
+  g.add(blade, lashing(0.24, 0.022, 2));
+  return g;
+}
+
+const BUILDERS: Record<string, () => THREE.Group> = { 'stone-hatchet': hatchet, 'stone-pick': pick, 'stone-sickle': sickle };
 
 /** The model for a tool item, or null for items that aren't held. */
 export function toolModel(id: string): THREE.Group | null {

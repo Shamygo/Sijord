@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyCraft, craftBlock, craftSpend, RECIPES, recipeById } from '../src/shared/crafting';
+import { applyCraft, canLearn, craftBlock, craftSpend, RECIPES, recipeById, techPoints } from '../src/shared/crafting';
+import { chargeDamage } from '../src/shared/trainer-vitals';
 import { gatherWay, NODE_RULES, pruneDepleted, rollYield, TOOL_USES, wearTool, type NodeKind } from '../src/shared/gathering';
 import { ITEMS } from '../src/shared/items';
 import { chopPitch, toolModel } from '../src/client/player/tools';
@@ -123,5 +124,42 @@ describe('crafting', () => {
     expect(paid / full).toBeGreaterThan(0.9);
     expect(paid / full).toBeLessThan(0.94);
     expect(craftSpend(r, 1, () => 0.5)).toEqual(r.cost);
+  });
+});
+
+describe('Technology Points and armour', () => {
+  it('earns a point per level past the first and per tablet, and spends them on recipes', () => {
+    expect(techPoints(1, 0, [])).toEqual({ earned: 0, spent: 0, left: 0 });
+    expect(techPoints(4, 2, ['cloth-cap'])).toEqual({ earned: 5, spent: 1, left: 4 });
+  });
+
+  it('newer recipes have to be learned; the first ones are known to everyone', () => {
+    const cap = recipeById('cloth-cap')!, ball = recipeById('poke-ball')!;
+    const bag = { 'woven-cloth': 9, fiber: 9 };
+    expect(craftBlock(cap, bag, 3, ['workbench'], [])).toBe('learn');
+    expect(craftBlock(cap, bag, 3, ['workbench'], ['cloth-cap'])).toBeNull();
+    expect(craftBlock(cap, bag, 2, ['workbench'], ['cloth-cap'])).toBe('level');
+    expect(ball.tp).toBeUndefined();
+    expect(canLearn(cap, 3, 1, [])).toBe(true);
+    expect(canLearn(cap, 3, 0, [])).toBe(false);
+    expect(canLearn(cap, 2, 5, [])).toBe(false);
+    expect(canLearn(cap, 3, 5, ['cloth-cap'])).toBe(false);
+    expect(canLearn(ball, 3, 5, [])).toBe(false);
+  });
+
+  it('a full set of cloth covers head, body and legs and softens a charge', () => {
+    const set = ['cloth-cap', 'cloth-tunic', 'cloth-trousers'].map((id) => ITEMS[id].armour!);
+    expect(set.map((a) => a.slot).sort()).toEqual(['body', 'head', 'legs']);
+    const defence = set.reduce((n, a) => n + a.defence, 0);
+    expect(chargeDamage(10, undefined, defence)).toBeLessThan(chargeDamage(10));
+    // Cloth takes the edge off; it doesn't make you safe.
+    expect(chargeDamage(10, undefined, defence)).toBeGreaterThan(chargeDamage(10) * 0.8);
+  });
+
+  it('a sickle cuts more fibre from a bush, faster', () => {
+    const hand = gatherWay('bush', () => false)!, sickle = gatherWay('bush', (t) => t === 'stone-sickle')!;
+    expect(sickle.tool).toBe('stone-sickle');
+    expect(sickle.gives.fiber[0]).toBeGreaterThan(hand.gives.fiber[0]);
+    expect(sickle.seconds).toBeLessThan(hand.seconds);
   });
 });
