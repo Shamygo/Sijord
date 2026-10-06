@@ -49,6 +49,8 @@ export interface SaveData {
   equipped?: Partial<Record<ArmourSlot, string>>;
   /** Today's Alphas already beaten or caught, here or by a friend (`alpha:lair:day`). */
   alphas?: string[];
+  /** Roaming trainers beaten: trainer id -> the (UTC) day you last beat them. */
+  trainers?: Record<string, number>;
 }
 
 export function loadSave(): SaveData | null {

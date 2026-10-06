@@ -59,6 +59,8 @@ export interface PlayerSnapshot {
   wildBusy?: string[];
   /** Grid cells this player has wild herds out in, as `i,j,epoch` (so a friend rolls the same herds). */
   wildCells?: string[];
+  /** The roaming trainer walking up to or battling this player (a trainer id). */
+  trainer?: string;
 }
 
 /** A thrown ball: the partner replays the same physical flight from the same launch. */

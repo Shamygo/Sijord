@@ -27,6 +27,8 @@ export interface WildActor {
 export interface BattleStart {
   kind: 'wild' | 'trainer';
   progressionFlag?: 'beat-rival';
+  /** A roaming trainer's id, so a friend who joins knows who they beat. */
+  trainer?: string;
   playerName: string;
   party: Creature[];
   levelCap: number;
@@ -89,7 +91,14 @@ export function arenaSpots(playerPos: THREE.Vector3, facing: number): { center: 
   const axis = new THREE.Vector3(Math.sin(facing), 0, Math.cos(facing));
   const right = new THREE.Vector3(-Math.cos(facing), 0, Math.sin(facing));
   const center = playerPos.clone().addScaledVector(axis, ARENA.trainer).addScaledVector(right, -0.6);
-  return { center, foeTrainer: center.clone().addScaledVector(axis, ARENA.trainer + 0.2).addScaledVector(right, -0.6) };
+  return { center, foeTrainer: foeTrainerSpot(center, facing) };
+}
+
+/** Where the opposing trainer stands, for a ring at `center` that the player faces along `facing`. */
+export function foeTrainerSpot(center: THREE.Vector3, facing: number): THREE.Vector3 {
+  const axis = new THREE.Vector3(Math.sin(facing), 0, Math.cos(facing));
+  const right = new THREE.Vector3(-Math.cos(facing), 0, Math.sin(facing));
+  return center.clone().addScaledVector(axis, ARENA.trainer + 0.2).addScaledVector(right, -0.6);
 }
 
 
@@ -261,7 +270,7 @@ export class BattleDirector {
 
   snapshot(): BattleFrame {
     return { id: this.id, center: this.stage.center.toArray() as [number,number,number], yaw: this.start.facing,
-      progressionFlag:this.start.progressionFlag, kind:this.start.kind, mode: this.mode, lobby: this.lobby, joinable: this.lobby && !this.guest, guest: this.guest, turn: this.battle.turn,
+      progressionFlag:this.start.progressionFlag, trainer:this.start.trainer, kind:this.start.kind, mode: this.mode, lobby: this.lobby, joinable: this.lobby && !this.guest, guest: this.guest, turn: this.battle.turn,
       winner:this.battle.winner, escaped:this.battle.escaped, windup: this.windup, ended: this.readyResult, caption: this.captionText,
       slots: [...this.displayed.values()].map(s => ({...s,position:this.stage.snapshotPosition(s.pos)})),
       events: this.recentEvents, prompt: this.remotePrompt ? {...this.remotePrompt, move:this.remotePrompt.move ? {...this.remotePrompt.move,portrait:undefined,bench:this.remotePrompt.move.bench.map(b => ({...b,portrait:undefined}))} : undefined, bench:this.remotePrompt.bench?.map(b => ({...b,portrait:undefined}))} : undefined,

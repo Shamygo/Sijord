@@ -183,10 +183,10 @@ const STAT_LABEL: Record<BoostName, string> = {
   atk: 'Attack', def: 'Defense', spa: 'Sp. Atk', spd: 'Sp. Def', spe: 'Speed', accuracy: 'accuracy', evasion: 'evasiveness',
 };
 
-/** Held items that do something in battle. */
 /** Stats a wild Alpha's aura raises by one stage when it comes in. */
 const ALPHA_AURA: BoostName[] = ['atk', 'def', 'spa', 'spd', 'spe'];
 
+/** Held items that do something in battle. */
 const BERRIES: Record<string, (m: BattleMon) => number> = {
   'oran-berry': () => 10,
   'sitrus-berry': (m) => Math.floor(m.maxHp / 4),
