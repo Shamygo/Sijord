@@ -60,6 +60,10 @@ export const ITEMS: Record<string, ItemInfo> = {
     id: 'mushroom-skewer', name: 'Mushroom Skewer', category: 'food', icon: '🍢', food: { hunger: 35 },
     description: 'Wild mushrooms grilled over a campfire on a stick. A proper meal.',
   },
+  'hearty-stew': {
+    id: 'hearty-stew', name: 'Hearty Stew', category: 'food', icon: '🍲', food: { hunger: 60, thirst: 20 },
+    description: "Gudrun's stew: wild mushrooms and Oran Berries simmered in river water. It sticks to your ribs and wets your whistle.",
+  },
   'poke-ball': {
     id: 'poke-ball', name: 'Poke Ball', category: 'balls', icon: '◓', sprite:'poke-ball',
     description: 'A standard ball. Works best on Pokemon weakened in battle and close to your level.',

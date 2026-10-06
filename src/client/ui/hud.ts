@@ -6,6 +6,7 @@ import type { World } from '../world/types';
 import { keyLabel, type Action, type Settings } from '../core/settings';
 import { AimHud } from './aim-hud';
 import { DialogueBox } from './dialogue';
+import { CookOffPanel } from './cookoff';
 import { h } from './dom';
 import { Minimap } from './minimap';
 
@@ -41,6 +42,7 @@ const COMPASS_SPAN = 180;
 export class Hud {
   readonly el: HTMLDivElement;
   readonly dialogue = new DialogueBox();
+  readonly cookoff = new CookOffPanel();
   readonly aim = new AimHud();
   private compass = h('div.compass');
   private clock = h('div.clock');
@@ -126,6 +128,7 @@ export class Hud {
       this.toast,
       this.fadeEl,
       this.dialogue.el,
+      this.cookoff.el,
       this.clickToPlay,
     );
   }

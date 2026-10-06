@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { PICNICKER } from '../../shared/cookoff';
+import { DEFECTOR } from '../../shared/defector';
 import type { Collider, World } from './types';
 import { CELL, GRID_HALF, GRID_N, HALF, POI, TOWN, WATER_LEVEL, ROADS, MESAS, distToPolyline, POND, LAKE } from './layout';
 import { buildTerrainData, TerrainQuery, makeTerrainMaterial, buildTerrainMeshes, makeDepthTexture, waterDistance, makeTerrainTextures } from './terrain';
@@ -131,20 +133,24 @@ export function createWorld(): World {
   root.add(veg.group);
 
   // ---- things to gather: trees, bushes and stones from the scatter, plus berries, apricorns and copper ----
+  const thinGrass = (x: number, z: number, r: number, keep: number): void => {
+    const V = GRID_N + 1;
+    for (let j = Math.max(0, Math.floor((z - r + GRID_HALF) / CELL)); j <= Math.min(GRID_N, Math.ceil((z + r + GRID_HALF) / CELL)); j++) {
+      for (let i = Math.max(0, Math.floor((x - r + GRID_HALF) / CELL)); i <= Math.min(GRID_N, Math.ceil((x + r + GRID_HALF) / CELL)); i++) {
+        if (Math.hypot(-GRID_HALF + i * CELL - x, -GRID_HALF + j * CELL - z) < r) data.grass[j * V + i] *= keep;
+      }
+    }
+  };
   const resources = new ResourceField({
     heightAt: rawH, slopeAt: (x, z) => terrain.slopeAt(x, z), reserved, waterDist: (x, z) => waterDistance(x, z).d, grassAt: (x, z) => terrain.grassAt(x, z),
-    thinGrass: (x, z, r, keep) => {
-      const V = GRID_N + 1;
-      for (let j = Math.max(0, Math.floor((z - r + GRID_HALF) / CELL)); j <= Math.min(GRID_N, Math.ceil((z + r + GRID_HALF) / CELL)); j++) {
-        for (let i = Math.max(0, Math.floor((x - r + GRID_HALF) / CELL)); i <= Math.min(GRID_N, Math.ceil((x + r + GRID_HALF) / CELL)); i++) {
-          if (Math.hypot(-GRID_HALF + i * CELL - x, -GRID_HALF + j * CELL - z) < r) data.grass[j * V + i] *= keep;
-        }
-      }
-    },
+    thinGrass,
     colliders, half: HALF, town: { x: TOWN.x, z: TOWN.z, r: TOWN.fenceR + 4 }, mesas: MESAS,
     scatter: veg.nodes, rocks: veg.rocks, foliage: veg.foliage,
   });
   root.add(resources.root);
+  // Trampled grass round Gudrun's picnic and Sten's bale, so the blanket and the bale's foot show.
+  thinGrass(PICNICKER.x, PICNICKER.z, 4.5, 0.12);
+  thinGrass(DEFECTOR.x, DEFECTOR.z, 1.8, 0.35);
   town.anchors.stations = [...(town.anchors.stations ?? []), { kind: 'campfire', position: poi.fire.clone() }];
 
   // ---- GPU grass + flowers ----

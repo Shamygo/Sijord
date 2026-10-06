@@ -53,6 +53,8 @@ export interface SaveData {
   trainers?: Record<string, number>;
   /** Sten, the Tether Defector: meals fed and caches he's pointed you to (`src/shared/defector.ts`). */
   defector?: { fed: number; told: string[] };
+  /** Gudrun's cook-off: wins against her, and the (UTC) day of the last one (`src/shared/cookoff.ts`). */
+  picnicker?: { wins: number; day?: number };
 }
 
 export function loadSave(): SaveData | null {

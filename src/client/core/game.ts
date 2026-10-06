@@ -41,6 +41,8 @@ import { patrolAt, ROAMING_TRAINERS, TRAINER_TUNING, trainerById, trainerDay, tr
 import { RoamingTrainer } from '../npc/roaming-trainer';
 import { BALE_NAME, DEFECTOR, DEFECTOR_INTRO, defectorState, nextMeal, pendingTip, tipDirections } from '../../shared/defector';
 import { Defector } from '../npc/defector';
+import { COOK_MAX, cookoffWon, PICNICKER, PICNICKER_INTRO, picnickerState, rivalScore } from '../../shared/cookoff';
+import { Picnicker } from '../npc/picnicker';
 import type { ResourceNode } from '../world/resources';
 import { TOWN } from '../world/layout';
 import { waterDistance } from '../world/terrain';
@@ -167,6 +169,8 @@ export class Game {
   private trainers: RoamingTrainer[] = [];
   /** Sten in his hay bale, and when the bale next rustles at someone walking by. */
   private defector!: Defector;
+  /** Gudrun at her picnic under the lone tree. */
+  private picnicker!: Picnicker;
   private baleRustle = 0;
   /** The roaming trainer walking up to or battling this player, if any. */
   private trainerEngaged: RoamingTrainer | null = null;
@@ -248,6 +252,9 @@ export class Game {
     save.defector = defectorState(save.defector);
     this.defector = new Defector(this.world);
     this.scene.add(this.defector.root);
+    save.picnicker = picnickerState(save.picnicker);
+    this.picnicker = new Picnicker(this.world);
+    this.scene.add(this.picnicker.root);
     this.updateNpcState();
     this.scene.add(this.follower.root);
     // Herds come from the world's name, so both friends meet the same ones.
@@ -710,6 +717,10 @@ export class Game {
     if (beat && left) {
       const n = trainersBeaten(this.save.trainers);
       quests.push({ id: 'trainers', text: `Beat the trainers roaming Hearthmeadow (${n} of ${ROAMING_TRAINERS.length})`, done: n >= ROAMING_TRAINERS.length });
+    }
+    if (this.flags.has('met-gudrun') && !picnickerState(this.save.picnicker).wins) {
+      const p = this.picnicker.position;
+      quests.push({ id: 'cookoff', text: 'Beat Gudrun in a cook-off (bring 3 Wild Mushrooms)', target: { x: p.x, z: p.z } });
     }
     if (this.flags.has('met-sten')) {
       const st = defectorState(this.save.defector), found = this.save.found ?? [];
@@ -1338,7 +1349,7 @@ export class Game {
     const max = trainerMaxHp(now.level, mods.maxHp);
     this.vitals.setMax(max);
     this.vitals.heal(max);
-    const unlocked = RECIPES.filter((r) => !r.tp && r.level > before && r.level <= now.level).map((r) => ITEMS[r.out]?.name ?? r.id);
+    const unlocked = RECIPES.filter((r) => !r.tp && !r.prize && r.level > before && r.level <= now.level).map((r) => ITEMS[r.out]?.name ?? r.id);
     const tp = this.techPoints.left;
     const sub = [unlocked.length ? `New recipes: ${unlocked.join(', ')}` : `Max HP is now ${max}`, `${tp} Technology Point${tp === 1 ? '' : 's'} to spend (K)`].join(' · ');
     // After whatever toast the find or catch put up.
@@ -1896,6 +1907,78 @@ export class Game {
     this.endScene();
   }
 
+  /**
+   * Gudrun's cook-off (DESIGN §12.4): three Wild Mushrooms buy a go. Beat her score and she
+   * teaches you her Hearty Stew; on later days a rematch win gets you a bowl of it.
+   */
+  private async talkToPicnicker(): Promise<void> {
+    this.beginScene();
+    const gudrun = this.picnicker;
+    gudrun.lookAt(this.controller.position);
+    const say = (text: string) => ({ speaker: PICNICKER.name, text });
+    const st = (this.save.picnicker = picnickerState(this.save.picnicker));
+    const day = trainerDay(Date.now());
+    const first = !this.flags.has('met-gudrun');
+    if (first) {
+      await this.hud.dialogue.play(PICNICKER_INTRO.map(say));
+      this.setFlag('met-gudrun');
+    }
+    const opener = first ? 'So? Are you brave enough?' : !st.wins ? 'Back for another go? The pot\'s hot.' : st.day === day ? "Again? You've had your bowl today, but I'll gladly beat you for the glory." : "Back for a rematch? I've been practising.";
+    const [pick] = await this.hud.dialogue.play([{ ...say(opener), choices: ['Cook-off! (3 Wild Mushrooms)', 'Use your grill', 'Not now'] }]);
+    const bag = (this.save.bag ??= {});
+    const short = Object.entries(PICNICKER.fee).some(([id, n]) => (bag[id] ?? 0) < n);
+    if (pick === 1) {
+      gudrun.lookAt(null);
+      this.endScene();
+      this.openMenu('craft');
+      return;
+    }
+    if (pick !== 0) await this.hud.dialogue.play([say("Suit yourself. The grill's warm whenever you want it.")]);
+    else if (short) {
+      const have = bag['wild-mushroom'] ?? 0;
+      await this.hud.dialogue.play([say(have ? `Three mushrooms, not ${have}. A champion doesn't cook with scraps.` : 'No mushrooms, no cook-off. They grow on fallen logs in the woods.')]);
+    } else {
+      for (const [id, n] of Object.entries(PICNICKER.fee)) if (!(bag[id] -= n)) delete bag[id];
+      writeSave(this.save);
+      await this.hud.dialogue.play([say('Ha! Then we cook. Chop, stir, season. Stop on the gold and the judges swoon.')]);
+      gudrun.cook(16);
+      const scores = await this.hud.cookoff.play(Math.floor(Math.random() * 1e6));
+      const total = scores.reduce((a, b) => a + b, 0), rival = rivalScore(st.wins);
+      const lines = [{ speaker: '', text: `Your dish: ${total} of ${COOK_MAX}. Gudrun's: ${rival} of ${COOK_MAX}.` }];
+      let prize: 'recipe' | 'bowl' | null = null;
+      if (cookoffWon(scores, rival)) {
+        st.wins++;
+        if (st.wins === 1) {
+          const learned = (this.save.learned ??= []);
+          if (!learned.includes(PICNICKER.prize)) learned.push(PICNICKER.prize);
+          this.gainXp(TRAINER_XP.cookoff);
+          prize = 'recipe';
+          lines.push(say('...I lost? Fourteen summers! To you?'), say("Fine. A deal's a deal. My Hearty Stew: two mushrooms, two Oran Berries and a splash of river water, simmered over any campfire. It'll keep you going for days."));
+        } else if (st.day !== day) {
+          bag[PICNICKER.prize] = (bag[PICNICKER.prize] ?? 0) + 1;
+          prize = 'bowl';
+          lines.push(say("Again?! Take a bowl, then. And don't tell anyone in Bramblewick."));
+        } else lines.push(say("You win again. You've had your bowl today, so glory's all you get."));
+        st.day = day;
+      } else lines.push(say(total === rival ? 'A tie! And a tie goes to the champion. So close, though.' : total >= rival - 2 ? 'Not bad! Not good enough, but not bad. Bring more mushrooms.' : 'Fourteen summers and counting! Come back when you can hold a knife.'));
+      await this.hud.dialogue.play(lines);
+      writeSave(this.save);
+      this.refreshQuests();
+      if (prize === 'recipe') this.hud.showToast('You learned Hearty Stew', 'Cook it at any campfire (K)', 3.5);
+      else if (prize === 'bowl') this.hud.showToast('You got a Hearty Stew', `Cook-offs won: ${st.wins}`, 3);
+      if (this.menu?.isOpen) this.menu.refresh();
+    }
+    gudrun.lookAt(null);
+    this.endScene();
+  }
+
+  /** Gudrun watches anyone who comes up the hill. */
+  private updatePicnicker(dt: number): void {
+    const p = this.controller.position;
+    if (!this.talking) this.picnicker.lookAt(p.distanceTo(this.picnicker.position) < 9 ? p : null);
+    this.picnicker.update(dt, p);
+  }
+
   /** The bale rustles when someone walks close and Sten hasn't come out to talk. */
   private updateDefector(dt: number): void {
     const p = this.controller.position;
@@ -2155,7 +2238,7 @@ export class Game {
       money: this.save.money ?? 0,
       meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },
       throwing: { aiming: this.aiming, ball: this.aimBall, balls: Object.fromEntries(this.throwKinds().map((b) => [b, this.save.bag?.[b] ?? 0])), treats: this.wild.treats.length, intercept: this.intercept ? displayName(this.intercept.m.creature) : null, inFlight: this.throws.busy, dropped: this.throws.droppedCount, lastCatch: this.lastCatch },
-      trainers: this.trainers.filter((t) => t.visible).map((t) => ({ id: t.def.id, position: [t.position.x, t.position.z].map((v) => Math.round(v * 10) / 10), patrolling: t.patrolling, standing: trainerStanding(this.save.trainers, t.def.id, trainerDay(Date.now())) })), trainerEngaged: this.trainerEngaged?.def.id ?? null, defector: { met: this.flags.has('met-sten'), ...defectorState(this.save.defector) }, destination: this.destination,
+      trainers: this.trainers.filter((t) => t.visible).map((t) => ({ id: t.def.id, position: [t.position.x, t.position.z].map((v) => Math.round(v * 10) / 10), patrolling: t.patrolling, standing: trainerStanding(this.save.trainers, t.def.id, trainerDay(Date.now())) })), trainerEngaged: this.trainerEngaged?.def.id ?? null, defector: { met: this.flags.has('met-sten'), ...defectorState(this.save.defector) }, picnicker: { met: this.flags.has('met-gudrun'), ...picnickerState(this.save.picnicker) }, cookoff: this.hud.cookoff.active ? this.hud.cookoff.debugState() : null, destination: this.destination,
       wildCreatures: this.wild.creatures.map((m) => ({ species: m.creature.species, level: m.creature.level, alpha: m.alpha ? true : undefined, state: m.state, alert: Math.round(m.alert), attack: m.attack?.phase, position: [m.mover.pos.x, m.mover.pos.z].map((v) => Math.round(v * 10) / 10) })) });
   }
 
@@ -2185,8 +2268,12 @@ export class Game {
     this.hud.setPointerLocked(input.locked || this.talking || this.menu.isOpen || inBattle || this.scripted);
     const move = input.move();
     if (this.talking) {
-      if (input.consumeAction('interact') || input.consume('Space') || input.consume('Enter')) this.hud.dialogue.next();
+      if (input.consumeAction('interact') || input.consume('Space') || input.consume('Enter')) {
+        if (this.hud.cookoff.active) this.hud.cookoff.press();
+        else this.hud.dialogue.next();
+      }
     }
+    this.hud.cookoff.update(dt);
     this.updateAim(dt, busy);
     if (!busy && input.consumeAction('heal')) this.healSelf();
     const knocked = this.vitals.knockedDown;
@@ -2258,13 +2345,14 @@ export class Game {
       const nearRival = this.rival.visible && pos.distanceTo(this.rival.position) < TALK_RADIUS;
       const nearTrainer = !nearProf && !nearRival ? this.trainers.find((t) => t.visible && t.patrolling && pos.distanceTo(t.position) < TALK_RADIUS) ?? null : null;
       const nearBale = !nearProf && !nearRival && !nearTrainer && Math.hypot(pos.x - DEFECTOR.x, pos.z - DEFECTOR.z) < TALK_RADIUS + 0.9;
-      const pickup = !nearProf && !nearRival && !nearTrainer && !nearBale && !this.aiming ? this.throws.nearestPickup(pos) : null;
-      const find = !nearProf && !nearRival && !nearTrainer && !nearBale && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
-      const home = !nearProf && !nearRival && !nearTrainer && !nearBale && !pickup && !find ? this.nearHome(pos) : null;
-      const shop = !nearProf && !nearRival && !nearTrainer && !nearBale && !pickup && !find && !home ? this.shopNear(pos) : null;
-      const station = !nearProf && !nearRival && !nearTrainer && !nearBale && !pickup && !find && !home && !shop ? this.stationsNear(pos)[0] ?? null : null;
-      const wildMon = !nearProf && !nearRival && !nearTrainer && !nearBale ? this.wild.nearestEngageable(pos) : null;
-      const free = !nearProf && !nearRival && !nearTrainer && !nearBale && !pickup && !find && !home && !shop && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
+      const nearGudrun = !nearProf && !nearRival && !nearTrainer && !nearBale && pos.distanceTo(this.picnicker.position) < TALK_RADIUS + 0.6;
+      const pickup = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !this.aiming ? this.throws.nearestPickup(pos) : null;
+      const find = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
+      const home = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !pickup && !find ? this.nearHome(pos) : null;
+      const shop = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !pickup && !find && !home ? this.shopNear(pos) : null;
+      const station = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !pickup && !find && !home && !shop ? this.stationsNear(pos)[0] ?? null : null;
+      const wildMon = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun ? this.wild.nearestEngageable(pos) : null;
+      const free = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !pickup && !find && !home && !shop && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
       let gather = free ? this.nearestGather(pos) : null;
       const waterAt = free ? this.nearWater(pos) : null;
       let water = waterAt && this.waterPrompt(waterAt) ? waterAt : null;
@@ -2284,6 +2372,7 @@ export class Game {
       else if (nearProf) this.hud.setPrompt(`Talk to ${this.professor.name}`);
       else if (nearRival) this.hud.setPrompt(`Talk to ${this.rival.name}`);
       else if (nearTrainer) this.hud.setPrompt(`Talk to ${nearTrainer.name}`);
+      else if (nearGudrun) this.hud.setPrompt(`Talk to ${PICNICKER.name}`);
       else if (nearBale) this.hud.setPrompt(this.flags.has('met-sten') ? `Talk to ${DEFECTOR.name}` : `Look at the ${BALE_NAME.toLowerCase()}`);
       else if (pickup) this.hud.setPrompt(`Pick up the ${ITEMS[pickup.ball]?.name ?? 'ball'}`);
       else if (find) this.hud.setPrompt(DISCOVERY_LABEL[find.def.kind].prompt);
@@ -2308,6 +2397,7 @@ export class Game {
         else if (nearRival) void this.talkToRival();
         else if (nearTrainer) void this.talkToTrainer(nearTrainer);
         else if (nearBale) void this.talkToDefector();
+        else if (nearGudrun) void this.talkToPicnicker();
         else if (pickup) this.pickupBall(pickup.id);
         else if (find) void this.openDiscovery(find);
         else if (home) void this.restAtHome();
@@ -2362,6 +2452,7 @@ export class Game {
     this.rival.update(dt);
     this.updateTrainers(dt);
     this.updateDefector(dt);
+    this.updatePicnicker(dt);
     const friends = [...this.partnerWild.values()];
     this.wild.setRemoteBusy(new Set(friends.flatMap((f) => f.busy)));
     this.wild.setFriendCells(friends.flatMap((f) => f.cells));

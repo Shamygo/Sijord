@@ -74,10 +74,11 @@ describe('hunger and thirst', () => {
 describe('food, water and canteens', () => {
   it('every food item fills something, and only raw food is risky', () => {
     const foods = Object.values(ITEMS).filter((i) => i.food);
-    expect(foods.map((i) => i.id).sort()).toEqual(['bramble-berry', 'mushroom-skewer', 'river-water', 'water-flask', 'wild-mushroom']);
+    expect(foods.map((i) => i.id).sort()).toEqual(['bramble-berry', 'hearty-stew', 'mushroom-skewer', 'river-water', 'water-flask', 'wild-mushroom']);
     for (const f of foods) expect((f.food!.hunger ?? 0) + (f.food!.thirst ?? 0)).toBeGreaterThan(0);
     expect(ITEMS['mushroom-skewer'].food!.queasy).toBeUndefined();
     expect(ITEMS['water-flask'].food!.queasy).toBeUndefined();
+    expect(ITEMS['hearty-stew'].food!.queasy).toBeUndefined();
     expect(ITEMS['wild-mushroom'].food!.queasy).toBeGreaterThan(0);
   });
 

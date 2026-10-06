@@ -143,6 +143,42 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .dialogue .choices button { padding: 8px 16px; border-radius: 999px; border: 2px solid #2f8f83; background: #fff; color: #24303b; font-weight: 800; }
 .dialogue .choices button:hover { background: #2f8f83; color: #fff; }
 
+/* Gudrun's cook-off: a marker sweeps across the bar; stop it on the gold. */
+.cookoff {
+  position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%); width: min(640px, calc(100% - 32px));
+  background: rgba(250, 247, 238, .97); color: #24303b; border-radius: 18px; padding: 16px 22px 14px; box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  border: 3px solid #e3c98b; pointer-events: auto; display: none; text-shadow: none; user-select: none; cursor: pointer;
+}
+.cookoff.show { display: block; }
+.cook-head { display: flex; align-items: center; gap: 12px; }
+.cook-head > div:not(.cook-total) { display: flex; flex-direction: column; flex: 1; }
+.cook-head b { font-size: 18px; font-weight: 900; }
+.cook-head small { font-size: 12px; font-weight: 700; color: #8a7a55; }
+.cook-icon { font-size: 30px; width: 46px; height: 46px; display: grid; place-items: center; background: #fff1d6; border-radius: 50%; border: 2px solid #e3c98b; }
+.cook-total { font-size: 20px; font-weight: 900; color: #2f8f83; font-variant-numeric: tabular-nums; }
+.cook-step { margin: 12px 0 8px; font-size: 16px; font-weight: 800; }
+.cook-bar { position: relative; height: 26px; border-radius: 13px; background: linear-gradient(#5b4636, #3e2f25); box-shadow: inset 0 2px 5px rgba(0,0,0,.45); overflow: hidden; }
+.cook-zone { position: absolute; top: 0; bottom: 0; }
+.cook-zone.ok { background: rgba(214, 160, 82, .55); }
+.cook-zone.good { background: rgba(122, 186, 92, .9); }
+.cook-zone.perfect { background: linear-gradient(#ffe48a, #f2b632); box-shadow: 0 0 10px rgba(255, 214, 102, .9); }
+.cook-marker { position: absolute; top: -3px; bottom: -3px; width: 6px; margin-left: -3px; border-radius: 3px; background: #fff; box-shadow: 0 0 0 2px #24303b, 0 0 8px rgba(255,255,255,.8); }
+.cook-foot { display: flex; align-items: center; gap: 14px; margin-top: 10px; min-height: 26px; }
+.cook-dots { display: flex; gap: 6px; }
+.cook-dot { width: 14px; height: 14px; border-radius: 50%; background: #e7dcc3; border: 2px solid #cdbb91; }
+.cook-dot.now { border-color: #2f8f83; }
+.cook-dot.g0 { background: #6b5a4a; border-color: #4a3d31; }
+.cook-dot.g1 { background: #d6a052; border-color: #a77a36; }
+.cook-dot.g2 { background: #7aba5c; border-color: #4f8a38; }
+.cook-dot.g3 { background: #f2b632; border-color: #c48a12; box-shadow: 0 0 6px rgba(242, 182, 50, .9); }
+.cook-grade { flex: 1; font-size: 18px; font-weight: 900; color: #8a7a55; }
+.cook-grade.g0 { color: #6b5a4a; }
+.cook-grade.g1 { color: #b0782a; }
+.cook-grade.g2 { color: #4f8a38; }
+.cook-grade.g3 { color: #d39410; animation: cook-pop .35s ease-out; }
+@keyframes cook-pop { from { transform: scale(1.5); } to { transform: scale(1); } }
+.cook-key { font-size: 12px; font-weight: 800; color: #8a7a55; }
+
 /* Game menu (map, bag, party, quests, settings) */
 .menu {
   position: absolute; inset: 0; display: none; align-items: center; justify-content: center; z-index: 20;
