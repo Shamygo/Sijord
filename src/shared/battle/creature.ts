@@ -1,5 +1,5 @@
 import { MOVES } from '../data/moves';
-import { species } from '../data/species';
+import { SPECIES, species } from '../data/species';
 import { NATURE_IDS } from './natures';
 import { Rng } from './rng';
 import { MAX_EV_STAT, MAX_EV_TOTAL, calcStats, xpForLevel } from './stats';
@@ -173,6 +173,48 @@ export function evolve(c: Creature, into: string): GrowthResult {
   if (!sp.abilities.includes(c.ability) && sp.hiddenAbility !== c.ability) c.ability = sp.abilities[0];
   for (const m of movesLearnedAt(into, c.level)) learnOrQueue(c, m, res);
   return res;
+}
+
+/**
+ * Bring a saved creature in line with the current species data. The original 21 species became
+ * their canonical Pokémon, which changed some abilities, growth rates and stats: an ability the
+ * species no longer has becomes its first regular ability, experience is moved into the right
+ * range for its level on the new growth curve (the level never changes), and HP and PP are
+ * capped at their new maximums. Known moves are kept even if the species no longer learns them.
+ * Anything that doesn't look like a whole creature of a known species is left untouched.
+ * Returns whether anything changed.
+ */
+export function normalizeCreature(c: Creature): boolean {
+  if (!c || typeof c !== 'object' || typeof c.species !== 'string' || !SPECIES[c.species]) return false;
+  if (typeof c.level !== 'number' || !c.ivs || !c.evs || !Array.isArray(c.moves)) return false;
+  const sp = SPECIES[c.species];
+  let changed = false;
+  if (!sp.abilities.includes(c.ability) && sp.hiddenAbility !== c.ability) {
+    c.ability = sp.abilities[0];
+    changed = true;
+  }
+  const level = Math.max(1, Math.min(100, Math.round(c.level)));
+  const lo = xpForLevel(sp.growth, level);
+  const hi = level >= 100 ? lo : xpForLevel(sp.growth, level + 1) - 1;
+  if (typeof c.xp !== 'number' || !(c.xp >= lo && c.xp <= hi)) {
+    c.xp = typeof c.xp === 'number' && c.xp > hi ? hi : lo;
+    changed = true;
+  }
+  if (typeof c.hp === 'number') {
+    const max = maxHp(c);
+    if (c.hp > max) {
+      c.hp = max;
+      changed = true;
+    }
+  }
+  for (const m of c.moves) {
+    const data = m && MOVES[m.id];
+    if (data && m.pp > data.pp) {
+      m.pp = data.pp;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 /** Add effort values, respecting the 252 per stat and 510 total limits. */

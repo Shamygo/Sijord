@@ -22,7 +22,8 @@ export interface DamageInput {
   crit?: boolean;
   /** Random roll, 85-100. */
   random: number;
-  stab?: boolean;
+  /** Same-type attack bonus: true for the usual 1.5x, or a multiplier (Adaptability: 2). */
+  stab?: boolean | number;
   /** Combined type effectiveness: 0, 0.25, 0.5, 1, 2 or 4. */
   effectiveness: number;
   /** Physical move from a burned attacker without Guts. */
@@ -41,7 +42,7 @@ export function calcDamage(d: DamageInput): number {
   if (d.spread) dmg = modify(dmg, 0.75);
   if (d.crit) dmg = modify(dmg, 1.5);
   dmg = Math.trunc((dmg * d.random) / 100);
-  if (d.stab) dmg = modify(dmg, 1.5);
+  if (d.stab) dmg = modify(dmg, d.stab === true ? 1.5 : d.stab);
   // Effectiveness is applied one doubling or halving at a time.
   let e = d.effectiveness;
   while (e >= 2) {
