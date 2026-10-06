@@ -4,7 +4,7 @@
  * is still full for the other. Regrowth runs on real time, so it carries on while the game is
  * closed.
  */
-export type NodeKind = 'tree' | 'stones' | 'bush' | 'boulder' | 'berry' | 'apricorn' | 'copper';
+export type NodeKind = 'tree' | 'stones' | 'bush' | 'boulder' | 'berry' | 'apricorn' | 'copper' | 'mushroom';
 export type ToolId = 'stone-hatchet' | 'stone-pick';
 /** Which of Rei's clips plays while gathering: kneel at the ground, reach and pick, or swing a tool. */
 export type GatherAnim = 'gather' | 'pick' | 'chop';
@@ -61,6 +61,10 @@ export const NODE_RULES: Record<NodeKind, NodeRule> = {
   apricorn: {
     hand: { prompt: 'Pick a Red Apricorn', doing: 'Picking an apricorn', gives: { 'red-apricorn': [1, 1] }, seconds: 1.1, anim: 'pick' },
     regrow: 1500,
+  },
+  mushroom: {
+    hand: { prompt: 'Pick mushrooms', doing: 'Picking mushrooms', gives: { 'wild-mushroom': [1, 2] }, seconds: 1.7, anim: 'gather' },
+    regrow: 900,
   },
   copper: {
     withTool: { prompt: 'Mine copper ore', doing: 'Mining copper', gives: { 'copper-ore': [1, 1], stone: [0, 1] }, seconds: SWING_SECONDS * 3, anim: 'chop', tool: 'stone-pick' },

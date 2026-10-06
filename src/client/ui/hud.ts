@@ -1,6 +1,7 @@
 import type { MajorStatus } from '../../shared/battle/types';
 import { PLAYER_CLASSES } from '../../shared/classes';
 import type { PlayerProfile } from '../../shared/types';
+import { SURVIVAL } from '../../shared/survival';
 import type { World } from '../world/types';
 import { keyLabel, type Action, type Settings } from '../core/settings';
 import { AimHud } from './aim-hud';
@@ -51,7 +52,15 @@ export class Hud {
   private fpsFrames = 0;
   private fpsTime = 0;
   private stamina = h('i');
-  private staminaBar = h('div.bar.stamina', {}, this.stamina);
+  /** The part of the stamina bar thirst has taken away. */
+  private staminaLock = h('b');
+  private staminaBar = h('div.bar.stamina', {}, this.stamina, this.staminaLock);
+  private hungerFill = h('i');
+  private thirstFill = h('i');
+  private hungerMeter = h('div.meter', { title: 'Hunger' }, h('span', {}, '🍖'), h('div.bar.hunger', {}, this.hungerFill));
+  private thirstMeter = h('div.meter', { title: 'Thirst' }, h('span', {}, '💧'), h('div.bar.thirst', {}, this.thirstFill));
+  private queasyChip = h('span.queasy', { title: 'Queasy: stamina comes back slowly' }, 'Queasy');
+  private lastMeters = '';
   private hpFill = h('i');
   private hpBar = h('div.bar', {}, this.hpFill);
   private hpText = h('small');
@@ -103,6 +112,7 @@ export class Hud {
           // The trainer's own HP only shows once something has hurt them.
           h('div.trainer-hp', { title: 'Your HP' }, this.hpBar, this.hpText),
           this.staminaBar,
+          h('div.meters', {}, this.hungerMeter, this.thirstMeter, this.queasyChip),
         ),
       )),
       this.hotbar,
@@ -206,6 +216,24 @@ export class Hud {
     this.hpFill.style.width = `${Math.round(r * 100)}%`;
     this.hpBar.classList.toggle('low', r <= 0.25);
     this.hpText.textContent = `${shown}/${max} HP`;
+  }
+
+  /** Hunger and thirst (0..100), queasiness, and how full stamina can get. */
+  setMeters(hunger: number, thirst: number, queasy: boolean, staminaCap: number): void {
+    const key = `${Math.ceil(hunger)}/${Math.ceil(thirst)}/${queasy}/${staminaCap}`;
+    if (key === this.lastMeters) return;
+    this.lastMeters = key;
+    const set = (meter: HTMLElement, fill: HTMLElement, v: number) => {
+      fill.style.width = `${Math.max(0, Math.min(100, v))}%`;
+      meter.classList.toggle('low', v < SURVIVAL.low && v > 0);
+      meter.classList.toggle('empty', v <= 0);
+    };
+    set(this.hungerMeter, this.hungerFill, hunger);
+    set(this.thirstMeter, this.thirstFill, thirst);
+    this.hungerMeter.title = `Hunger ${Math.ceil(hunger)}/100`;
+    this.thirstMeter.title = `Thirst ${Math.ceil(thirst)}/100`;
+    this.queasyChip.classList.toggle('show', queasy);
+    this.staminaLock.style.width = `${Math.round((1 - staminaCap) * 100)}%`;
   }
 
   /** A hit landed on the trainer: red edge flash and a shake of the vitals panel. */

@@ -38,6 +38,8 @@ import { gatherWay, NODE_RULES, pruneDepleted, rollYield, wearTool, type GatherW
 import { earnedXp, trainerLevel, TRAINER_XP } from '../../shared/trainer-level';
 import type { ResourceNode } from '../world/resources';
 import { TOWN } from '../world/layout';
+import { waterDistance } from '../world/terrain';
+import { canteenRoom, consume, meterState, OPEN_WATER, stepMeters, SURVIVAL, survivalEffects, type Meters } from '../../shared/survival';
 import type { World } from '../world/types';
 import { Input } from './input';
 import { RenderPipeline } from './render';
@@ -49,6 +51,16 @@ const TALK_RADIUS = 2.6;
 const INTERCEPT_RANGE = 14;
 /** Standing this close to a house door offers a rest. */
 const HOME_RADIUS = 3;
+
+/** Open water within reach: where to kneel, and what it is. */
+interface WaterSpot {
+  x: number;
+  z: number;
+  name: 'river' | 'lake' | 'pond';
+}
+
+/** Drinking at open water stops once you're this close to full. */
+const DRINK_BELOW = 90;
 
 /** A battle in progress, or one whose ring is still fading out. */
 interface ActiveBattle {
@@ -146,8 +158,11 @@ export class Game {
   private netThrow: { fx: BallThrowFx; until: number } | null = null;
   private netCatch: { fx: BallCatchFx; until: number } | null = null;
   private lastCatch: { species: string; chance: number; unaware: boolean; caught?: boolean; reaction?: CatchReaction } | null = null;
-  /** Gathering in progress (DESIGN §6.3): the node, how, and seconds so far. */
-  private gathering: { node: ResourceNode; way: GatherWay; t: number } | null = null;
+  /** Gathering in progress (DESIGN §6.3): the node (or the water you're kneeling at), how, and seconds so far. */
+  private gathering: { node: ResourceNode | null; water?: WaterSpot; way: GatherWay; t: number } | null = null;
+  /** Hunger, thirst and queasiness (DESIGN §6.1); the same object as `save.meters`. */
+  private meters: Meters;
+  private metersSaveT = 0;
   private regrowCheck = 0;
   /** Dev only: force overworld catch outcomes in scripted tests. */
   debugCatch: { caught?: boolean; reaction?: CatchReaction } | null = null;
@@ -167,6 +182,7 @@ export class Game {
     this.controller = new PlayerController({ staminaDrain: PLAYER_TUNING.staminaDrain / mods.stamina });
     const hpMax = trainerMaxHp(trainerLevel(save.trainerXp).level, mods.maxHp);
     this.vitals = new TrainerVitals(hpMax, save.trainerHp && save.trainerHp > 0 ? save.trainerHp : hpMax);
+    this.meters = save.meters ??= { hunger: SURVIVAL.max, thirst: SURVIVAL.max, queasy: 0 };
 
     this.world = createWorld();
     applyAtmosphere(this.scene);
@@ -254,6 +270,8 @@ export class Game {
       craftSeconds: (id) => (recipeById(id)?.seconds ?? 1) * classInfo(this.save.profile.playerClass).modifiers.craftTime,
       craft: (id) => this.craft(id),
       toolUses: (id) => this.save.toolWear?.[id],
+      eat: (id) => this.eat(id),
+      meters: () => this.meters,
       settings: this.settings,
       onSettings: (s) => this.applySettings(s),
       onSave: () => writeSave(this.save),
@@ -652,6 +670,8 @@ export class Game {
     for (const c of this.party) healCreature(c);
     this.vitals.restore();
     this.save.trainerHp = this.vitals.hp;
+    // A meal and a drink at home.
+    Object.assign(this.meters, { hunger: SURVIVAL.max, thirst: SURVIVAL.max, queasy: 0 });
     this.onPartyChanged();
     await sleep(700);
     await this.hud.fade(false);
@@ -1206,8 +1226,10 @@ export class Game {
     this.gathering = { node, way, t: 0 };
   }
 
-  private finishGather(g: { node: ResourceNode; way: GatherWay }): void {
+  private finishGather(g: { node: ResourceNode | null; water?: WaterSpot; way: GatherWay }): void {
     this.gathering = null;
+    if (g.water) return this.finishWater(g.water);
+    if (!g.node) return;
     const bag = (this.save.bag ??= {});
     const got = rollYield(g.way, Math.random);
     for (const [id, n] of Object.entries(got)) bag[id] = (bag[id] ?? 0) + n;
@@ -1218,6 +1240,130 @@ export class Game {
       note = `Your ${ITEMS[g.way.tool]?.name ?? 'tool'} broke${bag[g.way.tool] ? ' · you have a spare' : ''}`;
     }
     this.hud.showToast(Object.entries(got).map(([id, n]) => `+${n} ${ITEMS[id]?.name ?? id}`).join('   ') || 'Nothing useful here', note, 1.8);
+    writeSave(this.save);
+    if (this.menu?.isOpen) this.menu.refresh();
+  }
+
+  // ---- Hunger and thirst (DESIGN §6.1) -----------------------------------------------------------
+
+  /**
+   * Run the meters down, bend stamina to match, and take HP while one is empty. Returns whether
+   * HP can come back right now.
+   */
+  private updateSurvival(dt: number, inBattle: boolean): boolean {
+    const m = this.meters;
+    // Dialogue and cutscenes don't cost anything.
+    if (!this.talking && !(this.scripted && !inBattle)) {
+      const p = this.controller.position;
+      const inTown = Math.hypot(p.x - TOWN.x, p.z - TOWN.z) < TOWN.fenceR;
+      const drain = classInfo(this.save.profile.playerClass).modifiers.survivalDrain;
+      const { hpLoss, changed } = stepMeters(m, dt, { drain, inTown });
+      for (const k of changed) this.warnMeter(k);
+      // Battles hold it off: you won't pass out mid-fight from an empty stomach.
+      if (hpLoss && !inBattle && !this.vitals.knockedDown && !this.knockedOut && this.vitals.drain(hpLoss)) {
+        this.knockedOut = true;
+        this.hud.hurt();
+        this.hud.showToast('You collapsed!', m.thirst <= 0 ? 'You went too long without water' : 'You went too long without food', 2.5);
+      }
+      if ((this.metersSaveT -= dt) <= 0) {
+        this.metersSaveT = 20;
+        writeSave(this.save);
+      }
+    }
+    const fx = survivalEffects(m);
+    this.controller.staminaRegenScale = fx.staminaRegen;
+    this.controller.staminaCap = fx.staminaCap;
+    this.hud.setMeters(m.hunger, m.thirst, m.queasy > 0, fx.staminaCap);
+    return fx.heals;
+  }
+
+  /** A meter just dropped to low or empty (rising ones say nothing). */
+  private warnMeter(k: 'hunger' | 'thirst'): void {
+    const state = meterState(this.meters[k]);
+    if (state === 'ok') return;
+    const lines = {
+      hunger: { low: ['You\'re getting hungry', 'Eat something: berries, mushrooms, or a meal from a campfire'], empty: ['You\'re starving!', 'You\'re losing HP and won\'t heal until you eat'] },
+      thirst: { low: ['You\'re thirsty', 'Drink at a river or pond, or from your bag'], empty: ['You\'re parched!', 'You\'re losing HP and won\'t heal until you drink'] },
+    }[k][state];
+    this.hud.showToast(lines[0], lines[1], 3);
+  }
+
+  /** Eat or drink something from the bag. */
+  private eat(id: string): boolean {
+    const food = ITEMS[id]?.food, bag = (this.save.bag ??= {}), m = this.meters;
+    if (!food || !bag[id]) return false;
+    const name = ITEMS[id].name;
+    const fills = (food.hunger ?? 0) > 0 && m.hunger < SURVIVAL.max - 1 || (food.thirst ?? 0) > 0 && m.thirst < SURVIVAL.max - 1;
+    if (!fills) {
+      this.hud.showToast(food.hunger ? 'You\'re full' : 'You\'re not thirsty', `Save the ${name} for later`, 1.8);
+      return false;
+    }
+    if (!--bag[id]) delete bag[id];
+    const { queasy } = consume(m, food, Math.random);
+    const what = food.hunger ? `ate ${/^[AEIOU]/.test(name) ? 'an' : 'a'} ${name}` : `drank some ${name}`;
+    this.hud.showToast(`You ${what}`, queasy ? 'It didn\'t sit well. You feel queasy' : this.meterNote(), 2);
+    writeSave(this.save);
+    if (this.menu?.isOpen) this.menu.refresh();
+    return true;
+  }
+
+  private meterNote(): string {
+    return `Hunger ${Math.round(this.meters.hunger)} · Thirst ${Math.round(this.meters.thirst)}`;
+  }
+
+  /** Open water the trainer could kneel at from here, nearest first. */
+  private nearWater(pos: THREE.Vector3): WaterSpot | null {
+    const level = this.world.waterLevel;
+    if (pos.y - level > 1.4) return null;
+    for (const r of [0, 0.7, 1.4]) {
+      let best: { x: number; z: number; depth: number } | null = null;
+      for (let k = 0, n = r ? 10 : 1; k < n; k++) {
+        const a = (k / n) * Math.PI * 2, x = pos.x + Math.sin(a) * r, z = pos.z + Math.cos(a) * r;
+        const depth = level - this.world.heightAt(x, z);
+        if (depth > 0.12 && (!best || depth > best.depth)) best = { x, z, depth };
+      }
+      if (best) {
+        const floor = waterDistance(best.x, best.z).floor;
+        return { x: best.x, z: best.z, name: floor === -1.7 ? 'pond' : floor === -3.4 ? 'lake' : 'river' };
+      }
+    }
+    return null;
+  }
+
+  /** What kneeling at the water would do right now, or null if there's no point. */
+  private waterPrompt(spot: WaterSpot): string | null {
+    const drink = this.meters.thirst < DRINK_BELOW, fill = canteenRoom(this.save.bag ?? {}) > 0;
+    if (drink && fill) return `Drink from the ${spot.name} and fill your canteen`;
+    if (drink) return `Drink from the ${spot.name}`;
+    if (fill) return 'Fill your canteen';
+    return null;
+  }
+
+  private startWater(spot: WaterSpot): void {
+    this.cancelAim();
+    const p = this.controller.position;
+    this.controller.yaw = Math.atan2(spot.x - p.x, spot.z - p.z);
+    const drink = this.meters.thirst < DRINK_BELOW;
+    this.gathering = { node: null, water: spot, t: 0, way: { prompt: '', doing: drink ? 'Drinking' : 'Filling your canteen', gives: {}, seconds: 1.7, anim: 'gather' } };
+  }
+
+  /** Cupped hands from the river: quick, but it can leave you queasy. Canteens fill for later. */
+  private finishWater(spot: WaterSpot): void {
+    const bag = (this.save.bag ??= {}), m = this.meters;
+    let title = '', sub = '', queasy = false;
+    if (m.thirst < DRINK_BELOW) {
+      queasy = consume(m, OPEN_WATER, Math.random).queasy;
+      title = `You drank from the ${spot.name}`;
+      sub = queasy ? 'It didn\'t sit well. You feel queasy' : this.meterNote();
+    }
+    const room = canteenRoom(bag);
+    if (room > 0) {
+      bag['river-water'] = (bag['river-water'] ?? 0) + room;
+      title = title ? `${title} and filled your canteen` : 'You filled your canteen';
+      if (!queasy) sub = `${ITEMS['river-water']?.name ?? 'River Water'} ×${bag['river-water']} · boil it at a campfire to be safe`;
+    }
+    if (!title) return;
+    this.hud.showToast(title, sub, 2.2);
     writeSave(this.save);
     if (this.menu?.isOpen) this.menu.refresh();
   }
@@ -1499,6 +1645,10 @@ export class Game {
     this.vitals.restore();
     this.knockedOut = false;
     this.save.trainerHp = this.vitals.hp;
+    // Hazel makes sure you've eaten and had something to drink, but only just.
+    this.meters.hunger = Math.max(this.meters.hunger, 50);
+    this.meters.thirst = Math.max(this.meters.thirst, 50);
+    this.meters.queasy = 0;
     for (const c of this.party) healCreature(c);
     this.onPartyChanged();
     await sleep(400);
@@ -1522,6 +1672,7 @@ export class Game {
   debugText(): string {
     return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, found:this.save.found?.length ?? 0, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
       trainerHp: { hp: Math.round(this.vitals.hp * 10) / 10, max: this.vitals.max, down: this.vitals.knockedDown },
+      meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },
       throwing: { aiming: this.aiming, ball: this.aimBall, balls: Object.fromEntries(this.throwKinds().map((b) => [b, this.save.bag?.[b] ?? 0])), treats: this.wild.treats.length, intercept: this.intercept ? displayName(this.intercept.m.creature) : null, inFlight: this.throws.busy, dropped: this.throws.droppedCount, lastCatch: this.lastCatch },
       wildCreatures: this.wild.creatures.map((m) => ({ species: m.creature.species, level: m.creature.level, state: m.state, alert: Math.round(m.alert), attack: m.attack?.phase, position: [m.mover.pos.x, m.mover.pos.z].map((v) => Math.round(v * 10) / 10) })) });
   }
@@ -1591,7 +1742,8 @@ export class Game {
     if (gathering && gathering.t >= gathering.way.seconds) this.finishGather(gathering);
     this.hud.setGather(this.gathering ? this.gathering.t / this.gathering.way.seconds : null);
     this.updateRegrowth(dt);
-    this.vitals.update(dt, inBattle || this.wild.attacking);
+    const heals = this.updateSurvival(dt, inBattle);
+    this.vitals.update(dt, inBattle || this.wild.attacking, heals);
     this.save.trainerHp = this.vitals.hp;
     this.hud.setTrainerHp(this.vitals.hp, this.vitals.max);
     if (this.knockedOut && !busy && (!knocked || downT > 0.9)) {
@@ -1627,7 +1779,15 @@ export class Game {
       const home = !nearProf && !nearRival && !pickup && !find ? this.nearHome(pos) : null;
       const station = !nearProf && !nearRival && !pickup && !find && !home ? this.stationsNear(pos)[0] ?? null : null;
       const wildMon = !nearProf && !nearRival ? this.wild.nearestEngageable(pos) : null;
-      const gather = !nearProf && !nearRival && !pickup && !find && !home && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing ? this.nearestGather(pos) : null;
+      const free = !nearProf && !nearRival && !pickup && !find && !home && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
+      let gather = free ? this.nearestGather(pos) : null;
+      const waterAt = free ? this.nearWater(pos) : null;
+      let water = waterAt && this.waterPrompt(waterAt) ? waterAt : null;
+      // Whichever is closer: a bush on the bank or the water beside it.
+      if (water && gather) {
+        const dn = Math.hypot(gather.node.x - pos.x, gather.node.z - pos.z) - gather.node.r;
+        if (dn < Math.hypot(water.x - pos.x, water.z - pos.z)) water = null; else gather = null;
+      }
       const canFight = this.party.some(isUsable);
       const invite = [...this.partnerBattles].find(([,f]) => f.joinable && Math.hypot(pos.x-f.center[0],pos.z-f.center[2]) < 14);
       const chargingAt = !knocked ? this.interceptTarget() : null;
@@ -1644,6 +1804,7 @@ export class Game {
       else if (station) this.hud.setPrompt(station === 'workbench' ? 'Use the workbench' : 'Cook at the campfire');
       else if (wildMon) this.hud.setPrompt(canFight ? `Battle the wild ${displayName(wildMon.creature)} · Lv. ${wildMon.creature.level}` : `Wild ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
       else if (this.gathering) this.hud.setPrompt(`${this.gathering.way.doing}…`, '');
+      else if (water) this.hud.setPrompt(this.waterPrompt(water));
       else if (gather) gather.way ? this.hud.setPrompt(gather.way.prompt) : this.hud.setPrompt(NODE_RULES[gather.node.kind].needs ?? null, '');
       else if(this.controller.onLadder)this.hud.setPrompt(`${keyLabel(this.settings.keys.forward)} up · ${keyLabel(this.settings.keys.back)} down · ${keyLabel(this.settings.keys.jump)} let go`,'');
       else if(this.controller.onWall)this.hud.setPrompt(`${[this.settings.keys.forward,this.settings.keys.left,this.settings.keys.back,this.settings.keys.right].map(keyLabel).join(' ')} climb · ${keyLabel(this.settings.keys.jump)} leap · ${keyLabel(this.settings.keys.back)} + ${keyLabel(this.settings.keys.jump)} kick off · ${keyLabel(this.settings.keys.climb)} let go`,'');
@@ -1658,6 +1819,7 @@ export class Game {
         else if (home) void this.restAtHome();
         else if (station) this.openMenu('craft');
         else if (wildMon && canFight) void this.startWildBattle(wildMon, false);
+        else if (water) this.startWater(water);
         else if (gather?.way) this.startGather(gather.node, gather.way);
       }
       // A creature that broke out of a ball and wants a fight starts it once it has popped out.

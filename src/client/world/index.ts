@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Collider, World } from './types';
-import { HALF, POI, TOWN, WATER_LEVEL, ROADS, MESAS, distToPolyline, POND, LAKE } from './layout';
+import { CELL, GRID_HALF, GRID_N, HALF, POI, TOWN, WATER_LEVEL, ROADS, MESAS, distToPolyline, POND, LAKE } from './layout';
 import { buildTerrainData, TerrainQuery, makeTerrainMaterial, buildTerrainMeshes, makeDepthTexture, waterDistance, makeTerrainTextures } from './terrain';
 import { createLights, createSky, centreSun, createClouds } from './sky';
 import { createWater } from './water';
@@ -133,6 +133,14 @@ export function createWorld(): World {
   // ---- things to gather: trees, bushes and stones from the scatter, plus berries, apricorns and copper ----
   const resources = new ResourceField({
     heightAt: rawH, slopeAt: (x, z) => terrain.slopeAt(x, z), reserved, waterDist: (x, z) => waterDistance(x, z).d, grassAt: (x, z) => terrain.grassAt(x, z),
+    thinGrass: (x, z, r, keep) => {
+      const V = GRID_N + 1;
+      for (let j = Math.max(0, Math.floor((z - r + GRID_HALF) / CELL)); j <= Math.min(GRID_N, Math.ceil((z + r + GRID_HALF) / CELL)); j++) {
+        for (let i = Math.max(0, Math.floor((x - r + GRID_HALF) / CELL)); i <= Math.min(GRID_N, Math.ceil((x + r + GRID_HALF) / CELL)); i++) {
+          if (Math.hypot(-GRID_HALF + i * CELL - x, -GRID_HALF + j * CELL - z) < r) data.grass[j * V + i] *= keep;
+        }
+      }
+    },
     colliders, half: HALF, town: { x: TOWN.x, z: TOWN.z, r: TOWN.fenceR + 4 }, mesas: MESAS,
     scatter: veg.nodes, rocks: veg.rocks, foliage: veg.foliage,
   });
