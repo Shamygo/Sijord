@@ -40,6 +40,8 @@ export interface SaveData {
   crafted?: string[];
   /** Hunger, thirst and queasiness (DESIGN §6.1). Missing on older saves: fed, watered and well. */
   meters?: Meters;
+  /** Pokedollars (DESIGN §6.7). Missing on older saves: they start with the new-trainer amount. */
+  money?: number;
 }
 
 export function loadSave(): SaveData | null {

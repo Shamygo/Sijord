@@ -8,6 +8,7 @@ import {
 import { signTexture } from './shared';
 import type { WorldAnchors, Region, ClimbPoint, Platform } from './types';
 import type { TreeKind } from './vegetation';
+import type { ShopId } from '../../shared/economy';
 
 export interface TownResult {
   anchors: WorldAnchors;
@@ -34,10 +35,16 @@ export function buildHometown(kit: Kit, kinds: Record<string, TreeKind>): TownRe
   const labDoor = lab(kit, ...at(0, -30), 0);
 
   // A denser commercial street, with porches facing the central avenue.
+  const shops: { id: ShopId; position: THREE.Vector3 }[] = [];
+  const SHOP_AT: Record<string, ShopId> = { 'FIELD SUPPLIES': 'field-supplies', APOTHECARY: 'apothecary', 'WAYFARER INN': 'wayfarer-inn' };
   for(const [x,z,yaw,label] of [
     [-20,38,Math.PI/2,'FIELD SUPPLIES'],[-20,9,Math.PI/2,'THE CLOTHIER'],[-20,-20,Math.PI/2,'WAYFARER INN'],
     [20,40,-Math.PI/2,'CRAFT WORKSHOP'],[20,0,-Math.PI/2,'APOTHECARY'],[20,-26,-Math.PI/2,'SURVEY LODGE'],
-  ] as [number,number,number,string][])streetHouse(kit,...at(x,z),yaw,label,0x526e7b);
+  ] as [number,number,number,string][]){
+    streetHouse(kit,...at(x,z),yaw,label,0x526e7b);
+    // You shop at the curtained doorway on the porch.
+    if (SHOP_AT[label]) shops.push({ id: SHOP_AT[label], position: new THREE.Vector3(...new Frame(...at(x, z), yaw).p(0, 0.13, 4.3)) });
+  }
   // The village workbench stands on the Craft Workshop's porch, by the door.
   const bench0 = new Frame(...at(20, 40), -Math.PI / 2).p(2.7, 0, 4.25);
   const workbenchSpot = workbench(kit, bench0[0], Y + 0.11, bench0[2], -Math.PI / 2);
@@ -191,6 +198,7 @@ export function buildHometown(kit: Kit, kinds: Record<string, TreeKind>): TownRe
       { id: 'gate', label: 'Route 1', position: new THREE.Vector3(X, Y, Z + R) },
     ],
     stations: [{ kind: 'workbench', position: workbenchSpot }],
+    shops,
   };
   const region: Region = { name: 'Bramblewick', tier: 'small', centerX: X, centerZ: Z, radius: R + 5 };
   return { anchors, region, flowerSpots, trees, hedges, climbs, platforms };

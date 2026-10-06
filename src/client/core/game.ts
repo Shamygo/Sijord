@@ -39,6 +39,7 @@ import { earnedXp, trainerLevel, TRAINER_XP } from '../../shared/trainer-level';
 import type { ResourceNode } from '../world/resources';
 import { TOWN } from '../world/layout';
 import { waterDistance } from '../world/terrain';
+import { blackoutLoss, buy, formatMoney, sell, SHOPS, STARTING_MONEY, trainerPrize, wildPrize, type Shop } from '../../shared/economy';
 import { canteenRoom, consume, meterState, OPEN_WATER, stepMeters, SURVIVAL, survivalEffects, type Meters } from '../../shared/survival';
 import type { World } from '../world/types';
 import { Input } from './input';
@@ -160,6 +161,9 @@ export class Game {
   private lastCatch: { species: string; chance: number; unaware: boolean; caught?: boolean; reaction?: CatchReaction } | null = null;
   /** Gathering in progress (DESIGN §6.3): the node (or the water you're kneeling at), how, and seconds so far. */
   private gathering: { node: ResourceNode | null; water?: WaterSpot; way: GatherWay; t: number } | null = null;
+  /** The wild side of the friend's battle we joined: levels seen and who fainted (prize money). */
+  private remoteFoes: { id: string; levels: Map<string, number>; fainted: Set<string> } | null = null;
+  private guestPrize = 0;
   /** Hunger, thirst and queasiness (DESIGN §6.1); the same object as `save.meters`. */
   private meters: Meters;
   private metersSaveT = 0;
@@ -183,6 +187,7 @@ export class Game {
     const hpMax = trainerMaxHp(trainerLevel(save.trainerXp).level, mods.maxHp);
     this.vitals = new TrainerVitals(hpMax, save.trainerHp && save.trainerHp > 0 ? save.trainerHp : hpMax);
     this.meters = save.meters ??= { hunger: SURVIVAL.max, thirst: SURVIVAL.max, queasy: 0 };
+    save.money ??= STARTING_MONEY;
 
     this.world = createWorld();
     applyAtmosphere(this.scene);
@@ -272,6 +277,10 @@ export class Game {
       toolUses: (id) => this.save.toolWear?.[id],
       eat: (id) => this.eat(id),
       meters: () => this.meters,
+      money: () => this.save.money ?? 0,
+      shop: () => this.shopNear(this.controller.position),
+      buy: (id, n) => this.buyItem(id, n),
+      sell: (id, n) => this.sellItem(id, n),
       settings: this.settings,
       onSettings: (s) => this.applySettings(s),
       onSave: () => writeSave(this.save),
@@ -486,6 +495,10 @@ export class Game {
   private receiveRemoteBattle(frame?: BattleFrame): void {
     if (!frame || (this.remoteFrame && frame.id !== this.remoteFrame.id)) {this.finishRemoteBattle(); return;}
     this.remoteFrame = frame;
+    // Wild Pokemon that faint during a friend's battle, for the joiner's own prize money.
+    if (this.remoteFoes?.id !== frame.id) this.remoteFoes = { id: frame.id, levels: new Map(), fainted: new Set() };
+    for (const sl of frame.slots) if (sl.pos.side === 1) this.remoteFoes.levels.set(sl.uid, sl.level);
+    for (const { event } of frame.events) if (event.t === 'faint' && event.pos.side === 1) this.remoteFoes.fainted.add(event.uid);
     if (!frame.lobby && !frame.guest) {this.finishRemoteBattle(); this.hud.showToast('The battle has already started', 'Join before your friend chooses a mode.'); return;}
     if (frame.guest && !this.remoteBattle) {
       this.remoteBattle = new RemoteBattle(frame,this.world,this.scene,this.hud.el,this.portraits,c => {this.battleControl = {...this.battleControl,...c,join:undefined};},v => this.project(v));
@@ -509,6 +522,17 @@ export class Game {
       for (const [b, n] of Object.entries(frame.result.ballsUsed ?? {})) { bag[b] = Math.max(0, (bag[b] ?? 0) - n); if (!bag[b]) delete bag[b]; }
       void this.storeCaught(structuredClone(frame.result.caught ?? []));
       this.battleControl = {id:frame.id,ack:true}; this.onPartyChanged();
+      // A won wild battle pays the friend who joined it too, for the Pokemon that fainted.
+      const foes = this.remoteFoes;
+      if (frame.winner === 0 && frame.kind === 'wild' && foes?.id === frame.id) {
+        const beaten = [...foes.fainted].map((uid) => foes.levels.get(uid) ?? 1);
+        if (beaten.length) {
+          this.gainXp(beaten.length * TRAINER_XP.wildWin);
+          // Shown as the battle closes, in place of "Back to exploring".
+          this.guestPrize = wildPrize(beaten);
+          this.earn(this.guestPrize, 'Prize money', false);
+        }
+      }
       this.guestProgression = {winner:frame.winner,escaped:frame.escaped,fainted:new Set(),pendingMoves:new Map(frame.result.pendingMoves),caught:[],ballsUsed:{},partnerCaught:[]};
     }
   }
@@ -518,7 +542,9 @@ export class Game {
     this.onPartyChanged();
     this.remoteBattle?.dispose(); this.remoteBattle = null; this.remoteBattleHost = null; this.remoteFrame = undefined;
     this.battleControl = undefined; this.hud.setBattleMode(false); this.refreshFollower();
-    this.hud.showToast('Back to exploring');
+    if (this.guestPrize) this.prizeToast(this.guestPrize, 'Prize money');
+    else this.hud.showToast('Back to exploring');
+    this.guestPrize = 0;
     if (this.guestProgression) {const outcome = this.guestProgression; this.guestProgression = null; void (async()=>{await this.afterBattle(outcome);if(!this.party.some(isUsable))await this.blackout();})();}
   }
 
@@ -1244,6 +1270,44 @@ export class Game {
     if (this.menu?.isOpen) this.menu.refresh();
   }
 
+  // ---- Money and shops (DESIGN §6.7) ---------------------------------------------------------------
+
+  /** The shop doorway the trainer is standing at, if any. */
+  private shopNear(pos: THREE.Vector3): Shop | null {
+    const s = this.world.anchors.shops?.find((s) => Math.hypot(pos.x - s.position.x, pos.z - s.position.z) < 1.8 && Math.abs(pos.y - s.position.y) < 1.5);
+    return s ? SHOPS[s.id] : null;
+  }
+
+  private buyItem(id: string, n: number): boolean {
+    const wallet = { money: this.save.money ?? 0 }, bag = (this.save.bag ??= {});
+    if (!this.shopNear(this.controller.position)?.stock.includes(id) || !buy(wallet, bag, id, n)) return false;
+    this.save.money = wallet.money;
+    writeSave(this.save);
+    return true;
+  }
+
+  private sellItem(id: string, n: number): number {
+    if (!this.shopNear(this.controller.position) || ITEMS[id]?.category === 'key') return 0;
+    const wallet = { money: this.save.money ?? 0 };
+    const got = sell(wallet, (this.save.bag ??= {}), id, n);
+    if (!got) return 0;
+    this.save.money = wallet.money;
+    writeSave(this.save);
+    return got;
+  }
+
+  /** Prize money in hand, with a toast once the battle's own messages are done. */
+  private earn(amount: number, why: string, toast = true): void {
+    if (amount <= 0) return;
+    this.save.money = (this.save.money ?? 0) + amount;
+    writeSave(this.save);
+    if (toast) this.prizeToast(amount, why);
+  }
+
+  private prizeToast(amount: number, why: string): void {
+    this.hud.showToast(`${why}: ${formatMoney(amount)}`, `${formatMoney(this.save.money ?? 0)} in your purse`, 2.5);
+  }
+
   // ---- Hunger and thirst (DESIGN §6.1) -----------------------------------------------------------
 
   /**
@@ -1446,10 +1510,11 @@ export class Game {
     this.rival.place(spot, facing + Math.PI);
     this.rival.lookAt(p);
     this.talking = false;
+    const foes = this.rival.team(this.save.starter ?? this.party[0].species, randomSeed());
     const outcome = await this.runBattle({
       kind: 'trainer',
       progressionFlag:'beat-rival',
-      foes: this.rival.team(this.save.starter ?? this.party[0].species, randomSeed()),
+      foes,
       foeName: this.rival.name,
       foeAi: 't1',
       playerPos: p,
@@ -1462,6 +1527,7 @@ export class Game {
     this.rival.lookAt(this.controller.position);
     await this.hud.dialogue.play(won ? this.rival.winLines() : this.rival.loseLines());
     if (won) {
+      this.earn(trainerPrize(Math.max(...foes.map((f) => f.level)), this.flags.has('beat-rival')), `You got prize money from ${this.rival.name}`);
       if (!this.flags.has('beat-rival')) this.gainXp(TRAINER_XP.trainerWin);
       this.setFlag('beat-rival');
       this.hud.showToast('New quest', 'Head out onto Route 1');
@@ -1561,8 +1627,11 @@ export class Game {
     }
     await this.storeCaught(outcome.caught);
     if (start.kind === 'wild' && outcome.winner === 0) {
-      const beaten = start.foes.filter((f) => outcome.fainted.has(f.uid)).length;
-      if (beaten) this.gainXp(beaten * TRAINER_XP.wildWin);
+      const beaten = start.foes.filter((f) => outcome.fainted.has(f.uid));
+      if (beaten.length) {
+        this.gainXp(beaten.length * TRAINER_XP.wildWin);
+        this.earn(wildPrize(beaten.map((f) => f.level)), 'Prize money');
+      }
     }
     this.onPartyChanged();
     await this.afterBattle(outcome);
@@ -1645,6 +1714,8 @@ export class Game {
     this.vitals.restore();
     this.knockedOut = false;
     this.save.trainerHp = this.vitals.hp;
+    const lost = blackoutLoss(this.save.money ?? 0);
+    this.save.money = (this.save.money ?? 0) - lost;
     // Hazel makes sure you've eaten and had something to drink, but only just.
     this.meters.hunger = Math.max(this.meters.hunger, 50);
     this.meters.thirst = Math.max(this.meters.thirst, 50);
@@ -1657,6 +1728,8 @@ export class Game {
     await this.hud.dialogue.play(this.professor.blackoutLines());
     this.professor.lookAt(null);
     this.endScene();
+    writeSave(this.save);
+    if (lost) this.hud.showToast(`You dropped ${formatMoney(lost)} in the confusion`, `${formatMoney(this.save.money ?? 0)} left in your purse`, 3);
   }
 
   /** World point to CSS pixels. */
@@ -1672,6 +1745,7 @@ export class Game {
   debugText(): string {
     return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, found:this.save.found?.length ?? 0, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
       trainerHp: { hp: Math.round(this.vitals.hp * 10) / 10, max: this.vitals.max, down: this.vitals.knockedDown },
+      money: this.save.money ?? 0,
       meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },
       throwing: { aiming: this.aiming, ball: this.aimBall, balls: Object.fromEntries(this.throwKinds().map((b) => [b, this.save.bag?.[b] ?? 0])), treats: this.wild.treats.length, intercept: this.intercept ? displayName(this.intercept.m.creature) : null, inFlight: this.throws.busy, dropped: this.throws.droppedCount, lastCatch: this.lastCatch },
       wildCreatures: this.wild.creatures.map((m) => ({ species: m.creature.species, level: m.creature.level, state: m.state, alert: Math.round(m.alert), attack: m.attack?.phase, position: [m.mover.pos.x, m.mover.pos.z].map((v) => Math.round(v * 10) / 10) })) });
@@ -1777,9 +1851,10 @@ export class Game {
       const pickup = !nearProf && !nearRival && !this.aiming ? this.throws.nearestPickup(pos) : null;
       const find = !nearProf && !nearRival && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
       const home = !nearProf && !nearRival && !pickup && !find ? this.nearHome(pos) : null;
-      const station = !nearProf && !nearRival && !pickup && !find && !home ? this.stationsNear(pos)[0] ?? null : null;
+      const shop = !nearProf && !nearRival && !pickup && !find && !home ? this.shopNear(pos) : null;
+      const station = !nearProf && !nearRival && !pickup && !find && !home && !shop ? this.stationsNear(pos)[0] ?? null : null;
       const wildMon = !nearProf && !nearRival ? this.wild.nearestEngageable(pos) : null;
-      const free = !nearProf && !nearRival && !pickup && !find && !home && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
+      const free = !nearProf && !nearRival && !pickup && !find && !home && !shop && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
       let gather = free ? this.nearestGather(pos) : null;
       const waterAt = free ? this.nearWater(pos) : null;
       let water = waterAt && this.waterPrompt(waterAt) ? waterAt : null;
@@ -1801,6 +1876,7 @@ export class Game {
       else if (pickup) this.hud.setPrompt(`Pick up the ${ITEMS[pickup.ball]?.name ?? 'ball'}`);
       else if (find) this.hud.setPrompt(DISCOVERY_LABEL[find.def.kind].prompt);
       else if (home) this.hud.setPrompt(`Rest at ${home.id === 'p1-house' ? 'home' : 'your friend’s house'}`);
+      else if (shop) this.hud.setPrompt(shop.prompt);
       else if (station) this.hud.setPrompt(station === 'workbench' ? 'Use the workbench' : 'Cook at the campfire');
       else if (wildMon) this.hud.setPrompt(canFight ? `Battle the wild ${displayName(wildMon.creature)} · Lv. ${wildMon.creature.level}` : `Wild ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
       else if (this.gathering) this.hud.setPrompt(`${this.gathering.way.doing}…`, '');
@@ -1817,6 +1893,7 @@ export class Game {
         else if (pickup) this.pickupBall(pickup.id);
         else if (find) void this.openDiscovery(find);
         else if (home) void this.restAtHome();
+        else if (shop) this.openMenu('shop');
         else if (station) this.openMenu('craft');
         else if (wildMon && canFight) void this.startWildBattle(wildMon, false);
         else if (water) this.startWater(water);

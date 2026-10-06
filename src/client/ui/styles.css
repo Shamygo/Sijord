@@ -624,3 +624,20 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .food-info p { margin: 0; }
 .food-gives { color: var(--accent); font-weight: 800; }
 .food-now { color: var(--muted); font-weight: 700; font-size: 13px; }
+/* Shops (DESIGN §6.7). */
+.purse { display: inline-flex; align-items: center; padding: 6px 14px; border-radius: 999px; background: rgba(255, 211, 77, .14); color: var(--accent); font-weight: 900; margin-right: 6px; }
+.purse.big { font-size: 22px; padding: 2px 0; background: none; }
+.shop { display: flex; flex-direction: column; gap: 4px; }
+.shop-cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); gap: 18px; align-items: start; }
+.shop-desc { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; flex: 1; }
+.shop .craft-card { min-height: 100%; }
+.shop .price { color: var(--accent); font-size: 17px; }
+.shop-btns { display: flex; gap: 6px; }
+.shop-btns .craft-go { padding: 7px 12px; white-space: nowrap; }
+.sell-list { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow-y: auto; padding-right: 4px; }
+.sell-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 12px; background: rgba(255,255,255,.04); border: 1px solid var(--panel-border); }
+.sell-row .bag-icon { width: 32px; height: 32px; font-size: 22px; }
+.sell-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.sell-name small { color: var(--muted); font-weight: 700; }
+.sell-row .act { padding: 6px 10px; font-size: 12px; white-space: nowrap; }
+@media (max-width: 760px) { .shop-cols { grid-template-columns: 1fr; } }
