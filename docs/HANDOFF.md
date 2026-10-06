@@ -120,7 +120,7 @@ From DESIGN §18. None answered yet. Proceed on the current default and flag it.
 
 ## Next up
 
-**M3: Catching, party and the first route** (ROADMAP). In-battle catching, guest throws in shared battles, overworld throws, failed-catch aggression with trainer HP and knockdown, the party of 6 with a PC box, the region Dex and 45 species are done (above). Still to do: Treats and partner interceptions (§5.3), healing at home, the Hearthmeadow slice to its density target with its first POIs, and shared wild herds so two players see the same creatures. Exit: catch 10+ species, survive or get knocked down by an angry charge after a bad throw, manage a party, and two players catch side by side without desync.
+**M3: Catching, party and the first route** (ROADMAP). In-battle catching, guest throws in shared battles, overworld throws, failed-catch aggression with trainer HP and knockdown, the party of 6 with a PC box, the region Dex and 45 species are done (above). Press E at either house door in Bramblewick to rest: the team and the trainer go back to full. Still to do: Treats and partner interceptions (§5.3), the Hearthmeadow slice to its density target with its first POIs, and shared wild herds so two players see the same creatures. Exit: catch 10+ species, survive or get knocked down by an angry charge after a bad throw, manage a party, and two players catch side by side without desync.
 
 Two M2 follow-ups fit naturally into M3: share wild herds between the two players (spawn from a shared seed and sync engagements), and tune battle difficulty from Simon's play-testing.
 
