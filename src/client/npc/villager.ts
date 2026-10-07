@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { SideQuestDef } from '../../shared/sidequests';
+import type { Appearance } from '../../shared/types';
 import { createAvatar } from '../player/avatar';
 import type { Avatar } from '../player/types';
 import type { World } from '../world/types';
@@ -8,6 +8,19 @@ import type { World } from '../world/types';
 const DRAW_RANGE = 140;
 
 export type QuestMark = 'new' | 'ready' | null;
+
+/** Who a villager is and where they stand. */
+export interface VillagerDef {
+  id: string;
+  giver: string;
+  /** Where they stand (world metres) and which way they face. */
+  x: number;
+  z: number;
+  yaw: number;
+  look: Appearance;
+  /** Height against a grown-up's. */
+  size?: number;
+}
 
 const marks = new Map<Exclude<QuestMark, null>, THREE.SpriteMaterial>();
 /** The gold "!" over someone with a quest for you, and "?" when you can hand it in. */
@@ -40,11 +53,11 @@ function markMaterial(kind: Exclude<QuestMark, null>): THREE.SpriteMaterial {
 }
 
 /**
- * Someone in Hearthmeadow with a side quest (`src/shared/sidequests.ts`). They stand at their
- * spot, turn to watch a trainer who comes close, and wear a "!" while they have a quest for you
- * and a "?" when you can hand it in.
+ * Someone in Hearthmeadow with something for you: a side quest giver (`src/shared/sidequests.ts`)
+ * or Edvin the cartographer. They stand at their spot, turn to watch a trainer who comes close,
+ * and wear a "!" while they have a quest for you and a "?" when you can hand it in.
  */
-export class Villager {
+export class Villager<D extends VillagerDef = VillagerDef> {
   readonly root = new THREE.Group();
   readonly name: string;
   private avatar: Avatar;
@@ -54,7 +67,7 @@ export class Villager {
   private lookYaw: number;
   private t = Math.random() * 10;
 
-  constructor(readonly def: SideQuestDef, world: World) {
+  constructor(readonly def: D, world: World) {
     this.name = def.giver;
     this.avatar = createAvatar(def.look);
     this.avatar.setGround((x, z) => world.heightAt(x, z));
