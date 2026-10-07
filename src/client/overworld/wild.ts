@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ALPHA, ALPHA_LAIRS, alphaCreature, alphaDay, alphaKey, type AlphaLair } from '../../shared/alpha';
 import { createCreature, newUid } from '../../shared/battle/creature';
 import { Rng } from '../../shared/battle/rng';
+import { clockAt, isNight } from '../../shared/daynight';
 import type { Creature } from '../../shared/battle/types';
 import { MOVES } from '../../shared/data/moves';
 import { SPECIES } from '../../shared/data/species';
@@ -173,16 +174,25 @@ export type Habitat = 'water' | 'rock';
 export interface ZoneEntry {
   species: string;
   weight: number;
+  /** Its weight at night instead (0: it sleeps; a species with weight 0 only comes out at night). */
+  night?: number;
   min: number;
   max: number;
   herd: [number, number];
   habitat?: Habitat;
 }
 
+/** How common an entry is by day or by night. */
+export function entryWeight(e: ZoneEntry, night: boolean): number {
+  return night ? e.night ?? e.weight : e.weight;
+}
+
 /**
  * Spawn tables by distance from Bramblewick. Further out means stronger creatures. Common
  * creatures roam in pairs and flocks (so most fights are two at once); the rare ones (Pikachu,
  * Eevee, Abra) are met alone or in pairs. Levels stay under the first level cap (15).
+ * At night (`night` weights) the birds and bugs mostly sleep, Oddish, Meowth, Clefairy and
+ * Jigglypuff come out, and Zubat flock over the meadows.
  */
 export const ZONES: { maxDist: number; entries: ZoneEntry[] }[] = [
   {
@@ -190,15 +200,17 @@ export const ZONES: { maxDist: number; entries: ZoneEntry[] }[] = [
     maxDist: 190,
     entries: [
       { species: 'nibblet', weight: 20, min: 2, max: 4, herd: [2, 3] },
-      { species: 'finchlet', weight: 20, min: 2, max: 4, herd: [2, 4] },
-      { species: 'dewmite', weight: 15, min: 2, max: 4, herd: [2, 4] },
-      { species: 'weedle', weight: 15, min: 2, max: 4, herd: [2, 3] },
-      { species: 'spearow', weight: 6, min: 3, max: 5, herd: [2, 3] },
+      { species: 'finchlet', weight: 20, night: 4, min: 2, max: 4, herd: [2, 4] },
+      { species: 'dewmite', weight: 15, night: 5, min: 2, max: 4, herd: [2, 4] },
+      { species: 'weedle', weight: 15, night: 5, min: 2, max: 4, herd: [2, 3] },
+      { species: 'spearow', weight: 6, night: 1, min: 3, max: 5, herd: [2, 3] },
       { species: 'nidoran-f', weight: 5, min: 3, max: 5, herd: [2, 2] },
       { species: 'nidoran-m', weight: 5, min: 3, max: 5, herd: [2, 2] },
-      { species: 'oddish', weight: 5, min: 3, max: 5, herd: [2, 3] },
+      { species: 'oddish', weight: 5, night: 14, min: 3, max: 5, herd: [2, 3] },
       { species: 'bellsprout', weight: 4, min: 3, max: 5, herd: [2, 2] },
-      { species: 'cloveret', weight: 3, min: 3, max: 5, herd: [1, 2] },
+      { species: 'cloveret', weight: 3, night: 7, min: 3, max: 5, herd: [1, 2] },
+      { species: 'zubat', weight: 0, night: 12, min: 3, max: 5, herd: [2, 4] },
+      { species: 'meowth', weight: 0, night: 5, min: 3, max: 5, herd: [1, 2] },
       { species: 'hjordpup', weight: 3, min: 3, max: 5, herd: [2, 2] },
       { species: 'poliwag', weight: 8, min: 3, max: 5, herd: [2, 2], habitat: 'water' },
       { species: 'psyduck', weight: 5, min: 4, max: 6, herd: [1, 2], habitat: 'water' },
@@ -212,24 +224,25 @@ export const ZONES: { maxDist: number; entries: ZoneEntry[] }[] = [
     maxDist: 360,
     entries: [
       { species: 'nibblet', weight: 14, min: 4, max: 7, herd: [2, 3] },
-      { species: 'finchlet', weight: 14, min: 4, max: 7, herd: [2, 4] },
-      { species: 'dewmite', weight: 6, min: 4, max: 6, herd: [2, 3] },
+      { species: 'finchlet', weight: 14, night: 3, min: 4, max: 7, herd: [2, 4] },
+      { species: 'dewmite', weight: 6, night: 2, min: 4, max: 6, herd: [2, 3] },
       { species: 'cocoonch', weight: 5, min: 7, max: 9, herd: [2, 2] },
-      { species: 'weedle', weight: 6, min: 4, max: 6, herd: [2, 3] },
+      { species: 'weedle', weight: 6, night: 2, min: 4, max: 6, herd: [2, 3] },
       { species: 'kakuna', weight: 5, min: 7, max: 9, herd: [2, 2] },
-      { species: 'spearow', weight: 10, min: 5, max: 8, herd: [2, 3] },
+      { species: 'spearow', weight: 10, night: 2, min: 5, max: 8, herd: [2, 3] },
       { species: 'ekans', weight: 7, min: 5, max: 8, herd: [1, 2] },
       { species: 'nidoran-f', weight: 5, min: 5, max: 8, herd: [2, 2] },
       { species: 'nidoran-m', weight: 5, min: 5, max: 8, herd: [2, 2] },
-      { species: 'oddish', weight: 6, min: 5, max: 8, herd: [2, 3] },
+      { species: 'oddish', weight: 6, night: 14, min: 5, max: 8, herd: [2, 3] },
       { species: 'bellsprout', weight: 5, min: 5, max: 8, herd: [2, 2] },
-      { species: 'mankey', weight: 6, min: 5, max: 8, herd: [2, 3] },
-      { species: 'meowth', weight: 6, min: 5, max: 8, herd: [1, 2] },
-      { species: 'jigglypuff', weight: 3, min: 5, max: 7, herd: [1, 2] },
+      { species: 'mankey', weight: 6, night: 3, min: 5, max: 8, herd: [2, 3] },
+      { species: 'meowth', weight: 6, night: 12, min: 5, max: 8, herd: [1, 2] },
+      { species: 'jigglypuff', weight: 3, night: 6, min: 5, max: 7, herd: [1, 2] },
       { species: 'vulpix', weight: 3, min: 5, max: 7, herd: [1, 2] },
-      { species: 'ponyta', weight: 3, min: 6, max: 8, herd: [2, 3] },
+      { species: 'ponyta', weight: 3, night: 1, min: 6, max: 8, herd: [2, 3] },
       { species: 'hjordpup', weight: 4, min: 6, max: 8, herd: [2, 3] },
-      { species: 'cloveret', weight: 3, min: 6, max: 8, herd: [1, 2] },
+      { species: 'cloveret', weight: 3, night: 8, min: 6, max: 8, herd: [1, 2] },
+      { species: 'zubat', weight: 0, night: 12, min: 5, max: 8, herd: [2, 4] },
       { species: 'poliwag', weight: 8, min: 5, max: 8, herd: [2, 3], habitat: 'water' },
       { species: 'psyduck', weight: 6, min: 5, max: 8, herd: [1, 2], habitat: 'water' },
       { species: 'pikachu', weight: 1.5, min: 5, max: 7, herd: [1, 2] },
@@ -243,24 +256,24 @@ export const ZONES: { maxDist: number; entries: ZoneEntry[] }[] = [
     entries: [
       { species: 'nibblet', weight: 8, min: 8, max: 12, herd: [2, 3] },
       { species: 'stashquill', weight: 6, min: 10, max: 14, herd: [2, 2] },
-      { species: 'finchlet', weight: 8, min: 8, max: 12, herd: [2, 3] },
-      { species: 'fjordling', weight: 4, min: 12, max: 14, herd: [2, 3] },
-      { species: 'spearow', weight: 8, min: 9, max: 13, herd: [2, 3] },
+      { species: 'finchlet', weight: 8, night: 2, min: 8, max: 12, herd: [2, 3] },
+      { species: 'fjordling', weight: 4, night: 1, min: 12, max: 14, herd: [2, 3] },
+      { species: 'spearow', weight: 8, night: 2, min: 9, max: 13, herd: [2, 3] },
       { species: 'cocoonch', weight: 5, min: 9, max: 12, herd: [2, 2] },
       { species: 'kakuna', weight: 5, min: 9, max: 12, herd: [2, 2] },
       { species: 'ekans', weight: 7, min: 9, max: 13, herd: [1, 2] },
       { species: 'nidoran-f', weight: 4, min: 9, max: 13, herd: [2, 2] },
       { species: 'nidoran-m', weight: 4, min: 9, max: 13, herd: [2, 2] },
-      { species: 'oddish', weight: 5, min: 9, max: 13, herd: [2, 3] },
+      { species: 'oddish', weight: 5, night: 12, min: 9, max: 13, herd: [2, 3] },
       { species: 'bellsprout', weight: 5, min: 9, max: 13, herd: [2, 2] },
-      { species: 'mankey', weight: 6, min: 9, max: 13, herd: [2, 3] },
-      { species: 'meowth', weight: 5, min: 9, max: 13, herd: [1, 2] },
-      { species: 'jigglypuff', weight: 4, min: 9, max: 12, herd: [1, 2] },
+      { species: 'mankey', weight: 6, night: 3, min: 9, max: 13, herd: [2, 3] },
+      { species: 'meowth', weight: 5, night: 10, min: 9, max: 13, herd: [1, 2] },
+      { species: 'jigglypuff', weight: 4, night: 7, min: 9, max: 12, herd: [1, 2] },
       { species: 'vulpix', weight: 4, min: 9, max: 12, herd: [1, 2] },
-      { species: 'ponyta', weight: 5, min: 9, max: 13, herd: [2, 3] },
+      { species: 'ponyta', weight: 5, night: 1, min: 9, max: 13, herd: [2, 3] },
       { species: 'hjordpup', weight: 6, min: 8, max: 13, herd: [2, 3] },
-      { species: 'cloveret', weight: 4, min: 8, max: 12, herd: [1, 2] },
-      { species: 'zubat', weight: 6, min: 9, max: 13, herd: [2, 4] },
+      { species: 'cloveret', weight: 4, night: 9, min: 8, max: 12, herd: [1, 2] },
+      { species: 'zubat', weight: 6, night: 16, min: 9, max: 13, herd: [2, 4] },
       { species: 'geodude', weight: 10, min: 9, max: 13, herd: [2, 3], habitat: 'rock' },
       { species: 'poliwag', weight: 6, min: 9, max: 13, herd: [2, 3], habitat: 'water' },
       { species: 'psyduck', weight: 6, min: 9, max: 13, herd: [1, 2], habitat: 'water' },
@@ -324,16 +337,19 @@ export class WildManager {
 
   private clock: () => number;
   private modelReady: (species: string) => boolean;
+  /** Whether it's night on the shared clock: herds rolled at night come from the night tables. */
+  private night: () => boolean;
 
   /**
    * `seed` drives behaviour; `spawnSeed` (from the world's name) decides which herds live where.
    * Tests can pass their own clock and model check.
    */
-  constructor(private world: World, seed: number, private spawnSeed = seed, opts: { clock?: () => number; modelReady?: (species: string) => boolean } = {}) {
+  constructor(private world: World, seed: number, private spawnSeed = seed, opts: { clock?: () => number; modelReady?: (species: string) => boolean; night?: () => boolean } = {}) {
     this.rng = new Rng(seed);
     this.root.name = 'wild';
     this.clock = opts.clock ?? (() => Date.now());
     this.modelReady = opts.modelReady ?? creatureModelReady;
+    this.night = opts.night ?? (() => isNight(clockAt(this.clock())));
   }
 
   get creatures(): WildCreature[] {
@@ -934,7 +950,9 @@ export class WildManager {
    */
   private trySpawn(player: THREE.Vector3): void {
     const C = SHARED_SPAWN.cell;
-    const epoch = Math.floor(this.clock() / SHARED_SPAWN.epochMs);
+    // The time window, doubled with night in the low bit: herds rolled after dusk are a fresh
+    // roll from the night tables, under their own keys, the same for both friends.
+    const epoch = Math.floor(this.clock() / SHARED_SPAWN.epochMs) * 2 + (this.night() ? 1 : 0);
     const reach = Math.ceil(SPAWN_MAX / C) + 1;
     const ci = Math.floor(player.x / C);
     const cj = Math.floor(player.z / C);
@@ -945,7 +963,7 @@ export class WildManager {
         if (live.has(`${i},${j}`)) continue;
         // A friend's herd from just before the window turned over: meet that one, not a new roll.
         const theirs = this.friendCells.get(`${i},${j}`);
-        const e = theirs !== undefined && Math.abs(theirs - epoch) <= 1 ? theirs : epoch;
+        const e = theirs !== undefined && Math.abs(Math.floor(theirs / 2) - Math.floor(epoch / 2)) <= 1 ? theirs : epoch;
         if (this.emptied.has(`${i},${j},${e}`)) continue;
         const plan = this.cellPlan(i, j, e);
         if (!plan) continue;
@@ -973,8 +991,10 @@ export class WildManager {
     if (!this.spawnable(x, z)) return null;
     const d = Math.hypot(x - TOWN.x, z - TOWN.z);
     const zone = ZONES.find((zn) => d < zn.maxDist) ?? ZONES[ZONES.length - 1];
-    const fits = zone.entries.filter((e) => !e.habitat || habitatAt(x, z, e.habitat));
-    const entry = this.pickEntry(fits.length ? fits : zone.entries.filter((e) => !e.habitat), rng);
+    const night = (epoch & 1) === 1;
+    const out = zone.entries.filter((e) => entryWeight(e, night) > 0);
+    const fits = out.filter((e) => !e.habitat || habitatAt(x, z, e.habitat));
+    const entry = this.pickEntry(fits.length ? fits : out.filter((e) => !e.habitat), rng, night);
     return { x, z, entry, seed: rng.int(0, 0x7fffffff) };
   }
 
@@ -1071,15 +1091,16 @@ export class WildManager {
    * loading (models outside the gameplay pack stream in after the world is built).
    */
   private candidates(entries: ZoneEntry[], x: number, z: number): ZoneEntry[] {
-    const ok = entries.filter((e) => (!e.habitat || habitatAt(x, z, e.habitat)) && creatureModelReady(e.species));
-    return ok.length ? ok : entries.filter((e) => !e.habitat);
+    const awake = entries.filter((e) => e.weight > 0);
+    const ok = awake.filter((e) => (!e.habitat || habitatAt(x, z, e.habitat)) && creatureModelReady(e.species));
+    return ok.length ? ok : awake.filter((e) => !e.habitat);
   }
 
-  private pickEntry(entries: ZoneEntry[], rng: Rng = this.rng): ZoneEntry {
-    const total = entries.reduce((a, e) => a + e.weight, 0);
+  private pickEntry(entries: ZoneEntry[], rng: Rng = this.rng, night = false): ZoneEntry {
+    const total = entries.reduce((a, e) => a + entryWeight(e, night), 0);
     let r = rng.next() * total;
     for (const e of entries) {
-      r -= e.weight;
+      r -= entryWeight(e, night);
       if (r <= 0) return e;
     }
     return entries[0];

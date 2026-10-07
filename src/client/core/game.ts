@@ -299,7 +299,8 @@ export class Game {
     this.updateNpcState();
     this.scene.add(this.follower.root);
     // Herds come from the world's name, so both friends meet the same ones.
-    this.wild = new WildManager(this.world, randomSeed(), seedFromName(save.room));
+    // ...and from the shared clock, so night brings out the same night herds for both.
+    this.wild = new WildManager(this.world, randomSeed(), seedFromName(save.room), { night: () => isNight(this.gameMinutes) });
     // Alphas beaten or caught today (here or by a friend) stay gone until tomorrow.
     this.wild.onAlphaTaken = (key) => this.rememberAlpha(key);
     this.wild.applyTaken(currentAlphaKeys(save.alphas ?? [], alphaDay(Date.now())));
