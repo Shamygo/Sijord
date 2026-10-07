@@ -281,7 +281,8 @@ export function buildPOIs(kit: Kit, h: HeightFn): { reserved: { x: number; z: nu
   }
   // fishing spot by the pond
   const fx = p.x + Math.cos(2.0) * (p.r + 2.5), fz = p.z + Math.sin(2.0) * (p.r + 2.5);
-  const ff = new Frame(fx, h(fx, fz), fz, 2.0 + Math.PI);
+  // The rod leans out over the water.
+  const ff = new Frame(fx, h(fx, fz), fz, Math.atan2(-Math.cos(2.0), -Math.sin(2.0)));
   box(kit.solid, ff, [0.8, 0.5, 0.8], [0, 0.25, 0], 0x8b5a33);
   cyl(kit.solid, ff, 0.03, 0.02, 3.2, [0, 1.5, 1.2], 0x6b4426, 5, [0.9, 0, 0]);
   return { reserved, fire };

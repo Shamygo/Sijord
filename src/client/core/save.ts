@@ -55,6 +55,8 @@ export interface SaveData {
   defector?: { fed: number; told: string[] };
   /** Gudrun's cook-off: wins against her, and the (UTC) day of the last one (`src/shared/cookoff.ts`). */
   picnicker?: { wins: number; day?: number };
+  /** Side quests taken and finished, by quest id (`src/shared/sidequests.ts`). */
+  sideQuests?: Record<string, { state: 'active' | 'done'; n?: number }>;
 }
 
 export function loadSave(): SaveData | null {

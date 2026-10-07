@@ -43,6 +43,8 @@ import { BALE_NAME, DEFECTOR, DEFECTOR_INTRO, defectorState, nextMeal, pendingTi
 import { Defector } from '../npc/defector';
 import { COOK_MAX, cookoffWon, PICNICKER, PICNICKER_INTRO, picnickerState, rivalScore } from '../../shared/cookoff';
 import { Picnicker } from '../npc/picnicker';
+import { creditDefeats, goalMet, questLogText, SIDE_QUESTS, sideQuestState, type SideQuestDef } from '../../shared/sidequests';
+import { Villager } from '../npc/villager';
 import type { ResourceNode } from '../world/resources';
 import { TOWN } from '../world/layout';
 import { waterDistance } from '../world/terrain';
@@ -171,6 +173,8 @@ export class Game {
   private defector!: Defector;
   /** Gudrun at her picnic under the lone tree. */
   private picnicker!: Picnicker;
+  /** The people around Hearthmeadow with side quests. */
+  private villagers: Villager[] = [];
   private baleRustle = 0;
   /** The roaming trainer walking up to or battling this player, if any. */
   private trainerEngaged: RoamingTrainer | null = null;
@@ -189,7 +193,7 @@ export class Game {
   /** Gathering in progress (DESIGN §6.3): the node (or the water you're kneeling at), how, and seconds so far. */
   private gathering: { node: ResourceNode | null; water?: WaterSpot; way: GatherWay; t: number; helper?: { help: PartnerHelp; name: string } } | null = null;
   /** The wild side of the friend's battle we joined: levels seen, who fainted (prize money) and the Alphas' names. */
-  private remoteFoes: { id: string; levels: Map<string, number>; fainted: Set<string>; alphas: Map<string, string> } | null = null;
+  private remoteFoes: { id: string; levels: Map<string, number>; species: Map<string, string>; fainted: Set<string>; alphas: Map<string, string> } | null = null;
   private guestPrize = 0;
   /** Hunger, thirst and queasiness (DESIGN §6.1); the same object as `save.meters`. */
   private meters: Meters;
@@ -255,6 +259,9 @@ export class Game {
     save.picnicker = picnickerState(save.picnicker);
     this.picnicker = new Picnicker(this.world);
     this.scene.add(this.picnicker.root);
+    save.sideQuests = sideQuestState(save.sideQuests);
+    this.villagers = SIDE_QUESTS.map((q) => new Villager(q, this.world));
+    for (const v of this.villagers) this.scene.add(v.root);
     this.updateNpcState();
     this.scene.add(this.follower.root);
     // Herds come from the world's name, so both friends meet the same ones.
@@ -565,8 +572,8 @@ export class Game {
     if (!frame || (this.remoteFrame && frame.id !== this.remoteFrame.id)) {this.finishRemoteBattle(); return;}
     this.remoteFrame = frame;
     // Wild Pokemon that faint during a friend's battle, for the joiner's own prize money.
-    if (this.remoteFoes?.id !== frame.id) this.remoteFoes = { id: frame.id, levels: new Map(), fainted: new Set(), alphas: new Map() };
-    for (const sl of frame.slots) if (sl.pos.side === 1) this.remoteFoes.levels.set(sl.uid, sl.level);
+    if (this.remoteFoes?.id !== frame.id) this.remoteFoes = { id: frame.id, levels: new Map(), species: new Map(), fainted: new Set(), alphas: new Map() };
+    for (const sl of frame.slots) if (sl.pos.side === 1) { this.remoteFoes.levels.set(sl.uid, sl.level); this.remoteFoes.species.set(sl.uid, sl.species); }
     for (const sl of frame.slots) if (sl.pos.side === 1 && sl.alpha) this.remoteFoes.alphas.set(sl.uid, sl.name);
     for (const { event } of frame.events) if (event.t === 'faint' && event.pos.side === 1) this.remoteFoes.fainted.add(event.uid);
     if (!frame.lobby && !frame.guest) {this.finishRemoteBattle(); this.hud.showToast('The battle has already started', 'Join before your friend chooses a mode.'); return;}
@@ -596,6 +603,7 @@ export class Game {
       const foes = this.remoteFoes;
       if (frame.winner === 0 && frame.kind === 'wild' && foes?.id === frame.id) {
         const beaten = [...foes.fainted].filter((uid) => !foes.alphas.has(uid)).map((uid) => foes.levels.get(uid) ?? 1);
+        this.questDefeats([...foes.fainted].map((uid) => foes.species.get(uid) ?? ''));
         if (beaten.length) {
           this.gainXp(beaten.length * TRAINER_XP.wildWin);
           // Shown as the battle closes, in place of "Back to exploring".
@@ -721,6 +729,13 @@ export class Game {
     if (this.flags.has('met-gudrun') && !picnickerState(this.save.picnicker).wins) {
       const p = this.picnicker.position;
       quests.push({ id: 'cookoff', text: 'Beat Gudrun in a cook-off (bring 3 Wild Mushrooms)', target: { x: p.x, z: p.z } });
+    }
+    const side = this.save.sideQuests ?? {};
+    for (const def of SIDE_QUESTS) {
+      const e = side[def.id];
+      if (e?.state !== 'active') continue;
+      const ready = goalMet(def, e, this.questContext());
+      quests.push({ id: `side:${def.id}`, text: ready ? `${def.title}: go and tell ${def.giver}` : questLogText(def, e), ...(ready ? { target: { x: def.x, z: def.z } } : {}) });
     }
     if (this.flags.has('met-sten')) {
       const st = defectorState(this.save.defector), found = this.save.found ?? [];
@@ -1972,6 +1987,102 @@ export class Game {
     this.endScene();
   }
 
+  /** What a side quest's goal looks at: your bag and the species in your party. */
+  private questContext(): { bag: Record<string, number>; party: string[] } {
+    return { bag: this.save.bag ?? {}, party: this.party.map((c) => c.species) };
+  }
+
+  /** A side quest giver: take the quest, hear how you're getting on, or hand it in for the reward. */
+  private async talkToVillager(v: Villager): Promise<void> {
+    this.beginScene();
+    const def = v.def;
+    v.lookAt(this.controller.position);
+    const say = (text: string) => ({ speaker: def.giver, text });
+    const quests = (this.save.sideQuests = sideQuestState(this.save.sideQuests));
+    const entry = quests[def.id];
+    if (!entry) {
+      const heard = this.flags.has(`heard-${def.id}`);
+      const [pick] = await this.hud.dialogue.play([...(heard ? [] : def.intro.map(say)), { ...say(def.ask), choices: ['Leave it to me', 'Not now'] }]);
+      if (!heard) this.setFlag(`heard-${def.id}`);
+      if (pick === 0) {
+        quests[def.id] = def.goal.kind === 'defeat' ? { state: 'active', n: 0 } : { state: 'active' };
+        await this.hud.dialogue.play([say(def.accepted)]);
+        writeSave(this.save);
+        this.hud.showToast(`Side quest: ${def.title}`, def.log, 3);
+      } else await this.hud.dialogue.play([say("Oh. Well, I'll be here if you change your mind.")]);
+    } else if (entry.state === 'active' && goalMet(def, entry, this.questContext())) {
+      await this.finishSideQuest(def, entry);
+    } else if (entry.state === 'active') {
+      const g = def.goal;
+      // A survey of several species says which you still need to bring.
+      const progress = g.kind === 'defeat' ? `${entry.n ?? 0} of ${g.count} so far. ` : g.kind === 'show' && g.species.length > 1 ? `I still need a ${g.species.filter((sp) => !this.party.some((c) => c.species === sp)).map((sp) => species(sp).name).join(' and a ')}. ` : '';
+      await this.hud.dialogue.play([say(progress + def.waiting)]);
+    } else await this.hud.dialogue.play([say(def.after)]);
+    v.lookAt(null);
+    this.endScene();
+    this.refreshQuests();
+  }
+
+  /** Hand a side quest in: items you bring go to the giver, then the reward. */
+  private async finishSideQuest(def: SideQuestDef, entry: { state: 'active' | 'done'; n?: number }): Promise<void> {
+    const bag = (this.save.bag ??= {});
+    if (def.goal.kind === 'bring') for (const [id, n] of Object.entries(def.goal.items)) if (!(bag[id] -= n)) delete bag[id];
+    await this.hud.dialogue.play(def.done.map((text) => ({ speaker: def.giver, text })));
+    entry.state = 'done';
+    const got: string[] = [];
+    if (def.reward.money) {
+      this.earn(def.reward.money, `Reward from ${def.giver}`, false);
+      got.push(formatMoney(def.reward.money));
+    }
+    for (const [id, n] of Object.entries(def.reward.items ?? {})) {
+      bag[id] = (bag[id] ?? 0) + n;
+      got.push(n > 1 ? `${n} ${ITEMS[id]?.name ?? id}s` : `a ${ITEMS[id]?.name ?? id}`);
+    }
+    this.gainXp(def.reward.xp);
+    writeSave(this.save);
+    this.hud.showToast(`Side quest done: ${def.title}`, `You got ${got.join(' and ')}`, 3.5);
+    if (this.menu?.isOpen) this.menu.refresh();
+  }
+
+  /** Wild Pokémon knocked out in a battle you won count towards open side quests. */
+  private questDefeats(knocked: string[]): void {
+    const moved = creditDefeats((this.save.sideQuests = sideQuestState(this.save.sideQuests)), knocked);
+    if (!moved.length) return;
+    writeSave(this.save);
+    this.refreshQuests();
+    const last = moved[moved.length - 1], g = last.def.goal;
+    // After the prize money toast (and a level-up's, which waits 2.4 s).
+    if (g.kind === 'defeat') setTimeout(() => this.hud.showToast(last.n >= g.count ? `${last.def.title}: done! Go and tell ${last.def.giver}` : `${last.def.title}: ${last.n} of ${g.count}`, `${species(g.species).name} knocked out for ${last.def.giver}`, 3), 4200);
+  }
+
+  /** Givers watch you come close, and wear "!" for a quest to take or "?" for one to hand in. */
+  private updateVillagers(dt: number): void {
+    const p = this.controller.position;
+    const quests = this.save.sideQuests ?? {};
+    // Checking goals reads the bag and party: a few times a second is plenty.
+    const refresh = (this.villagerTick -= dt) <= 0;
+    if (refresh) this.villagerTick = 0.4;
+    const ctx = refresh ? this.questContext() : null;
+    let ready = '';
+    for (const v of this.villagers) {
+      if (!this.talking) v.lookAt(p.distanceTo(v.position) < 7 ? p : null);
+      if (ctx) {
+        const e = quests[v.def.id];
+        const met = e?.state === 'active' && goalMet(v.def, e, ctx);
+        if (met) ready += v.def.id + ',';
+        v.setMark(!e ? 'new' : met ? 'ready' : null);
+      }
+      v.update(dt, p);
+    }
+    // A catch or a full bag can make a quest ready to hand in: the quest log says so.
+    if (ctx && ready !== this.questsReady) {
+      this.questsReady = ready;
+      this.refreshQuests();
+    }
+  }
+  private villagerTick = 0;
+  private questsReady = '';
+
   /** Gudrun watches anyone who comes up the hill. */
   private updatePicnicker(dt: number): void {
     const p = this.controller.position;
@@ -2115,6 +2226,7 @@ export class Game {
     await this.storeCaught(outcome.caught);
     if (start.kind === 'wild' && outcome.winner === 0) {
       const beaten = start.foes.filter((f) => outcome.fainted.has(f.uid) && !f.alpha);
+      this.questDefeats(start.foes.filter((f) => outcome.fainted.has(f.uid)).map((f) => f.species));
       if (beaten.length) {
         this.gainXp(beaten.length * TRAINER_XP.wildWin);
         this.earn(wildPrize(beaten.map((f) => f.level)), 'Prize money');
@@ -2238,7 +2350,7 @@ export class Game {
       money: this.save.money ?? 0,
       meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },
       throwing: { aiming: this.aiming, ball: this.aimBall, balls: Object.fromEntries(this.throwKinds().map((b) => [b, this.save.bag?.[b] ?? 0])), treats: this.wild.treats.length, intercept: this.intercept ? displayName(this.intercept.m.creature) : null, inFlight: this.throws.busy, dropped: this.throws.droppedCount, lastCatch: this.lastCatch },
-      trainers: this.trainers.filter((t) => t.visible).map((t) => ({ id: t.def.id, position: [t.position.x, t.position.z].map((v) => Math.round(v * 10) / 10), patrolling: t.patrolling, standing: trainerStanding(this.save.trainers, t.def.id, trainerDay(Date.now())) })), trainerEngaged: this.trainerEngaged?.def.id ?? null, defector: { met: this.flags.has('met-sten'), ...defectorState(this.save.defector) }, picnicker: { met: this.flags.has('met-gudrun'), ...picnickerState(this.save.picnicker) }, cookoff: this.hud.cookoff.active ? this.hud.cookoff.debugState() : null, destination: this.destination,
+      trainers: this.trainers.filter((t) => t.visible).map((t) => ({ id: t.def.id, position: [t.position.x, t.position.z].map((v) => Math.round(v * 10) / 10), patrolling: t.patrolling, standing: trainerStanding(this.save.trainers, t.def.id, trainerDay(Date.now())) })), trainerEngaged: this.trainerEngaged?.def.id ?? null, defector: { met: this.flags.has('met-sten'), ...defectorState(this.save.defector) }, picnicker: { met: this.flags.has('met-gudrun'), ...picnickerState(this.save.picnicker) }, sideQuests: this.save.sideQuests ?? {}, villagers: this.villagers.filter((v) => v.visible).map((v) => ({ id: v.def.id, mark: v.markShown })), cookoff: this.hud.cookoff.active ? this.hud.cookoff.debugState() : null, destination: this.destination,
       wildCreatures: this.wild.creatures.map((m) => ({ species: m.creature.species, level: m.creature.level, alpha: m.alpha ? true : undefined, state: m.state, alert: Math.round(m.alert), attack: m.attack?.phase, position: [m.mover.pos.x, m.mover.pos.z].map((v) => Math.round(v * 10) / 10) })) });
   }
 
@@ -2346,13 +2458,16 @@ export class Game {
       const nearTrainer = !nearProf && !nearRival ? this.trainers.find((t) => t.visible && t.patrolling && pos.distanceTo(t.position) < TALK_RADIUS) ?? null : null;
       const nearBale = !nearProf && !nearRival && !nearTrainer && Math.hypot(pos.x - DEFECTOR.x, pos.z - DEFECTOR.z) < TALK_RADIUS + 0.9;
       const nearGudrun = !nearProf && !nearRival && !nearTrainer && !nearBale && pos.distanceTo(this.picnicker.position) < TALK_RADIUS + 0.6;
-      const pickup = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !this.aiming ? this.throws.nearestPickup(pos) : null;
-      const find = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
-      const home = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !pickup && !find ? this.nearHome(pos) : null;
-      const shop = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !pickup && !find && !home ? this.shopNear(pos) : null;
-      const station = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !pickup && !find && !home && !shop ? this.stationsNear(pos)[0] ?? null : null;
-      const wildMon = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun ? this.wild.nearestEngageable(pos) : null;
-      const free = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !pickup && !find && !home && !shop && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
+      const nearVillager = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun ? this.villagers.find((v) => v.visible && pos.distanceTo(v.position) < TALK_RADIUS) ?? null : null;
+      // Someone to talk to beats everything else at hand.
+      const talkable = nearProf || nearRival || !!nearTrainer || nearBale || nearGudrun || !!nearVillager;
+      const pickup = !talkable && !this.aiming ? this.throws.nearestPickup(pos) : null;
+      const find = !talkable && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
+      const home = !talkable && !pickup && !find ? this.nearHome(pos) : null;
+      const shop = !talkable && !pickup && !find && !home ? this.shopNear(pos) : null;
+      const station = !talkable && !pickup && !find && !home && !shop ? this.stationsNear(pos)[0] ?? null : null;
+      const wildMon = !talkable ? this.wild.nearestEngageable(pos) : null;
+      const free = !talkable && !pickup && !find && !home && !shop && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
       let gather = free ? this.nearestGather(pos) : null;
       const waterAt = free ? this.nearWater(pos) : null;
       let water = waterAt && this.waterPrompt(waterAt) ? waterAt : null;
@@ -2373,6 +2488,7 @@ export class Game {
       else if (nearRival) this.hud.setPrompt(`Talk to ${this.rival.name}`);
       else if (nearTrainer) this.hud.setPrompt(`Talk to ${nearTrainer.name}`);
       else if (nearGudrun) this.hud.setPrompt(`Talk to ${PICNICKER.name}`);
+      else if (nearVillager) this.hud.setPrompt(`Talk to ${nearVillager.name}`);
       else if (nearBale) this.hud.setPrompt(this.flags.has('met-sten') ? `Talk to ${DEFECTOR.name}` : `Look at the ${BALE_NAME.toLowerCase()}`);
       else if (pickup) this.hud.setPrompt(`Pick up the ${ITEMS[pickup.ball]?.name ?? 'ball'}`);
       else if (find) this.hud.setPrompt(DISCOVERY_LABEL[find.def.kind].prompt);
@@ -2398,6 +2514,7 @@ export class Game {
         else if (nearTrainer) void this.talkToTrainer(nearTrainer);
         else if (nearBale) void this.talkToDefector();
         else if (nearGudrun) void this.talkToPicnicker();
+        else if (nearVillager) void this.talkToVillager(nearVillager);
         else if (pickup) this.pickupBall(pickup.id);
         else if (find) void this.openDiscovery(find);
         else if (home) void this.restAtHome();
@@ -2453,6 +2570,7 @@ export class Game {
     this.updateTrainers(dt);
     this.updateDefector(dt);
     this.updatePicnicker(dt);
+    this.updateVillagers(dt);
     const friends = [...this.partnerWild.values()];
     this.wild.setRemoteBusy(new Set(friends.flatMap((f) => f.busy)));
     this.wild.setFriendCells(friends.flatMap((f) => f.cells));
