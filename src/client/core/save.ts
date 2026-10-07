@@ -37,6 +37,8 @@ export interface SaveData {
   depleted?: Record<string, number>;
   /** Uses left on the tool in hand, per tool id (missing: a fresh one). */
   toolWear?: Record<string, number>;
+  /** Stardust picked up tonight (`src/shared/stardust.ts`); forgotten the next night. */
+  stardust?: { night: number; taken: string[] };
   /** Recipes made at least once (the first time gives experience). */
   crafted?: string[];
   /** Hunger, thirst and queasiness (DESIGN §6.1). Missing on older saves: fed, watered and well. */

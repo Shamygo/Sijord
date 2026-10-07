@@ -128,6 +128,18 @@ export const ITEMS: Record<string, ItemInfo> = {
     id: 'canteen', name: 'Canteen', category: 'tools', icon: '🍶',
     description: 'A copper-lined flask. Each one carries three drinks: fill it at any river, lake or pond.',
   },
+  'lantern': {
+    id: 'lantern', name: 'Lantern', category: 'tools', icon: '🏮',
+    description: 'A copper lantern that hangs from your belt. Press L to light it after dark, and again to put it out. It holds about 20 minutes of oil, then it\'s spent. By its light you can find fallen stardust.',
+  },
+  'stardust': {
+    id: 'stardust', name: 'Stardust', category: 'materials', icon: '✨', sprite: 'stardust',
+    description: 'Fine red sand that falls on the meadows at night and glitters in the grass. Only found by lantern light, and gone by dawn. The shops pay well for it.',
+  },
+  'star-piece': {
+    id: 'star-piece', name: 'Star Piece', category: 'materials', icon: '⭐', sprite: 'star-piece',
+    description: 'A shard of a fallen star, found by lantern light on rare nights. Worth a great deal at the shops.',
+  },
   'trainer-journal': {
     id: 'trainer-journal', name: 'Trainer Journal', category: 'key', icon: '📓', sprite:'fashion-case',
     description: 'Your notes on the journey so far. Quests are tracked here.',

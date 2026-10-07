@@ -37,6 +37,7 @@ export const RECIPES: Recipe[] = [
   { id: 'potion', out: 'bandage', count: 1, cost: { 'bramble-berry': 2, fiber: 1 }, station: 'workbench', level: 3, seconds: 2.5 },
   { id: 'poke-ball', out: 'poke-ball', count: 1, cost: { 'red-apricorn': 1, 'copper-ore': 1, fiber: 2 }, station: 'workbench', level: 3, seconds: 3 },
   { id: 'canteen', out: 'canteen', count: 1, cost: { 'copper-ore': 1, fiber: 2, wood: 2 }, station: 'workbench', level: 3, seconds: 3 },
+  { id: 'lantern', out: 'lantern', count: 1, cost: { 'copper-ore': 2, 'woven-cloth': 1, wood: 1 }, station: 'workbench', level: 3, seconds: 4, tp: 1 },
   { id: 'cloth-cap', out: 'cloth-cap', count: 1, cost: { 'woven-cloth': 2, fiber: 1 }, station: 'workbench', level: 3, seconds: 3, tp: 1 },
   { id: 'cloth-trousers', out: 'cloth-trousers', count: 1, cost: { 'woven-cloth': 3, fiber: 2 }, station: 'workbench', level: 3, seconds: 3.5, tp: 1 },
   { id: 'cloth-tunic', out: 'cloth-tunic', count: 1, cost: { 'woven-cloth': 4, fiber: 2 }, station: 'workbench', level: 4, seconds: 4, tp: 1 },

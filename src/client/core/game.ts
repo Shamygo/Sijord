@@ -45,7 +45,11 @@ import { COOK_MAX, cookoffWon, PICNICKER, PICNICKER_INTRO, picnickerState, rival
 import { Picnicker } from '../npc/picnicker';
 import { creditDefeats, goalMet, questLogText, SIDE_QUESTS, sideQuestState, type SideQuestDef } from '../../shared/sidequests';
 import { Villager } from '../npc/villager';
-import { clockAt, clockText, offsetFor } from '../../shared/daynight';
+import { clockAt, clockText, isNight, offsetFor } from '../../shared/daynight';
+import { burnLantern, isDark, LANTERN, lanternOil } from '../../shared/lantern';
+import { litAt, nightOf, stardustState } from '../../shared/stardust';
+import { CarriedLantern } from '../player/lantern';
+import { StardustField, type FallenStar } from '../world/stardust';
 import { answerFor, CARTOGRAPHER, CARTOGRAPHER_ASK, CARTOGRAPHER_INTRO, CARTOGRAPHER_REVEAL, cartographerState, hasTreasureMap, MAP_ERRORS, placeList, surveyAt, toCheck, toReport, TREASURE } from '../../shared/cartographer';
 import { Cartographer, TreasureSpot } from '../npc/cartographer';
 import type { ResourceNode } from '../world/resources';
@@ -147,7 +151,7 @@ export class Game {
   private gameMinutes = clockAt(Date.now());
   /** Shifts the clock for testing (`debugTimeOfDay`). */
   private clockOffset = 0;
-  /** Stops the clock at a time of day for testing (`debugTimeOfDay`). */
+  /** Stops the clock at a moment for testing (`debugTimeOfDay`). */
   private clockHold: number | null = null;
   /** Set when we release the mouse on purpose (menus, dialogue) so it doesn't count as a pause. */
   private suppressPause = false;
@@ -183,6 +187,15 @@ export class Game {
   private picnicker!: Picnicker;
   private cartographer!: Cartographer;
   private treasure!: TreasureSpot;
+  /** Your lantern on your belt, and your friend's (the light is always there, dark when out). */
+  private lantern = new CarriedLantern();
+  private partnerLantern = new CarriedLantern();
+  /** Friends whose lanterns are lit. */
+  private partnerLit = new Set<string>();
+  /** Seconds until lantern oil is next saved. */
+  private oilSaveT = 30;
+  /** Tonight's fallen stardust. */
+  private stardust!: StardustField;
   /** The people around Hearthmeadow with side quests. */
   private villagers: Villager<SideQuestDef>[] = [];
   private baleRustle = 0;
@@ -279,6 +292,10 @@ export class Game {
     this.treasure = new TreasureSpot(this.world);
     this.treasure.setDug(maps.dug);
     this.scene.add(this.treasure.root);
+    this.scene.add(this.lantern.root, this.partnerLantern.root);
+    // Stardust falls in the same places for both friends: seeded by the world's name.
+    this.stardust = new StardustField(this.world, seedFromName(save.room));
+    this.scene.add(this.stardust.root);
     this.updateNpcState();
     this.scene.add(this.follower.root);
     // Herds come from the world's name, so both friends meet the same ones.
@@ -418,6 +435,7 @@ export class Game {
         const engaged = trainerById(s.trainer);
         if (engaged) this.partnerTrainer.set(id, engaged.id); else this.partnerTrainer.delete(id);
         if (pf) pf.work = Array.isArray(s.work) && s.work.length === 3 && s.work.every(Number.isFinite) ? s.work : null;
+        if (s.lantern === true) this.partnerLit.add(id); else this.partnerLit.delete(id);
         // The partner's throws replay here (catching itself is decided on their side).
         if (s.ballThrow && ITEMS[s.ballThrow.ball] && this.throws.remoteThrow(id, s.ballThrow, THROW_CLIP.release)) this.partners.get(id)?.remote.avatar.gesture('throw');
         if (s.ballCatch && ITEMS[s.ballCatch.ball]) this.throws.remoteCatch(id, s.ballCatch);
@@ -431,6 +449,7 @@ export class Game {
         this.partnerBattles.delete(id); this.battle?.director.partnerLeft(id);
         this.partnerWild.delete(id);
         this.partnerTrainer.delete(id);
+        this.partnerLit.delete(id);
         if (this.remoteBattleHost === id) { this.finishRemoteBattle(); this.hud.showToast('Partner disconnected', 'The shared battle ended on this device.'); }
         const p = this.partners.get(id);
         if (!p) return;
@@ -517,7 +536,7 @@ export class Game {
   debugTimeOfDay(hours: number | null, hold = true): string {
     const now = Date.now();
     this.clockOffset = hours === null ? 0 : offsetFor(hours * 60, now);
-    this.clockHold = hours !== null && hold ? clockAt(now + this.clockOffset) : null;
+    this.clockHold = hours !== null && hold ? now + this.clockOffset : null;
     return clockText(clockAt(now + this.clockOffset));
   }
 
@@ -2184,6 +2203,99 @@ export class Game {
     this.gathering = { node: null, dig: true, t: 0, way: { prompt: '', doing: 'Digging', gives: {}, seconds: TREASURE.seconds, anim: 'chop', tool: TREASURE.tool } };
   }
 
+  /** The moment the clock reads: the wall clock, shifted or held for testing. */
+  private clockMs(): number {
+    return this.clockHold ?? Date.now() + this.clockOffset;
+  }
+
+  /** L: light the lantern, or put it out. It only lights after sunset, and only if you have one. */
+  private toggleLantern(): void {
+    const bag = this.save.bag ?? {};
+    if (this.lantern.lit) {
+      this.lantern.setOn(false);
+      writeSave(this.save);
+      this.hud.showToast('You put out your lantern');
+      return;
+    }
+    if (!bag[LANTERN.item]) {
+      this.hud.showToast('You have no lantern', 'Make one at the Bramblewick workbench, or buy one at Field Supplies');
+      return;
+    }
+    if (!isDark(this.gameMinutes)) {
+      this.hud.showToast("It's light enough without it", 'Save the oil for after sunset');
+      return;
+    }
+    this.lantern.setOn(true);
+    const oil = lanternOil(bag, this.save.toolWear ?? {});
+    this.hud.showToast('Lantern lit', `About ${Math.max(1, Math.round(oil / 60))} minutes of oil left`);
+  }
+
+  /** Burn the lantern's oil, put it out at sunrise, and hang each lantern on its trainer. */
+  private updateLanterns(dt: number): void {
+    if (this.lantern.lit) {
+      const bag = (this.save.bag ??= {});
+      if (!bag[LANTERN.item]) {
+        // Sold or dropped while it was lit.
+        this.lantern.setOn(false);
+      } else if (!isDark(this.gameMinutes)) {
+        this.lantern.setOn(false);
+        writeSave(this.save);
+        this.hud.showToast("It's light out", 'You put out your lantern');
+      } else {
+        const { burnedOut } = burnLantern(bag, (this.save.toolWear ??= {}), dt);
+        if (burnedOut) {
+          const spare = (bag[LANTERN.item] ?? 0) > 0;
+          this.lantern.setOn(spare);
+          writeSave(this.save);
+          this.hud.showToast('Your lantern burned dry', spare ? 'You light your spare' : 'Make another at the workbench');
+          if (this.menu?.isOpen) this.menu.refresh();
+        } else if ((this.oilSaveT -= dt) <= 0) {
+          this.oilSaveT = 30;
+          writeSave(this.save);
+        }
+      }
+    }
+    const avatar = this.avatar.root.visible ? this.avatar.root : null;
+    this.lantern.update(dt, avatar, this.elapsed);
+    const friend = [...this.partnerLit].map((id) => this.partners.get(id)).find((p) => p && p.remote.root.visible);
+    this.partnerLantern.setOn(!!friend);
+    this.partnerLantern.update(dt, friend ? friend.remote.avatar.root : null, this.elapsed);
+  }
+
+  /** Lay out tonight's stardust and show it while it's dark. */
+  private updateStardust(): void {
+    const night = nightOf(this.clockMs());
+    if (night !== this.stardust.night) this.stardust.setNight(night, stardustState(this.save.stardust, night).taken);
+    this.stardust.update(this.elapsed, this.controller.position, isNight(this.gameMinutes));
+  }
+
+  /** Whether a lantern (yours or your friend's) is close enough to find stardust by. */
+  private starLit(star: FallenStar): boolean {
+    const lights: { x: number; z: number; r: number }[] = [];
+    if (this.lantern.lit) lights.push({ x: this.controller.position.x, z: this.controller.position.z, r: LANTERN.reach });
+    for (const id of this.partnerLit) {
+      const p = this.partners.get(id)?.remote.root.position;
+      if (p) lights.push({ x: p.x, z: p.z, r: LANTERN.reach });
+    }
+    return litAt(star.x, star.z, lights);
+  }
+
+  private pickStardust(star: FallenStar): void {
+    const st = stardustState(this.save.stardust, this.stardust.night);
+    if (st.taken.includes(star.id)) return;
+    st.taken.push(star.id);
+    this.save.stardust = st;
+    const bag = (this.save.bag ??= {});
+    const id = star.piece ? 'star-piece' : 'stardust';
+    bag[id] = (bag[id] ?? 0) + 1;
+    this.stardust.take(star.id);
+    this.gainXp(TRAINER_XP.stardust);
+    writeSave(this.save);
+    const left = this.stardust.spots.filter((p) => !p.taken).length;
+    this.hud.showToast(star.piece ? 'A Star Piece!' : 'Stardust', `${left ? `${left} more fell tonight` : "That's the last of tonight's"} · the shops pay well for it`);
+    if (this.menu?.isOpen) this.menu.refresh();
+  }
+
   /** The chest comes up: Edvin's grandmother's savings and an Ultra Ball, the only one in the vale. */
   private finishDig(): void {
     const st = (this.save.cartographer = cartographerState(this.save.cartographer));
@@ -2490,7 +2602,7 @@ export class Game {
   debugAdvance(ms: number): void { for (let t = 0; t < ms; t += 1000 / 60) this.frame(1 / 60); }
 
   debugText(): string {
-    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', time: clockText(this.gameMinutes), player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, found:this.save.found?.length ?? 0, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
+    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', time: clockText(this.gameMinutes), lantern: { lit: this.lantern.lit, oil: Math.round(lanternOil(this.save.bag ?? {}, this.save.toolWear ?? {})), partner: this.partnerLit.size > 0 }, stardust: { night: this.stardust.night, out: this.stardust.root.visible, left: this.stardust.spots.filter((p) => !p.taken).length }, player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, found:this.save.found?.length ?? 0, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
       trainerHp: { hp: Math.round(this.vitals.hp * 10) / 10, max: this.vitals.max, down: this.vitals.knockedDown },
       money: this.save.money ?? 0,
       meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },
@@ -2504,7 +2616,7 @@ export class Game {
     const dt = (step ?? Math.min(this.timer.getDelta(), 0.1)) * this.debugTimeScale;
     this.elapsed += dt;
     // Both friends read the time of day off the wall clock, so their skies match.
-    this.gameMinutes = this.clockHold ?? clockAt(Date.now() + this.clockOffset);
+    this.gameMinutes = clockAt(this.clockMs());
     const tod = this.world.setTimeOfDay?.(this.gameMinutes);
     if (tod) {
       if (this.scene.fog) this.scene.fog.color.copy(tod.fog);
@@ -2539,6 +2651,7 @@ export class Game {
     this.hud.cookoff.update(dt);
     this.updateAim(dt, busy);
     if (!busy && input.consumeAction('heal')) this.healSelf();
+    if (!busy && input.consumeAction('lantern')) this.toggleLantern();
     const knocked = this.vitals.knockedDown;
     if (actionMode) {
       const x = Math.sin(this.cam.yaw) * move.forward - Math.cos(this.cam.yaw) * move.right;
@@ -2616,11 +2729,13 @@ export class Game {
       const dig = !talkable && !this.gathering && this.treasureHere(pos);
       const pickup = !talkable && !dig && !this.aiming ? this.throws.nearestPickup(pos) : null;
       const find = !talkable && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
-      const home = !talkable && !pickup && !find ? this.nearHome(pos) : null;
-      const shop = !talkable && !pickup && !find && !home ? this.shopNear(pos) : null;
-      const station = !talkable && !pickup && !find && !home && !shop ? this.stationsNear(pos)[0] ?? null : null;
+      const star = !talkable && !pickup && !find && !this.aiming ? this.stardust.nearest(pos) : null;
+      const starLit = !!star && this.starLit(star);
+      const home = !talkable && !pickup && !find && !star ? this.nearHome(pos) : null;
+      const shop = !talkable && !pickup && !find && !star && !home ? this.shopNear(pos) : null;
+      const station = !talkable && !pickup && !find && !star && !home && !shop ? this.stationsNear(pos)[0] ?? null : null;
       const wildMon = !talkable ? this.wild.nearestEngageable(pos) : null;
-      const free = !talkable && !pickup && !find && !home && !shop && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
+      const free = !talkable && !pickup && !find && !star && !home && !shop && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
       let gather = free ? this.nearestGather(pos) : null;
       const waterAt = free ? this.nearWater(pos) : null;
       let water = waterAt && this.waterPrompt(waterAt) ? waterAt : null;
@@ -2647,6 +2762,7 @@ export class Game {
       else if (nearBale) this.hud.setPrompt(this.flags.has('met-sten') ? `Talk to ${DEFECTOR.name}` : `Look at the ${BALE_NAME.toLowerCase()}`);
       else if (pickup) this.hud.setPrompt(`Pick up the ${ITEMS[pickup.ball]?.name ?? 'ball'}`);
       else if (find) this.hud.setPrompt(DISCOVERY_LABEL[find.def.kind].prompt);
+      else if (star) starLit ? this.hud.setPrompt(`Pick up the ${star.piece ? 'Star Piece' : 'Stardust'}`) : this.hud.setPrompt('Something glitters in the grass · too dark to find it without a light', '');
       else if (home) this.hud.setPrompt(`Rest at ${home.id === 'p1-house' ? 'home' : 'your friend’s house'}`);
       else if (shop) this.hud.setPrompt(shop.prompt);
       else if (station) this.hud.setPrompt(station === 'workbench' ? 'Use the workbench' : 'Cook at the campfire');
@@ -2674,6 +2790,7 @@ export class Game {
         else if (dig === 'dig') this.startDig();
         else if (pickup) this.pickupBall(pickup.id);
         else if (find) void this.openDiscovery(find);
+        else if (star && starLit) this.pickStardust(star);
         else if (home) void this.restAtHome();
         else if (shop) this.openMenu('shop');
         else if (station) this.openMenu('craft');
@@ -2761,11 +2878,13 @@ export class Game {
     const wildBusy = this.wild.sharedBusy;
     const wildCells = this.wild.liveCells;
     const work: [number, number, number] | undefined = partnerWork ? [partnerWork.x, partnerWork.z, partnerWork.r].map((v) => Math.round(v * 100) / 100) as [number, number, number] : undefined;
-    this.net.send({ ...snap, lead, leadAlpha, trainer: this.trainerEngaged?.def.id, work, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl, ballThrow, ballCatch, down: down > 0 ? Math.round(down * 100) / 100 : undefined, wildTaken: wildTaken.length ? wildTaken : undefined, wildBusy: wildBusy.length ? wildBusy : undefined, wildCells: wildCells.length ? wildCells : undefined }, now);
+    this.net.send({ ...snap, lead, leadAlpha, trainer: this.trainerEngaged?.def.id, work, lantern: this.lantern.lit || undefined, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl, ballThrow, ballCatch, down: down > 0 ? Math.round(down * 100) / 100 : undefined, wildTaken: wildTaken.length ? wildTaken : undefined, wildBusy: wildBusy.length ? wildBusy : undefined, wildCells: wildCells.length ? wildCells : undefined }, now);
 
     // Also keeps the sun's shadow camera centred on the player.
     this.world.update(dt, this.elapsed, this.controller.position);
     this.discoveries.update(dt, this.elapsed, this.controller.position);
+    this.updateLanterns(dt);
+    this.updateStardust();
 
     const partner = [...this.partners.values()][0]?.remote.root.position;
     const alpha = this.wild.alphas[0];

@@ -61,6 +61,8 @@ export interface PlayerSnapshot {
   wildCells?: string[];
   /** The roaming trainer walking up to or battling this player (a trainer id). */
   trainer?: string;
+  /** This player's lantern is lit. */
+  lantern?: boolean;
 }
 
 /** A thrown ball: the partner replays the same physical flight from the same launch. */
