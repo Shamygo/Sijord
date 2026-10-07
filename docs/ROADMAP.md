@@ -107,7 +107,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 
 **Exit criterion:** players walk from Bramblewick to a large city through 3 biomes without loading screens, discovering settlements and POIs along the way, and fast travel back.
 
-**Status 2026-10-07:** day and night is in early: a 30-minute day on a clock both players share (read from the wall clock), with dawn, golden hour, sunset, dusk and a blue moonlit night with stars, and lanterns and the campfire lighting their surroundings after dark (`src/shared/daynight.ts`, `src/client/world/daynight.ts`). The lantern and fallen stardust give the nights something to do; weather and night-only spawns are still to do.
+**Status 2026-10-07:** day and night is in early: a 30-minute day on a clock both players share (read from the wall clock), with dawn, golden hour, sunset, dusk and a blue moonlit night with stars, and lanterns and the campfire lighting their surroundings after dark (`src/shared/daynight.ts`, `src/client/world/daynight.ts`). Night herds come from their own tables (Zubat, Oddish, Meowth, Clefairy and Jigglypuff by night, birds and bugs mostly asleep), and the lantern and fallen stardust give the nights something to do. Weather is still to do.
 
 ---
 

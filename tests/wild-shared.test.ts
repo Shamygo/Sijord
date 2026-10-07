@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { SHARED_SPAWN, seedFromName, WildManager } from '../src/client/overworld/wild';
+import { entryWeight, SHARED_SPAWN, seedFromName, WildManager, ZONES } from '../src/client/overworld/wild';
 import type { World } from '../src/client/world/types';
 
 function fakeWorld(): World {
@@ -20,8 +20,8 @@ function fakeWorld(): World {
 
 const T0 = 1_800_000_000_000;
 /** Two players' managers: different behaviour seeds, same world name. */
-function pair(world = fakeWorld(), name = 'our-world', clock = () => T0) {
-  const opts = { clock, modelReady: () => true };
+function pair(world = fakeWorld(), name = 'our-world', clock = () => T0, night = () => false) {
+  const opts = { clock, modelReady: () => true, night };
   return [new WildManager(world, 11, seedFromName(name), opts), new WildManager(world, 99, seedFromName(name), opts)] as const;
 }
 
@@ -128,5 +128,51 @@ describe('shared wild herds', () => {
     a.enterBattle([x, y]);
     a.leaveBattle([x, y], new Set([x.creature.uid]));
     expect(a.sharedTaken).toEqual([x.key]);
+  });
+
+  it('night brings out its own herds, the same for both friends', () => {
+    const [a, b] = pair(fakeWorld(), 'our-world', () => T0, () => true);
+    const [day] = pair();
+    for (const w of [a, b, day]) spawnAt(w, field);
+    expect(a.creatures.length).toBeGreaterThan(0);
+    expect(describeHerds(a)).toEqual(describeHerds(b));
+    // Night herds are a separate roll, under their own keys.
+    const keys = new Set(day.creatures.map((m) => m.key));
+    expect(a.creatures.some((m) => keys.has(m.key))).toBe(false);
+  });
+
+  it('a friend still out in the day herds after dusk is met in them', () => {
+    const [a] = pair();
+    const [, b] = pair(fakeWorld(), 'our-world', () => T0, () => true);
+    spawnAt(a, field);
+    b.setFriendCells(a.liveCells);
+    spawnAt(b, field);
+    const cellOf = (key?: string) => String(key).split(',').slice(0, 2).join(',');
+    const theirs = new Set(a.creatures.map((m) => cellOf(m.key)));
+    expect(describeHerds(b).filter((h) => theirs.has(cellOf(h.key)))).toEqual(describeHerds(a));
+  });
+
+  it('by night the birds and bugs sleep and Zubat, Oddish and Meowth come out', () => {
+    const [w] = pair();
+    const count = (night: boolean) => {
+      const n: Record<string, number> = {};
+      const e = Math.floor(T0 / SHARED_SPAWN.epochMs) * 2 + (night ? 1 : 0);
+      // Cells within Route 1's reach of town (the fake world is flat open ground).
+      for (let i = -5; i <= 5; i++) for (let j = -9; j <= 1; j++) for (let k = 0; k < 6; k++) {
+        const plan = w.cellPlan(i, j, e + k * 2);
+        if (plan) n[plan.entry.species] = (n[plan.entry.species] ?? 0) + 1;
+      }
+      return n;
+    };
+    const day = count(false), night = count(true);
+    expect(day.zubat ?? 0).toBeLessThan(night.zubat ?? 0);
+    expect(night.oddish ?? 0).toBeGreaterThan(day.oddish ?? 0);
+    expect(night.meowth ?? 0).toBeGreaterThan(day.meowth ?? 0);
+    expect(night.finchlet ?? 0).toBeLessThan(day.finchlet ?? 0);
+    // Near town, Zubat only ever come out at night.
+    const near = ZONES[0].entries.find((e) => e.species === 'zubat')!;
+    expect(entryWeight(near, false)).toBe(0);
+    expect(entryWeight(near, true)).toBeGreaterThan(0);
+    for (const z of ZONES) for (const e of z.entries) expect(entryWeight(e, false) + entryWeight(e, true)).toBeGreaterThan(0);
   });
 });
