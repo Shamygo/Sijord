@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CARTOGRAPHER, TREASURE } from '../../shared/cartographer';
 import { PICNICKER } from '../../shared/cookoff';
 import { DEFECTOR } from '../../shared/defector';
 import type { Collider, World } from './types';
@@ -118,6 +119,9 @@ export function createWorld(): World {
     { x: bridge.x, z: bridge.z, r: 26 },
     { x: POI.loneTree.x, z: POI.loneTree.z, r: 12 },
     { x: POI.dock.x, z: POI.dock.z, r: 10 },
+    // Edvin's easel and the cairn over his treasure.
+    { x: CARTOGRAPHER.x, z: CARTOGRAPHER.z, r: 4 },
+    { x: TREASURE.x, z: TREASURE.z, r: 4 },
   ];
   const reserved = (x: number, z: number, margin: number): boolean => {
     if (Math.hypot(x - TOWN.x, z - TOWN.z) < TOWN.fenceR + 10 + margin) return true;
@@ -151,6 +155,8 @@ export function createWorld(): World {
   // Trampled grass round Gudrun's picnic and Sten's bale, so the blanket and the bale's foot show.
   thinGrass(PICNICKER.x, PICNICKER.z, 4.5, 0.12);
   thinGrass(DEFECTOR.x, DEFECTOR.z, 1.8, 0.35);
+  thinGrass(CARTOGRAPHER.x, CARTOGRAPHER.z, 2.6, 0.3);
+  thinGrass(TREASURE.x, TREASURE.z, 2.4, 0.15);
   town.anchors.stations = [...(town.anchors.stations ?? []), { kind: 'campfire', position: poi.fire.clone() }];
 
   // ---- GPU grass + flowers ----

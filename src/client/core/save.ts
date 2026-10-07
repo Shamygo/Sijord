@@ -57,6 +57,8 @@ export interface SaveData {
   picnicker?: { wins: number; day?: number };
   /** Side quests taken and finished, by quest id (`src/shared/sidequests.ts`). */
   sideQuests?: Record<string, { state: 'active' | 'done'; n?: number }>;
+  /** Edvin the cartographer: his pages you've checked and corrected, and his treasure. */
+  cartographer?: { taken: boolean; seen: string[]; fixed: string[]; dug: boolean };
 }
 
 export function loadSave(): SaveData | null {

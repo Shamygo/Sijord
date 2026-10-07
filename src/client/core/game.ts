@@ -45,6 +45,8 @@ import { COOK_MAX, cookoffWon, PICNICKER, PICNICKER_INTRO, picnickerState, rival
 import { Picnicker } from '../npc/picnicker';
 import { creditDefeats, goalMet, questLogText, SIDE_QUESTS, sideQuestState, type SideQuestDef } from '../../shared/sidequests';
 import { Villager } from '../npc/villager';
+import { answerFor, CARTOGRAPHER, CARTOGRAPHER_ASK, CARTOGRAPHER_INTRO, CARTOGRAPHER_REVEAL, cartographerState, hasTreasureMap, MAP_ERRORS, placeList, surveyAt, toCheck, toReport, TREASURE } from '../../shared/cartographer';
+import { Cartographer, TreasureSpot } from '../npc/cartographer';
 import type { ResourceNode } from '../world/resources';
 import { TOWN } from '../world/layout';
 import { waterDistance } from '../world/terrain';
@@ -173,8 +175,10 @@ export class Game {
   private defector!: Defector;
   /** Gudrun at her picnic under the lone tree. */
   private picnicker!: Picnicker;
+  private cartographer!: Cartographer;
+  private treasure!: TreasureSpot;
   /** The people around Hearthmeadow with side quests. */
-  private villagers: Villager[] = [];
+  private villagers: Villager<SideQuestDef>[] = [];
   private baleRustle = 0;
   /** The roaming trainer walking up to or battling this player, if any. */
   private trainerEngaged: RoamingTrainer | null = null;
@@ -191,7 +195,7 @@ export class Game {
   private netCatch: { fx: BallCatchFx; until: number } | null = null;
   private lastCatch: { species: string; chance: number; unaware: boolean; caught?: boolean; reaction?: CatchReaction } | null = null;
   /** Gathering in progress (DESIGN §6.3): the node (or the water you're kneeling at), how, and seconds so far. */
-  private gathering: { node: ResourceNode | null; water?: WaterSpot; way: GatherWay; t: number; helper?: { help: PartnerHelp; name: string } } | null = null;
+  private gathering: { node: ResourceNode | null; water?: WaterSpot; dig?: boolean; way: GatherWay; t: number; helper?: { help: PartnerHelp; name: string } } | null = null;
   /** The wild side of the friend's battle we joined: levels seen, who fainted (prize money) and the Alphas' names. */
   private remoteFoes: { id: string; levels: Map<string, number>; species: Map<string, string>; fainted: Set<string>; alphas: Map<string, string> } | null = null;
   private guestPrize = 0;
@@ -262,6 +266,13 @@ export class Game {
     save.sideQuests = sideQuestState(save.sideQuests);
     this.villagers = SIDE_QUESTS.map((q) => new Villager(q, this.world));
     for (const v of this.villagers) this.scene.add(v.root);
+    const maps = (save.cartographer = cartographerState(save.cartographer));
+    this.cartographer = new Cartographer(this.world);
+    this.cartographer.setFixed(maps.fixed);
+    this.scene.add(this.cartographer.root);
+    this.treasure = new TreasureSpot(this.world);
+    this.treasure.setDug(maps.dug);
+    this.scene.add(this.treasure.root);
     this.updateNpcState();
     this.scene.add(this.follower.root);
     // Herds come from the world's name, so both friends meet the same ones.
@@ -736,6 +747,14 @@ export class Game {
       if (e?.state !== 'active') continue;
       const ready = goalMet(def, e, this.questContext());
       quests.push({ id: `side:${def.id}`, text: ready ? `${def.title}: go and tell ${def.giver}` : questLogText(def, e), ...(ready ? { target: { x: def.x, z: def.z } } : {}) });
+    }
+    const maps = this.save.cartographer;
+    if (maps?.taken && !maps.dug) {
+      const report = toReport(maps), check = toCheck(maps), here = this.controller?.position ?? { x: CARTOGRAPHER.x, z: CARTOGRAPHER.z };
+      const nearest = check.sort((a, b) => Math.hypot(a.x - here.x, a.z - here.z) - Math.hypot(b.x - here.x, b.z - here.z))[0];
+      if (hasTreasureMap(maps)) quests.push({ id: 'edvin-treasure', text: "Dig up the chest on Edvin's real map (bring a Stone Pick)", target: { x: TREASURE.x, z: TREASURE.z } });
+      else if (report.length) quests.push({ id: 'edvin', text: `Tell Edvin what's really at ${placeList(report)}`, target: { x: CARTOGRAPHER.x, z: CARTOGRAPHER.z } });
+      else if (nearest) quests.push({ id: 'edvin', text: `Check Edvin's maps against the land (${maps.fixed.length} of ${MAP_ERRORS.length} corrected)`, target: { x: nearest.x, z: nearest.z } });
     }
     if (this.flags.has('met-sten')) {
       const st = defectorState(this.save.defector), found = this.save.found ?? [];
@@ -1460,9 +1479,10 @@ export class Game {
     return { name: displayName(lead), types: species(lead.species).types };
   }
 
-  private finishGather(g: { node: ResourceNode | null; water?: WaterSpot; way: GatherWay; helper?: { help: PartnerHelp; name: string } }): void {
+  private finishGather(g: { node: ResourceNode | null; water?: WaterSpot; dig?: boolean; way: GatherWay; helper?: { help: PartnerHelp; name: string } }): void {
     this.gathering = null;
     if (g.water) return this.finishWater(g.water);
+    if (g.dig) return this.finishDig();
     if (!g.node) return;
     const bag = (this.save.bag ??= {});
     const got = rollYield(g.way, Math.random);
@@ -1993,7 +2013,7 @@ export class Game {
   }
 
   /** A side quest giver: take the quest, hear how you're getting on, or hand it in for the reward. */
-  private async talkToVillager(v: Villager): Promise<void> {
+  private async talkToVillager(v: Villager<SideQuestDef>): Promise<void> {
     this.beginScene();
     const def = v.def;
     v.lookAt(this.controller.position);
@@ -2082,6 +2102,115 @@ export class Game {
   }
   private villagerTick = 0;
   private questsReady = '';
+
+  /**
+   * Edvin the cartographer (DESIGN §12.4): he hands you three of his maps, all wrong. Go and see
+   * each place, then come back and tell him what's really there. A wrong answer sends you back to
+   * look again. Set him straight on all three and he gives you a real treasure map.
+   */
+  private async talkToCartographer(): Promise<void> {
+    this.beginScene();
+    const edvin = this.cartographer.person;
+    edvin.lookAt(this.controller.position);
+    const say = (text: string) => ({ speaker: CARTOGRAPHER.giver, text });
+    const st = (this.save.cartographer = cartographerState(this.save.cartographer));
+    const first = !this.flags.has('met-edvin');
+    if (!st.taken) {
+      const [pick] = await this.hud.dialogue.play([...(first ? CARTOGRAPHER_INTRO.map(say) : []), { ...say(first ? CARTOGRAPHER_ASK : 'Changed your mind? Three pages, checked against the land. Then you come back and tell me how right I am.'), choices: ["I'll check them", 'Not now'] }]);
+      if (first) this.setFlag('met-edvin');
+      if (pick === 0) {
+        st.taken = true;
+        await this.hud.dialogue.play([...MAP_ERRORS.map((e, i) => say(`${['Page one', 'Page two', 'Page three'][i] ?? 'And'}: ${e.claim}`)), say("Go and see for yourself, then come back and tell me what you saw. And no peeking at anyone else's map.")]);
+        writeSave(this.save);
+        this.hud.showToast("Check Edvin's maps", `Visit ${placeList(MAP_ERRORS)}`, 3);
+      } else await this.hud.dialogue.play([say('Suit yourself. The maps will still be right tomorrow.')]);
+    } else if (!hasTreasureMap(st)) {
+      const reports = toReport(st);
+      if (!reports.length) {
+        const left = toCheck(st);
+        await this.hud.dialogue.play([say(`Back already? You haven't looked at ${placeList(left)} yet. My maps don't check themselves. Well, they don't need checking. But you said you would.`)]);
+      }
+      for (const e of reports) {
+        const [pick] = await this.hud.dialogue.play([{ ...say(e.ask), choices: e.options }]);
+        const right = answerFor(st, e, pick);
+        await this.hud.dialogue.play([say(right ? e.right : "Ha! Exactly as I drew it. ...Then why do you look so unsure? Go and look again.")]);
+      }
+      if (reports.length) {
+        this.cartographer.setFixed(st.fixed);
+        if (hasTreasureMap(st)) {
+          await this.hud.dialogue.play(CARTOGRAPHER_REVEAL.map(say));
+          this.gainXp(TRAINER_XP.cartographer);
+          this.destination = { x: TREASURE.x, z: TREASURE.z, label: "Edvin's treasure" };
+          this.hud.showToast("Edvin gave you his grandmother's map", "The chest is marked on your map (M). You'll need a Stone Pick.", 3.5);
+        }
+        writeSave(this.save);
+      }
+    } else if (!st.dug) {
+      this.destination = { x: TREASURE.x, z: TREASURE.z, label: "Edvin's treasure" };
+      await this.hud.dialogue.play([say("Well? Far to the west, past the lone tree, where the meadow meets the mountains. Look for a little pile of stones. And bring a pick.")]);
+    } else await this.hud.dialogue.play([say("Grandmother's chest! I never had the nerve to dig it up myself. Don't tell the other treasure hunters. They're still out east, digging in my maps.")]);
+    edvin.lookAt(null);
+    this.endScene();
+    this.refreshQuests();
+  }
+
+  /** Close enough to his treasure to dig: 'dig' with a pick in the bag, 'pick' without one. */
+  private treasureHere(pos: THREE.Vector3): 'dig' | 'pick' | null {
+    const st = this.save.cartographer;
+    if (!st || !hasTreasureMap(st) || st.dug || Math.hypot(pos.x - TREASURE.x, pos.z - TREASURE.z) > TREASURE.r) return null;
+    return this.save.bag?.[TREASURE.tool] ? 'dig' : 'pick';
+  }
+
+  private startDig(): void {
+    this.cancelAim();
+    const p = this.controller.position;
+    this.controller.yaw = Math.atan2(TREASURE.x - p.x, TREASURE.z - p.z);
+    this.gathering = { node: null, dig: true, t: 0, way: { prompt: '', doing: 'Digging', gives: {}, seconds: TREASURE.seconds, anim: 'chop', tool: TREASURE.tool } };
+  }
+
+  /** The chest comes up: Edvin's grandmother's savings and an Ultra Ball, the only one in the vale. */
+  private finishDig(): void {
+    const st = (this.save.cartographer = cartographerState(this.save.cartographer));
+    if (st.dug) return;
+    st.dug = true;
+    const bag = (this.save.bag ??= {});
+    this.earn(TREASURE.money, 'Old coins from the chest', false);
+    for (const [id, n] of Object.entries(TREASURE.items)) bag[id] = (bag[id] ?? 0) + n;
+    const broke = wearTool(bag, (this.save.toolWear ??= {}), TREASURE.tool).broke;
+    this.gainXp(TRAINER_XP.treasure);
+    this.treasure.setDug(true);
+    if (this.destination?.label === "Edvin's treasure") this.destination = null;
+    writeSave(this.save);
+    const items = Object.entries(TREASURE.items).map(([id, n]) => (n > 1 ? `${n} ${ITEMS[id]?.name ?? id}s` : `an ${ITEMS[id]?.name ?? id}`));
+    this.hud.showToast('You dug up an old chest!', `${formatMoney(TREASURE.money)} in old coins and ${items.join(' and ')}${broke ? ` · your ${ITEMS[TREASURE.tool]?.name ?? 'pick'} broke` : ''}`, 4);
+    this.refreshQuests();
+    if (this.menu?.isOpen) this.menu.refresh();
+  }
+
+  /**
+   * Edvin watches you come up the hill and wears a "!" until you take his maps, then a "?" when
+   * you've seen a place you can tell him about. Walking up to one of his places checks it.
+   */
+  private updateCartographer(dt: number): void {
+    const p = this.controller.position;
+    const edvin = this.cartographer.person;
+    if (!this.talking) edvin.lookAt(p.distanceTo(edvin.position) < 7 ? p : null);
+    if ((this.surveyTick -= dt) <= 0) {
+      this.surveyTick = 0.5;
+      const st = (this.save.cartographer ??= cartographerState(undefined));
+      edvin.setMark(!st.taken ? 'new' : toReport(st).length ? 'ready' : null);
+      const e = this.talking || this.battle ? undefined : surveyAt(st, p.x, p.z);
+      if (e) {
+        st.seen.push(e.id);
+        writeSave(this.save);
+        this.refreshQuests();
+        this.hud.showToast(`That's not what Edvin's map says`, `Remember what's really at ${e.place}, then go and tell him`, 3.5);
+      }
+    }
+    this.cartographer.update(dt, p);
+    this.treasure.update(dt, p);
+  }
+  private surveyTick = 0;
 
   /** Gudrun watches anyone who comes up the hill. */
   private updatePicnicker(dt: number): void {
@@ -2350,7 +2479,7 @@ export class Game {
       money: this.save.money ?? 0,
       meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },
       throwing: { aiming: this.aiming, ball: this.aimBall, balls: Object.fromEntries(this.throwKinds().map((b) => [b, this.save.bag?.[b] ?? 0])), treats: this.wild.treats.length, intercept: this.intercept ? displayName(this.intercept.m.creature) : null, inFlight: this.throws.busy, dropped: this.throws.droppedCount, lastCatch: this.lastCatch },
-      trainers: this.trainers.filter((t) => t.visible).map((t) => ({ id: t.def.id, position: [t.position.x, t.position.z].map((v) => Math.round(v * 10) / 10), patrolling: t.patrolling, standing: trainerStanding(this.save.trainers, t.def.id, trainerDay(Date.now())) })), trainerEngaged: this.trainerEngaged?.def.id ?? null, defector: { met: this.flags.has('met-sten'), ...defectorState(this.save.defector) }, picnicker: { met: this.flags.has('met-gudrun'), ...picnickerState(this.save.picnicker) }, sideQuests: this.save.sideQuests ?? {}, villagers: this.villagers.filter((v) => v.visible).map((v) => ({ id: v.def.id, mark: v.markShown })), cookoff: this.hud.cookoff.active ? this.hud.cookoff.debugState() : null, destination: this.destination,
+      trainers: this.trainers.filter((t) => t.visible).map((t) => ({ id: t.def.id, position: [t.position.x, t.position.z].map((v) => Math.round(v * 10) / 10), patrolling: t.patrolling, standing: trainerStanding(this.save.trainers, t.def.id, trainerDay(Date.now())) })), trainerEngaged: this.trainerEngaged?.def.id ?? null, defector: { met: this.flags.has('met-sten'), ...defectorState(this.save.defector) }, picnicker: { met: this.flags.has('met-gudrun'), ...picnickerState(this.save.picnicker) }, sideQuests: this.save.sideQuests ?? {}, cartographer: { met: this.flags.has('met-edvin'), mark: this.cartographer.person.markShown, ...cartographerState(this.save.cartographer) }, villagers: this.villagers.filter((v) => v.visible).map((v) => ({ id: v.def.id, mark: v.markShown })), cookoff: this.hud.cookoff.active ? this.hud.cookoff.debugState() : null, destination: this.destination,
       wildCreatures: this.wild.creatures.map((m) => ({ species: m.creature.species, level: m.creature.level, alpha: m.alpha ? true : undefined, state: m.state, alert: Math.round(m.alert), attack: m.attack?.phase, position: [m.mover.pos.x, m.mover.pos.z].map((v) => Math.round(v * 10) / 10) })) });
   }
 
@@ -2459,9 +2588,11 @@ export class Game {
       const nearBale = !nearProf && !nearRival && !nearTrainer && Math.hypot(pos.x - DEFECTOR.x, pos.z - DEFECTOR.z) < TALK_RADIUS + 0.9;
       const nearGudrun = !nearProf && !nearRival && !nearTrainer && !nearBale && pos.distanceTo(this.picnicker.position) < TALK_RADIUS + 0.6;
       const nearVillager = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun ? this.villagers.find((v) => v.visible && pos.distanceTo(v.position) < TALK_RADIUS) ?? null : null;
+      const nearEdvin = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !nearVillager && pos.distanceTo(this.cartographer.person.position) < TALK_RADIUS;
       // Someone to talk to beats everything else at hand.
-      const talkable = nearProf || nearRival || !!nearTrainer || nearBale || nearGudrun || !!nearVillager;
-      const pickup = !talkable && !this.aiming ? this.throws.nearestPickup(pos) : null;
+      const talkable = nearProf || nearRival || !!nearTrainer || nearBale || nearGudrun || !!nearVillager || nearEdvin;
+      const dig = !talkable && !this.gathering && this.treasureHere(pos);
+      const pickup = !talkable && !dig && !this.aiming ? this.throws.nearestPickup(pos) : null;
       const find = !talkable && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
       const home = !talkable && !pickup && !find ? this.nearHome(pos) : null;
       const shop = !talkable && !pickup && !find && !home ? this.shopNear(pos) : null;
@@ -2489,6 +2620,8 @@ export class Game {
       else if (nearTrainer) this.hud.setPrompt(`Talk to ${nearTrainer.name}`);
       else if (nearGudrun) this.hud.setPrompt(`Talk to ${PICNICKER.name}`);
       else if (nearVillager) this.hud.setPrompt(`Talk to ${nearVillager.name}`);
+      else if (nearEdvin) this.hud.setPrompt(`Talk to ${CARTOGRAPHER.giver}`);
+      else if (dig) this.hud.setPrompt(dig === 'dig' ? 'Dig where the map says' : 'Something is buried here · you need a Stone Pick to dig', dig === 'dig' ? undefined : '');
       else if (nearBale) this.hud.setPrompt(this.flags.has('met-sten') ? `Talk to ${DEFECTOR.name}` : `Look at the ${BALE_NAME.toLowerCase()}`);
       else if (pickup) this.hud.setPrompt(`Pick up the ${ITEMS[pickup.ball]?.name ?? 'ball'}`);
       else if (find) this.hud.setPrompt(DISCOVERY_LABEL[find.def.kind].prompt);
@@ -2515,6 +2648,8 @@ export class Game {
         else if (nearBale) void this.talkToDefector();
         else if (nearGudrun) void this.talkToPicnicker();
         else if (nearVillager) void this.talkToVillager(nearVillager);
+        else if (nearEdvin) void this.talkToCartographer();
+        else if (dig === 'dig') this.startDig();
         else if (pickup) this.pickupBall(pickup.id);
         else if (find) void this.openDiscovery(find);
         else if (home) void this.restAtHome();
@@ -2571,6 +2706,7 @@ export class Game {
     this.updateDefector(dt);
     this.updatePicnicker(dt);
     this.updateVillagers(dt);
+    this.updateCartographer(dt);
     const friends = [...this.partnerWild.values()];
     this.wild.setRemoteBusy(new Set(friends.flatMap((f) => f.busy)));
     this.wild.setFriendCells(friends.flatMap((f) => f.cells));

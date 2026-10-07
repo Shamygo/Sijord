@@ -20,6 +20,9 @@ export const TRAINER_XP = {
   firstCraft: 25,
   /** The first time you beat Gudrun in a cook-off. */
   cookoff: 40,
+  /** Setting Edvin straight on all three of his maps, and digging up his treasure. */
+  cartographer: 40,
+  treasure: 30,
 };
 
 /** Experience needed to go from `level` to `level + 1`. */
