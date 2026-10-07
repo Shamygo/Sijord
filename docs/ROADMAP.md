@@ -22,7 +22,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 | M2 | First creatures and battles | Pick a starter and fight wild double battles near Bramblewick | Done |
 | M3 | Catching, party and the first route | Catch creatures (overworld and in battle) across the starter biome, with aggression | Done 2026-10-06 apart from its two-browser exit check (catching in battle and overworld, aggression, trainer HP, dodge, Treats, partner interceptions, resting, party/PC, Dex, 45 species, shared herds, Hearthmeadow supply caches, tablets and field notes) |
 | M4 | Survival and crafting core | Hunger, thirst and stamina, gathering, T0-T1 crafting, Poke Ball crafting, tools and armour | L · in progress (trainer levels, gathering, hatchet and pick, T0-T1 crafting with Poke Balls, Potions and Treats, hunger, thirst, cooking, canteens, money, shops, cloth armour, the sickle, Technology Points and partner gathering help are in) |
-| M5 | Open world and settlements | Streamed 6x6 km terrain with 4-5 biomes, villages and towns, NPCs, shops | XL |
+| M5 | Open world and settlements | Streamed 6x6 km terrain with 4-5 biomes, villages and towns, NPCs, shops | XL · day and night in early (2026-10-07) |
 | M6 | First gym slice | Two-player puzzle gym, co-op boss battle, competitive AI T1-T2, badges and level caps | XL |
 | M7 | Player levels, classes and quests | XP, skill trees for all 5 classes, quest system, first side quests | L |
 | M8 | Base building and automation | Base cores, building, work aptitudes, a Poke Ball assembly line, money automation | XL |
@@ -106,6 +106,8 @@ Every milestone ends in a **playable build** that two people can open in a brows
 - Performance budget: 60 fps target, 30 fps floor, in the browser.
 
 **Exit criterion:** players walk from Bramblewick to a large city through 3 biomes without loading screens, discovering settlements and POIs along the way, and fast travel back.
+
+**Status 2026-10-07:** day and night is in early: a 30-minute day on a clock both players share (read from the wall clock), with dawn, golden hour, sunset, dusk and a blue moonlit night with stars, and lanterns and the campfire lighting their surroundings after dark (`src/shared/daynight.ts`, `src/client/world/daynight.ts`). Weather and night-only gameplay are still to do.
 
 ---
 

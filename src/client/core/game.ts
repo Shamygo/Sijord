@@ -45,6 +45,7 @@ import { COOK_MAX, cookoffWon, PICNICKER, PICNICKER_INTRO, picnickerState, rival
 import { Picnicker } from '../npc/picnicker';
 import { creditDefeats, goalMet, questLogText, SIDE_QUESTS, sideQuestState, type SideQuestDef } from '../../shared/sidequests';
 import { Villager } from '../npc/villager';
+import { clockAt, clockText, offsetFor } from '../../shared/daynight';
 import { answerFor, CARTOGRAPHER, CARTOGRAPHER_ASK, CARTOGRAPHER_INTRO, CARTOGRAPHER_REVEAL, cartographerState, hasTreasureMap, MAP_ERRORS, placeList, surveyAt, toCheck, toReport, TREASURE } from '../../shared/cartographer';
 import { Cartographer, TreasureSpot } from '../npc/cartographer';
 import type { ResourceNode } from '../world/resources';
@@ -142,7 +143,12 @@ export class Game {
   private talking = false;
   private timer = new THREE.Timer();
   private elapsed = 0;
-  private gameMinutes = 9 * 60;
+  /** The time of day, in game minutes since midnight, from the shared clock (`daynight.ts`). */
+  private gameMinutes = clockAt(Date.now());
+  /** Shifts the clock for testing (`debugTimeOfDay`). */
+  private clockOffset = 0;
+  /** Stops the clock at a time of day for testing (`debugTimeOfDay`). */
+  private clockHold: number | null = null;
   /** Set when we release the mouse on purpose (menus, dialogue) so it doesn't count as a pause. */
   private suppressPause = false;
   private started = false;
@@ -504,6 +510,16 @@ export class Game {
 
   /** Dev only: run game time faster (automated tests in slow headless browsers). */
   debugTimeScale = 1;
+  /**
+   * Set the time of day (game hours, e.g. 21.5 for half past nine at night). It stays there for
+   * screenshots unless `hold` is false; `debugTimeOfDay(null)` goes back to the shared clock.
+   */
+  debugTimeOfDay(hours: number | null, hold = true): string {
+    const now = Date.now();
+    this.clockOffset = hours === null ? 0 : offsetFor(hours * 60, now);
+    this.clockHold = hours !== null && hold ? clockAt(now + this.clockOffset) : null;
+    return clockText(clockAt(now + this.clockOffset));
+  }
 
   /** Dev only: spawn a herd `dist` metres in front of the player. Returns how many creatures it has. */
   debugSpawnWild(speciesId = 'nibblet', level = 4, dist = 9): number {
@@ -2474,7 +2490,7 @@ export class Game {
   debugAdvance(ms: number): void { for (let t = 0; t < ms; t += 1000 / 60) this.frame(1 / 60); }
 
   debugText(): string {
-    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, found:this.save.found?.length ?? 0, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
+    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', time: clockText(this.gameMinutes), player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, found:this.save.found?.length ?? 0, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
       trainerHp: { hp: Math.round(this.vitals.hp * 10) / 10, max: this.vitals.max, down: this.vitals.knockedDown },
       money: this.save.money ?? 0,
       meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },
@@ -2487,7 +2503,13 @@ export class Game {
     this.timer.update();
     const dt = (step ?? Math.min(this.timer.getDelta(), 0.1)) * this.debugTimeScale;
     this.elapsed += dt;
-    this.gameMinutes += dt; // one real second is one in-game minute
+    // Both friends read the time of day off the wall clock, so their skies match.
+    this.gameMinutes = this.clockHold ?? clockAt(Date.now() + this.clockOffset);
+    const tod = this.world.setTimeOfDay?.(this.gameMinutes);
+    if (tod) {
+      if (this.scene.fog) this.scene.fog.color.copy(tod.fog);
+      this.pipeline.setExposure(tod.exposure);
+    }
     const now = performance.now();
     const input = this.input;
 
