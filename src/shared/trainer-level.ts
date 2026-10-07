@@ -23,6 +23,8 @@ export const TRAINER_XP = {
   /** Setting Edvin straight on all three of his maps, and digging up his treasure. */
   cartographer: 40,
   treasure: 30,
+  /** Each bit of fallen stardust picked up by lantern light. */
+  stardust: 6,
 };
 
 /** Experience needed to go from `level` to `level + 1`. */

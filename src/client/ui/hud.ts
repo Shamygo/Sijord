@@ -146,7 +146,7 @@ export class Hud {
     );
     this.help.replaceChildren(
       k('forward'), k('left'), k('back'), k('right'), ' move  ', k('sprint'), ' sprint  ', k('jump'), ' jump  ', k('dodge'), ' roll  ', k('climb'), ' let go of a wall  ', k('interact'), ' talk / battle  ',
-      k('throw'), ' hold: aim & throw  ', k('party'), ' party  ', k('map'), ' map  ', k('bag'), ' bag  ', k('craft'), ' craft  ', h('span.key', {}, 'Esc'), ' menu',
+      k('throw'), ' hold: aim & throw  ', k('party'), ' party  ', k('map'), ' map  ', k('bag'), ' bag  ', k('craft'), ' craft  ', k('lantern'), ' lantern  ', h('span.key', {}, 'Esc'), ' menu',
     );
     this.help.style.display = s.showControlsHint ? '' : 'none';
     this.fps.classList.toggle('show', s.showFps);

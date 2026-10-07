@@ -23,6 +23,9 @@ export const VALUE: Record<string, number> = {
   'mushroom-skewer': 180,
   'hearty-stew': 320,
   canteen: 1200,
+  lantern: 1600,
+  stardust: 1200,
+  'star-piece': 4800,
   'woven-cloth': 80,
   'cloth-cap': 500,
   'cloth-trousers': 800,
@@ -56,7 +59,7 @@ export const SHOPS: Record<ShopId, Shop> = {
   'field-supplies': {
     id: 'field-supplies', name: 'Field Supplies', prompt: 'Shop at Field Supplies',
     greeting: 'Balls and gear for the road. Prices are what they are: the supply carts don\'t come often.',
-    stock: ['poke-ball', 'treat', 'canteen'],
+    stock: ['poke-ball', 'treat', 'canteen', 'lantern'],
   },
   apothecary: {
     id: 'apothecary', name: 'Apothecary', prompt: 'Visit the Apothecary',

@@ -41,8 +41,9 @@ const SHOW_WITHIN = 170;
 const glyphLit = new THREE.MeshStandardMaterial({ color: 0xa8ecff, emissive: new THREE.Color(0x58d6ff), emissiveIntensity: 1.7, roughness: 0.5 });
 const glyphDim = new THREE.MeshStandardMaterial({ color: 0x6d6a62, emissive: new THREE.Color(0x58d6ff), emissiveIntensity: 0.1, roughness: 0.85 });
 
+/** A soft four-point glint, shared by everything that twinkles to be found. */
 let sparkleTex: THREE.Texture | null = null;
-function sparkleTexture(): THREE.Texture {
+export function sparkleTexture(): THREE.Texture {
   if (sparkleTex) return sparkleTex;
   const c = document.createElement('canvas');
   c.width = c.height = 64;
