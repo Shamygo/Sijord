@@ -26,6 +26,8 @@ export interface Kit {
   glow: GeoBuilder;
   extras: THREE.Group;
   colliders: Collider[];
+  /** Where each lantern's light is, for lamplight after dark. */
+  lamps: THREE.Vector3[];
 }
 
 export const COL = {
@@ -182,6 +184,7 @@ export function cottage(kit: Kit, x: number, y: number, z: number, yaw: number, 
   // lantern by the door
   box(b, f, [0.08, 0.08, 0.35], [0.95, base + 2.0, dz + 0.2], COL.woodDark);
   kit.glow.add(new THREE.BoxGeometry(0.24, 0.32, 0.24), 0xffd27a, f.p(0.95, base + 1.8, dz + 0.36), f.r());
+  kit.lamps.push(new THREE.Vector3(...f.p(0.95, base + 1.75, dz + 0.5)));
   // collider (yaw is a multiple of 90deg)
   const swap = Math.abs(Math.sin(yaw)) > 0.5;
   const hw = (swap ? d : w) / 2 + 0.25, hd = (swap ? w : d) / 2 + 0.25;
@@ -302,6 +305,7 @@ export function lantern(kit: Kit, x: number, y: number, z: number, yaw: number):
   box(kit.solid, f, [0.08, 0.08, 0.7], [0, 2.55, 0.3], COL.woodDark);
   box(kit.solid, f, [0.42, 0.08, 0.42], [0, 2.4, 0.6], COL.woodDark);
   kit.glow.add(new THREE.BoxGeometry(0.3, 0.4, 0.3), 0xffd27a, f.p(0, 2.15, 0.6), f.r());
+  kit.lamps.push(new THREE.Vector3(...f.p(0, 2.05, 0.6)));
   box(kit.solid, f, [0.36, 0.06, 0.36], [0, 1.93, 0.6], COL.woodDark);
   kit.colliders.push({ kind: 'circle', x, z, r: 0.2 });
 }

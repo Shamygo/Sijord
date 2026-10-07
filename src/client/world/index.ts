@@ -6,6 +6,8 @@ import type { Collider, World } from './types';
 import { CELL, GRID_HALF, GRID_N, HALF, POI, TOWN, WATER_LEVEL, ROADS, MESAS, distToPolyline, POND, LAKE } from './layout';
 import { buildTerrainData, TerrainQuery, makeTerrainMaterial, buildTerrainMeshes, makeDepthTexture, waterDistance, makeTerrainTextures } from './terrain';
 import { createLights, createSky, centreSun, createClouds } from './sky';
+import { applyTimeOfDay } from './daynight';
+import { LampLight } from './lamplight';
 import { createWater } from './water';
 import { GeoBuilder, mats, worldUniforms } from './shared';
 import { scatterVegetation, makeTreeKinds, makeBedFlowers, type FixedTree } from './vegetation';
@@ -41,7 +43,7 @@ export function createWorld(): World {
   root.add(terrainMeshes.group);
 
   // ---- sky + light ----
-  const { sun } = createLights(root);
+  const { sun, hemi } = createLights(root);
   const sky = createSky();
   root.add(sky);
   const clouds = createClouds();
@@ -52,7 +54,7 @@ export function createWorld(): World {
   root.add(water);
 
   // ---- static props ----
-  const kit: Kit = { solid: new GeoBuilder(), glow: new GeoBuilder(), extras: new THREE.Group(), colliders };
+  const kit: Kit = { solid: new GeoBuilder(), glow: new GeoBuilder(), extras: new THREE.Group(), colliders, lamps: [] };
   const kinds = makeTreeKinds();
   const town = buildHometown(kit, kinds);
   const rawH = (x: number, z: number) => terrain.heightAt(x, z);
@@ -103,6 +105,10 @@ export function createWorld(): World {
   }
   fireGroup.position.copy(poi.fire);
   root.add(fireGroup);
+
+  // Lanterns and the campfire light their surroundings after dark.
+  const lamplight = new LampLight([...kit.lamps.map((p) => ({ p })), { p: poi.fire.clone().add(new THREE.Vector3(0, 0.9, 0)), fire: true }]);
+  root.add(lamplight.group);
 
   // ---- boundary: mountains + invisible walls just inside them ----
   const W = 200;
@@ -207,6 +213,11 @@ export function createWorld(): World {
     resources,
     halfSize: HALF,
     sun,
+    setTimeOfDay(minutes: number) {
+      const st = applyTimeOfDay(minutes, sun, hemi);
+      lamplight.setNight(st.night);
+      return st;
+    },
     update(dt: number, elapsed: number, focus: THREE.Vector3): void {
       void dt;
       worldUniforms.uTime.value = elapsed;
@@ -220,6 +231,7 @@ export function createWorld(): World {
       centreSun(sun, focus);
       fauna.update(focus, heightAt);
       resources.update(focus);
+      lamplight.update(focus, elapsed);
       for (let i = 0; i < flames.length; i++) {
         const f = flames[i];
         const s = 0.85 + Math.sin(elapsed * (9 + i * 3) + i) * 0.12 + Math.sin(elapsed * 17 + i * 2) * 0.06;

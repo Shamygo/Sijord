@@ -69,6 +69,11 @@ export interface World {
   halfSize: number;
   /** The main directional light, so the game can keep its shadow camera centred on the player. */
   sun: THREE.DirectionalLight;
+  /**
+   * Optional: light and colour the vale for a time of day (game minutes since midnight). Returns
+   * the exposure and fog colour for the game to apply to the renderer and scene.
+   */
+  setTimeOfDay?(minutes: number): { exposure: number; fog: THREE.Color; night: number };
   /** Per-frame animation (water, swaying grass, clouds, critters). */
   update(dt: number, elapsed: number, focus: THREE.Vector3): void;
   /** Base colour of the ground near a point, used to paint the minimap. */

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLSL_NOISE } from './noise';
 import { CELL, GRID_HALF, GRID_N, WATER_LEVEL } from './layout';
-import { GLSL_SKY, SKY } from './sky';
+import { GLSL_SKY, SKY, SKY_UNIFORMS } from './sky';
 import { worldUniforms } from './shared';
 
 /**
@@ -76,14 +76,15 @@ export function createWater(depthTex: THREE.Texture): THREE.Mesh {
         base = mix(base, mid, smoothstep(0.4, 1.7, depth));
         base = mix(base, deep, smoothstep(1.5, 3.4, depth));
         float diff = max(dot(n, uSunDir), 0.0);
-        vec3 body = base * (0.55 + diff * 0.55);
+        // Lit by the sky and the sun or moon, so it darkens at night like everything else.
+        vec3 body = base * (0.55 + diff * 0.55) * uLightTint;
         // reflection: sky gradient + soft cloud blobs, darker green banks near the shore
         vec3 R = reflect(-Vv, n);
         R.y = abs(R.y);
         vec3 refl = skyGradient(R);
         vec2 cuv = R.xz / (R.y + 0.15) * 0.9 + vec2(t * 0.004, 0.0);
         float cl = smoothstep(0.55, 0.78, wFbm(cuv * 0.8));
-        refl = mix(refl, vec3(0.95, 0.96, 1.0), cl * 0.5);
+        refl = mix(refl, vec3(0.95, 0.96, 1.0) * uLightTint, cl * 0.5);
         float bank = smoothstep(2.2, 0.2, depth) * (1.0 - smoothstep(0.0, 0.3, R.y));
         refl = mix(refl, vec3(0.1, 0.17, 0.1), bank * 0.6);
         vec3 col = mix(body, refl * 0.92, clamp(fres * 1.05, 0.0, 0.85));
@@ -98,7 +99,7 @@ export function createWater(depthTex: THREE.Texture): THREE.Mesh {
         float foamBand = smoothstep(0.3, 0.0, depth + (fn - 0.5) * 0.2);
         float foam = foamBand * (0.45 + 0.4 * smoothstep(0.55, 0.95, wave));
         foam = max(foam, smoothstep(0.92, 1.0, wave) * smoothstep(0.7, 0.2, depth) * 0.4);
-        col = mix(col, vec3(0.92, 0.96, 0.98), foam * 0.7);
+        col = mix(col, vec3(0.92, 0.96, 0.98) * uLightTint, foam * 0.7);
         float alpha = mix(0.5, 0.95, smoothstep(0.0, 1.4, depth));
         alpha = max(alpha, foam * 0.9);
         alpha = max(alpha, fres);
@@ -113,6 +114,8 @@ export function createWater(depthTex: THREE.Texture): THREE.Mesh {
   });
   mat.uniforms.uDepth.value = depthTex;
   mat.uniforms.uTime = worldUniforms.uTime;
+  // Merging copies uniform values: share the sky's instead, so they follow the time of day.
+  Object.assign(mat.uniforms, SKY_UNIFORMS, { uSunDir: { value: SKY.sunDir }, uSunColor: { value: SKY.sunColor } });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'water';
   mesh.renderOrder = 1;

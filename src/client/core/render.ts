@@ -250,6 +250,8 @@ export class RenderPipeline {
   private sun: THREE.DirectionalLight | null = null;
   private sunScanTimer = 0;
   private time = 0;
+  /** Scene exposure, raised at night so moonlight stays readable (`daynight.ts`). */
+  private exposure = 1;
   private readonly tmpV = new THREE.Vector3();
   private readonly tmpV2 = new THREE.Vector3();
   private readonly tmpM = new THREE.Matrix4();
@@ -341,6 +343,10 @@ export class RenderPipeline {
     if (this.aoRT) u.uAOTexel.value.set(1 / this.aoRT.width, 1 / this.aoRT.height);
   }
 
+  setExposure(exposure: number): void {
+    this.exposure = exposure;
+  }
+
   render(dt: number): void {
     const r = this.renderer;
     this.time += dt;
@@ -387,6 +393,7 @@ export class RenderPipeline {
     g.tBloom.value = this.bloomRTs[0]?.texture ?? null;
     g.tAO.value = this.aoRT?.texture ?? null;
     g.uTime.value = this.time;
+    g.uExposure.value = this.exposure;
     this.blit(this.gradeMat, null);
   }
 

@@ -20,6 +20,27 @@ export const SKY = {
   fogMax: 0.9,
 };
 
+/**
+ * The sky's colours as uniforms shared by every material that draws sky (the dome, clouds and
+ * water reflections), so the time of day (`daynight.ts`) can change them all at once. They start
+ * at the daytime values above. `SKY.sunDir` and `SKY.sunColor` are shared by reference the same
+ * way: by night they point at the moon and carry its light.
+ */
+export const SKY_UNIFORMS = {
+  uZenith: { value: SKY.zenith.clone() },
+  uMid: { value: SKY.mid.clone() },
+  uHorizon: { value: SKY.horizon.clone() },
+  uSkyFog: { value: SKY.fog.clone() },
+  /** How bright the sun's disc and glow are: 1 by day, low for the moon. */
+  uSunDisc: { value: 1 },
+  /** Stars, 0 by day and 1 at night. */
+  uStars: { value: 0 },
+  /** Tints clouds and water foam with the light: white by day, warm at sunset, dim blue at night. */
+  uLightTint: { value: new THREE.Color(1, 1, 1) },
+};
+/** Daytime fog brightness: the sun-side haze fades with the fog at dusk. */
+const FOG_DAY_LUMA = SKY.fog.r * 0.2126 + SKY.fog.g * 0.7152 + SKY.fog.b * 0.0722;
+
 // -------------------------------------------------------------------------------------------
 // Aerial perspective: replaces three's FogExp2 with height fog whose colour leans toward the sun.
 // Linear fog (scene.fog = Fog) is untouched, so other scenes are unaffected.
@@ -64,7 +85,8 @@ function patchFogChunks(): void {
       float optical = fogDensity * dist * exp( - b * max( cameraPosition.y - ${SKY.fogBase.toFixed(1)}, -50.0 ) ) * f;
       float amt = min( 1.0 - exp( - optical ), ${SKY.fogMax.toFixed(3)} );
       float sunAmt = max( dot( rd, ${v3(SKY.sunDir)} ), 0.0 );
-      vec3 haze = mix( fogColor, ${c3(SKY.sunHaze)}, pow( sunAmt, 6.0 ) * 0.45 );
+      float dayK = clamp( dot( fogColor, vec3( 0.2126, 0.7152, 0.0722 ) ) / ${FOG_DAY_LUMA.toFixed(5)}, 0.0, 1.0 );
+      vec3 haze = mix( fogColor, ${c3(SKY.sunHaze)} * dayK, pow( sunAmt, 6.0 ) * 0.45 * dayK );
       // looking down into the valley the haze is a touch deeper blue
       haze = mix( haze, haze * vec3( 0.86, 0.92, 1.0 ), clamp( - rd.y * 4.0, 0.0, 1.0 ) * 0.5 );
       return mix( col, haze, amt );
@@ -88,17 +110,19 @@ patchFogChunks();
 
 /** GLSL for the sky gradient, shared by the sky dome, clouds and water reflections. */
 export const GLSL_SKY = /* glsl */ `
+uniform vec3 uZenith; uniform vec3 uMid; uniform vec3 uHorizon; uniform vec3 uSkyFog;
+uniform float uSunDisc; uniform float uStars; uniform vec3 uLightTint;
 vec3 skyGradient(vec3 d) {
   float y = d.y;
-  vec3 zen = ${c3(SKY.zenith)};
-  vec3 mid = ${c3(SKY.mid)};
-  vec3 hor = ${c3(SKY.horizon)};
+  vec3 zen = uZenith;
+  vec3 mid = uMid;
+  vec3 hor = uHorizon;
   float t = clamp(y, 0.0, 1.0);
   vec3 col = mix(hor, mid, smoothstep(0.0, 0.22, t));
   col = mix(col, zen, smoothstep(0.12, 0.85, t));
   // milky band right at the horizon
   col = mix(col, hor * 1.04, exp(-max(y, 0.0) * 28.0) * 0.55);
-  if (y < 0.0) col = mix(hor, ${c3(SKY.fog)}, smoothstep(0.0, -0.15, y));
+  if (y < 0.0) col = mix(hor, uSkyFog, smoothstep(0.0, -0.15, y));
   return col;
 }
 `;
@@ -143,6 +167,7 @@ export function createSky(): THREE.Mesh {
     uniforms: {
       uSunDir: { value: SKY.sunDir },
       uSunColor: { value: SKY.sunColor },
+      ...SKY_UNIFORMS,
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -160,7 +185,19 @@ export function createSky(): THREE.Mesh {
         vec3 d = normalize(vDir);
         vec3 col = skyGradient(d);
         float s = max(dot(d, uSunDir), 0.0);
-        col += uSunColor * (smoothstep(0.99955, 0.9998, s) * 18.0 + pow(s, 700.0) * 1.6 + pow(s, 40.0) * 0.22 + pow(s, 6.0) * 0.07);
+        // The sun's disc and glow by day; by night the same light is the moon, a smaller, paler disc.
+        float disc = mix(smoothstep(0.99935, 0.9996, s) * 1.6, smoothstep(0.99955, 0.9998, s) * 18.0, step(0.5, uSunDisc));
+        col += uSunColor * (disc + (pow(s, 700.0) * 1.6 + pow(s, 40.0) * 0.22 + pow(s, 6.0) * 0.07) * uSunDisc);
+        // A soft halo round the moon.
+        col += uSunColor * (1.0 - step(0.5, uSunDisc)) * (pow(s, 900.0) * 1.2 + pow(s, 60.0) * 0.25);
+        // Stars: one in about 170 cells of a fine grid on the sky, fading out near the horizon.
+        if (uStars > 0.0 && d.y > 0.0) {
+          vec3 p = d * 210.0;
+          vec3 c = floor(p);
+          float h = fract(sin(dot(c, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+          float star = step(0.994, h) * smoothstep(0.34, 0.0, length(fract(p) - 0.5));
+          col += vec3(0.85, 0.9, 1.0) * star * uStars * smoothstep(0.02, 0.3, d.y) * (0.6 + 1.9 * fract(h * 113.0));
+        }
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -272,6 +309,7 @@ export function createClouds(count = 24): Clouds {
       uTex: { value: puffTexture() },
       uSunDir: { value: SKY.sunDir },
       uSunColor: { value: SKY.sunColor },
+      ...SKY_UNIFORMS,
     },
     vertexShader: /* glsl */ `
       attribute vec3 aOffset; attribute vec2 aSize; attribute vec2 aBase;
@@ -316,7 +354,7 @@ export function createClouds(count = 24): Clouds {
         vec3 shadowCol = vec3(0.6, 0.68, 0.84);
         vec3 litCol = vec3(1.06, 1.05, 1.02);
         float k = clamp(lambert * 0.55 + h * 0.6 - 0.05 + t.r * 0.12 + (er - 0.5) * 0.2, 0.0, 1.0);
-        vec3 col = mix(shadowCol, litCol, smoothstep(0.1, 0.85, k));
+        vec3 col = mix(shadowCol, litCol, smoothstep(0.1, 0.85, k)) * uLightTint;
         col += uSunColor * pow(lambert, 6.0) * 0.1;
         // thin edges let the sky through; distant clouds sink into the horizon haze
         vec3 sky = skyGradient(vDir);
