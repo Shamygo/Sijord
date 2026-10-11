@@ -4,7 +4,13 @@ import { PICNICKER } from '../../shared/cookoff';
 import { DEFECTOR } from '../../shared/defector';
 import type { Collider, World } from './types';
 import { CELL, GRID_HALF, GRID_N, HALF, POI, TOWN, WATER_LEVEL, ROADS, MESAS, distToPolyline, POND, LAKE } from './layout';
-import { buildTerrainData, TerrainQuery, makeTerrainMaterial, buildTerrainMeshes, makeDepthTexture, waterDistance, makeTerrainTextures } from './terrain';
+import { buildTerrainData, TerrainQuery, makeTerrainMaterial } from './terrain';
+import { onIce, waterDistance } from './heightfield';
+import { TerrainStreamer } from './stream/streamer';
+import { GroundWindow } from './stream/window';
+import { OuterVegetation } from './stream/outer-veg';
+import { DynamicColliders, attachDynamic } from '../core/collision';
+import { REGION, SETTLEMENTS, inVale } from '../../shared/region';
 import { createLights, createSky, centreSun, createClouds } from './sky';
 import { applyTimeOfDay } from './daynight';
 import { LampLight } from './lamplight';
@@ -19,6 +25,7 @@ import { buildCliffs, type CliffResult } from './cliffs';
 import { createFauna } from './fauna';
 import { ResourceField } from './resources';
 import { collidersNear, colliderContains, colliderTop } from '../core/collision';
+import type { Region } from './types';
 
 export { applyAtmosphere } from './sky';
 
@@ -39,8 +46,9 @@ export function createWorld(): World {
   const terrain = new TerrainQuery(data);
   const grassRadius = { value: 48 };
   const terrainMat = makeTerrainMaterial(grassRadius);
-  const terrainMeshes = buildTerrainMeshes(data, terrainMat);
-  root.add(terrainMeshes.group);
+  const streamer = new TerrainStreamer(data, terrain, terrainMat);
+  root.add(streamer.group);
+  const win = new GroundWindow(streamer, data);
 
   // ---- sky + light ----
   const { sun, hemi } = createLights(root);
@@ -50,8 +58,8 @@ export function createWorld(): World {
   root.add(clouds.mesh);
 
   // ---- water ----
-  const water = createWater(makeDepthTexture(data));
-  root.add(water);
+  const water = createWater(win, streamer);
+  root.add(water.mesh);
 
   // ---- static props ----
   const kit: Kit = { solid: new GeoBuilder(), glow: new GeoBuilder(), extras: new THREE.Group(), colliders, lamps: [] };
@@ -110,13 +118,13 @@ export function createWorld(): World {
   const lamplight = new LampLight([...kit.lamps.map((p) => ({ p })), { p: poi.fire.clone().add(new THREE.Vector3(0, 0.9, 0)), fire: true }]);
   root.add(lamplight.group);
 
-  // ---- boundary: mountains + invisible walls just inside them ----
-  const W = 200;
+  // ---- boundary: the open sea round Sijord, walled just inside the region's edge ----
+  const W = 200, E = 40;
   colliders.push(
-    { kind: 'box', minX: HALF, maxX: HALF + W, minZ: -HALF - W, maxZ: HALF + W },
-    { kind: 'box', minX: -HALF - W, maxX: -HALF, minZ: -HALF - W, maxZ: HALF + W },
-    { kind: 'box', minX: -HALF - W, maxX: HALF + W, minZ: HALF, maxZ: HALF + W },
-    { kind: 'box', minX: -HALF - W, maxX: HALF + W, minZ: -HALF - W, maxZ: -HALF },
+    { kind: 'box', minX: REGION.maxX - E, maxX: REGION.maxX + W, minZ: REGION.minZ - W, maxZ: REGION.maxZ + W },
+    { kind: 'box', minX: REGION.minX - W, maxX: REGION.minX + E, minZ: REGION.minZ - W, maxZ: REGION.maxZ + W },
+    { kind: 'box', minX: REGION.minX - W, maxX: REGION.maxX + W, minZ: REGION.maxZ - E, maxZ: REGION.maxZ + W },
+    { kind: 'box', minX: REGION.minX - W, maxX: REGION.maxX + W, minZ: REGION.minZ - W, maxZ: REGION.minZ + E },
   );
 
   // ---- vegetation scatter ----
@@ -174,8 +182,15 @@ export function createWorld(): World {
     return false;
   };
   const townMask = makeTownMask(colliders, TOWN.x, TOWN.z, 72);
-  const grass = new GrassSystem(terrain, makeTerrainTextures(data), townMask, grassBlocked, grassRadius);
+  const grass = new GrassSystem(streamer, win, townMask, grassBlocked, grassRadius);
   root.add(grass.group);
+
+  // ---- the streamed land beyond the vale: trees, bushes and rocks per chunk ----
+  // (Attached only now, so the vale's own placement above never sees streamed colliders.)
+  const dynamic = new DynamicColliders();
+  attachDynamic(colliders, dynamic);
+  const outerVeg = new OuterVegetation(streamer, dynamic, resources);
+  root.add(outerVeg.group);
 
   // ---- ambient life ----
   const fauna = createFauna();
@@ -183,7 +198,9 @@ export function createWorld(): World {
 
   // ---- queries ----
   const heightAt = (x: number, z: number): number => {
-    let h = terrain.heightAt(x, z);
+    let h = streamer.heightAt(x, z);
+    // Frozen lakes in the tundra are walkable ice at the water line.
+    if (h < 0.02 && !inVale(x, z) && onIce(x, z)) h = 0.02;
     for (const w of walkables) {
       const d = w.test(x, z);
       if (d > h) h = d;
@@ -208,23 +225,29 @@ export function createWorld(): World {
     },
     waterLevel: WATER_LEVEL,
     colliders,
-    regions: [town.region],
+    regions: [town.region, ...SETTLEMENTS.filter((st) => st.tier !== 'home').map((st): Region => ({ name: st.name, tier: st.tier === 'home' ? 'small' : st.tier, centerX: st.x, centerZ: st.z, radius: st.r }))],
     anchors: town.anchors,
     resources,
     halfSize: HALF,
+    bounds: { minX: REGION.minX + 60, maxX: REGION.maxX - 60, minZ: REGION.minZ + 60, maxZ: REGION.maxZ - 60 },
+    streamer,
+    warmUp: (at: THREE.Vector3, camera: THREE.Vector3) => streamer.warmUp(at, camera),
     sun,
     setTimeOfDay(minutes: number) {
       const st = applyTimeOfDay(minutes, sun, hemi);
       lamplight.setNight(st.night);
       return st;
     },
-    update(dt: number, elapsed: number, focus: THREE.Vector3): void {
+    update(dt: number, elapsed: number, focus: THREE.Vector3, camera?: THREE.Vector3): void {
       void dt;
+      streamer.update(camera ?? focus, focus);
+      win.update(focus.x, focus.z);
+      water.update(camera ?? focus);
+      outerVeg.update(focus);
       worldUniforms.uTime.value = elapsed;
       worldUniforms.uFocus.value.copy(focus);
       const g = 0.75 + Math.sin(elapsed * 0.23) * 0.25;
       worldUniforms.uWind.value.set(0.8 * g, 0.45 * g);
-      terrainMeshes.update(focus);
       for (const b of veg.batches) b.update(focus);
       sky.position.set(focus.x, 0, focus.z);
       clouds.update(focus, elapsed);
@@ -240,13 +263,14 @@ export function createWorld(): World {
       }
     },
     groundColorAt(x: number, z: number): THREE.Color {
-      return terrain.groundColorAt(x, z);
+      return streamer.groundColorAt(x, z, new THREE.Color());
     },
     setQuality(q: Quality): void {
       grass.setQuality(q);
       const lod = q === 'low' ? 0.65 : q === 'medium' ? 1 : 1.5;
       for (const b of veg.batches) b.setLodScale(lod);
-      terrainMeshes.setLodScale(q === 'low' ? 0.75 : q === 'medium' ? 1 : 1.4);
+      streamer.setLodScale(q === 'low' ? 0.75 : q === 'medium' ? 1 : 1.4);
+      outerVeg.setLodScale(lod);
       fauna.setCount(q === 'low' ? 10 : q === 'medium' ? 20 : 28, q === 'low' ? 6 : 14);
     },
   };

@@ -1,28 +1,46 @@
 import * as THREE from 'three';
 import { GLSL_NOISE } from './noise';
-import { CELL, GRID_HALF, GRID_N, WATER_LEVEL } from './layout';
+import { CELL, WATER_LEVEL } from './layout';
+import { LAKES } from '../../shared/region';
+import type { GroundWindow } from './stream/window';
+import type { TerrainStreamer } from './stream/streamer';
+import { ORIGIN_X, ORIGIN_Z } from './stream/lattice';
 import { GLSL_SKY, SKY, SKY_UNIFORMS } from './sky';
 import { worldUniforms } from './shared';
 
+const FROZEN = LAKES.filter((l) => l.frozen);
+
+export interface Water {
+  mesh: THREE.Mesh;
+  /** Keep the sheet under the camera and the far depth texture current. */
+  update(camera: THREE.Vector3): void;
+}
+
 /**
- * Stylised water over the east of the map (river, lake, pond): turquoise shallows over sand that
- * deepen to blue, sky + cloud reflections with Fresnel, darker bank reflections near the shore,
- * sun glints and sparkles, and soft animated foam lines along the beaches.
+ * Stylised water at sea level everywhere (sea, fjords, rivers, lakes, ponds): turquoise shallows
+ * over sand that deepen to blue, sky + cloud reflections with Fresnel, darker bank reflections
+ * near the shore, sun glints and sparkles, and soft animated foam lines along the beaches. Depth
+ * comes from the ground window near the player and from the coarse region heights further out.
+ * Frozen lakes in the tundra are drawn as snow-dusted ice.
  */
-export function createWater(depthTex: THREE.Texture): THREE.Mesh {
-  const minX = -GRID_HALF, maxX = -60, minZ = -GRID_HALF, maxZ = GRID_HALF;
-  const geo = new THREE.PlaneGeometry(maxX - minX, maxZ - minZ, 1, 1);
+export function createWater(win: GroundWindow, streamer: TerrainStreamer): Water {
+  const SIZE = 9000;
+  const geo = new THREE.PlaneGeometry(SIZE, SIZE, 1, 1);
   geo.rotateX(-Math.PI / 2);
-  geo.translate((minX + maxX) / 2, WATER_LEVEL, (minZ + maxZ) / 2);
-  const V = GRID_N + 1;
+  geo.translate(0, WATER_LEVEL, 0);
+  const c = streamer.coarse;
+  const coarseTex = new THREE.DataTexture(c.heights, c.n, c.n, THREE.RedFormat, THREE.FloatType);
+  coarseTex.magFilter = coarseTex.minFilter = THREE.NearestFilter;
+  coarseTex.unpackAlignment = 1;
+  coarseTex.needsUpdate = true;
+  let coarseVersion = c.version;
+  const ice = Array.from({ length: 4 }, (_, i) => FROZEN[i] ? new THREE.Vector4(FROZEN[i].x, FROZEN[i].z, FROZEN[i].rx, FROZEN[i].rz) : new THREE.Vector4(1e9, 1e9, 1, 1));
   const mat = new THREE.ShaderMaterial({
     uniforms: THREE.UniformsUtils.merge([
       THREE.UniformsLib.fog,
       {
-        uDepth: { value: null },
         uSunDir: { value: SKY.sunDir },
         uSunColor: { value: SKY.sunColor },
-        uGrid: { value: new THREE.Vector3(GRID_HALF, CELL, V) },
       },
     ]),
     vertexShader: /* glsl */ `
@@ -36,8 +54,10 @@ export function createWater(depthTex: THREE.Texture): THREE.Mesh {
         #include <fog_vertex>
       }`,
     fragmentShader: /* glsl */ `
-      uniform sampler2D uDepth; uniform vec3 uSunDir; uniform vec3 uSunColor;
-      uniform vec3 uGrid; uniform float uTime;
+      uniform vec3 uSunDir; uniform vec3 uSunColor; uniform float uTime;
+      uniform sampler2D uHeight; uniform vec2 uWinOrigin; uniform float uWinSize;
+      uniform sampler2D uCoarse; uniform vec3 uCoarseBox;
+      uniform vec4 uIce[4];
       varying vec3 vW;
       #include <fog_pars_fragment>
       ${GLSL_NOISE}
@@ -50,12 +70,41 @@ export function createWater(depthTex: THREE.Texture): THREE.Mesh {
         float bz = wNoise((p + vec2(0.0, e)) * 0.35 + o1) + wNoise((p + vec2(0.0, e)) * 0.9 + o2) * 0.5;
         return vec2(bx - a, bz - a) / e;
       }
+      float bilerp(sampler2D tex, vec2 g, float n) {
+        vec2 gc = clamp(g, vec2(0.0), vec2(n - 1.001));
+        ivec2 i = ivec2(floor(gc));
+        vec2 f = gc - vec2(i);
+        float a = texelFetch(tex, i, 0).r, b = texelFetch(tex, i + ivec2(1, 0), 0).r;
+        float c = texelFetch(tex, i + ivec2(0, 1), 0).r, d = texelFetch(tex, i + ivec2(1, 1), 0).r;
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+      }
+      float groundAt(vec2 xz) {
+        vec2 g = (xz - uWinOrigin) / ${CELL.toFixed(3)};
+        if (g.x > 1.0 && g.y > 1.0 && g.x < uWinSize - 2.0 && g.y < uWinSize - 2.0) return bilerp(uHeight, g, uWinSize);
+        return bilerp(uCoarse, (xz - uCoarseBox.xy) / uCoarseBox.z, ${c.n.toFixed(1)});
+      }
       void main() {
-        vec2 g = (vW.xz + uGrid.x) / uGrid.y;
-        vec2 uv = (g + 0.5) / uGrid.z;
-        float depth = texture2D(uDepth, uv).r * 6.6 - 0.6;
+        float depth = ${WATER_LEVEL.toFixed(2)} - groundAt(vW.xz);
         if (depth < -0.05) discard;
         float t = uTime;
+        // Frozen lakes: snow-dusted ice with cracks instead of open water.
+        for (int k = 0; k < 4; k++) {
+          vec2 e = (vW.xz - uIce[k].xy) / uIce[k].zw;
+          float r = length(e);
+          if (r < 1.05) {
+            float n1 = wFbm(vW.xz * 0.06), n2 = wNoise(vW.xz * 0.9);
+            vec3 iceCol = mix(vec3(0.62, 0.78, 0.86), vec3(0.86, 0.93, 0.97), smoothstep(0.35, 0.7, n1));
+            float crack = smoothstep(0.03, 0.0, abs(wNoise(vW.xz * 0.18) - 0.5)) * 0.35;
+            iceCol *= 1.0 - crack;
+            iceCol = mix(iceCol, vec3(0.95, 0.97, 1.0), smoothstep(0.55, 0.85, n1 + n2 * 0.2) * 0.8 + smoothstep(0.8, 1.02, r) * 0.6);
+            float lit = 0.62 + 0.38 * max(uSunDir.y, 0.0);
+            gl_FragColor = vec4(iceCol * lit * uLightTint, 1.0);
+            #include <tonemapping_fragment>
+            #include <colorspace_fragment>
+            #include <fog_fragment>
+            return;
+          }
+        }
         vec3 Vv = cameraPosition - vW;
         float dist = length(Vv);
         Vv /= dist;
@@ -112,12 +161,27 @@ export function createWater(depthTex: THREE.Texture): THREE.Mesh {
     depthWrite: false,
     fog: true,
   });
-  mat.uniforms.uDepth.value = depthTex;
   mat.uniforms.uTime = worldUniforms.uTime;
+  mat.uniforms.uHeight = { value: win.height };
+  mat.uniforms.uWinOrigin = win.uniforms.uWinOrigin;
+  mat.uniforms.uWinSize = win.uniforms.uWinSize;
+  mat.uniforms.uCoarse = { value: coarseTex };
+  mat.uniforms.uCoarseBox = { value: new THREE.Vector3(ORIGIN_X, ORIGIN_Z, c.cell) };
+  mat.uniforms.uIce = { value: ice };
   // Merging copies uniform values: share the sky's instead, so they follow the time of day.
   Object.assign(mat.uniforms, SKY_UNIFORMS, { uSunDir: { value: SKY.sunDir }, uSunColor: { value: SKY.sunColor } });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = 'water';
   mesh.renderOrder = 1;
-  return mesh;
+  mesh.frustumCulled = false;
+  return {
+    mesh,
+    update(camera: THREE.Vector3) {
+      mesh.position.set(Math.round(camera.x / 100) * 100, 0, Math.round(camera.z / 100) * 100);
+      if (c.version !== coarseVersion) {
+        coarseVersion = c.version;
+        coarseTex.needsUpdate = true;
+      }
+    },
+  };
 }

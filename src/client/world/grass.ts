@@ -1,8 +1,9 @@
 import * as THREE from 'three';
-import { CELL, GRID_HALF, GRID_N } from './layout';
+import { CELL } from './layout';
 import { mulberry32 } from './noise';
 import { worldUniforms } from './shared';
-import { GLSL_GROUND, type TerrainQuery, type TerrainTextures } from './terrain';
+import { GLSL_GROUND } from './terrain';
+import type { GroundWindow } from './stream/window';
 import { getNoiseTexture } from './textures';
 import { lambertWrapChunk } from './materials';
 import type { Collider } from './types';
@@ -48,17 +49,16 @@ const QUALITY: Record<GrassQualityName, { detail: LayerSpec; base: LayerSpec; fl
 };
 
 const MAX_PATCHES = 1024;
-const GRID_V = GRID_N + 1;
 
-const GLSL_TERRAIN_SAMPLE = /* glsl */ `
+/** Ground sampling from the window that follows the player (stream/window.ts). */
+export const GLSL_TERRAIN_SAMPLE = /* glsl */ `
 uniform sampler2D uHeight;
-const float SJ_GRID_HALF = ${GRID_HALF.toFixed(1)};
+uniform vec2 uWinOrigin;
+uniform float uWinSize;
 const float SJ_CELL = ${CELL.toFixed(3)};
-const float SJ_GRID_N = ${GRID_N.toFixed(1)};
-const float SJ_GRID_V = ${GRID_V.toFixed(1)};
 /** Exact triangle interpolation (diagonal b-c), plus a smooth gradient for shading. */
 float sjTerrainH(vec2 xz, out vec2 grad) {
-  vec2 g = clamp((xz + SJ_GRID_HALF) / SJ_CELL, vec2(0.0), vec2(SJ_GRID_N - 1e-3));
+  vec2 g = clamp((xz - uWinOrigin) / SJ_CELL, vec2(0.0), vec2(uWinSize - 1.0 - 1e-3));
   ivec2 i = ivec2(floor(g));
   vec2 f = g - vec2(i);
   float a = texelFetch(uHeight, i, 0).r;
@@ -69,7 +69,7 @@ float sjTerrainH(vec2 xz, out vec2 grad) {
   if (f.x + f.y <= 1.0) return a + (b - a) * f.x + (c - a) * f.y;
   return d + (c - d) * (1.0 - f.x) + (b - d) * (1.0 - f.y);
 }
-vec2 sjGridUv(vec2 xz) { return ((xz + SJ_GRID_HALF) / SJ_CELL + 0.5) / SJ_GRID_V; }
+vec2 sjGridUv(vec2 xz) { return ((xz - uWinOrigin) / SJ_CELL + 0.5) / uWinSize; }
 `;
 
 const GLSL_PLACEMENT = /* glsl */ `
@@ -191,9 +191,16 @@ function flowerGeometry(patch: number, density: number, seed: number): THREE.Buf
 }
 
 interface Shared {
-  tex: TerrainTextures;
+  win: GroundWindow;
   townMask: THREE.Texture;
   townBox: THREE.Vector4;
+}
+
+/** What the grass needs to know about the ground to cull patches. */
+export interface GrassGround {
+  heightAt(x: number, z: number): number;
+  rawGrassAt(x: number, z: number): number;
+  hasData(x: number, z: number): boolean;
 }
 
 function makeBladeMaterial(shared: Shared, patches: THREE.DataTexture, spec: LayerSpec): THREE.MeshLambertMaterial {
@@ -203,9 +210,11 @@ function makeBladeMaterial(shared: Shared, patches: THREE.DataTexture, spec: Lay
   mat.userData.range = range;
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, {
-      uHeight: { value: shared.tex.height },
-      uGround: { value: shared.tex.ground },
-      uMask: { value: shared.tex.mask },
+      uHeight: { value: shared.win.height },
+      uGround: { value: shared.win.ground },
+      uMask: { value: shared.win.mask },
+      uWinOrigin: shared.win.uniforms.uWinOrigin,
+      uWinSize: shared.win.uniforms.uWinSize,
       uTownMask: { value: shared.townMask },
       uTownBox: { value: shared.townBox },
       uPatches: { value: patches },
@@ -290,9 +299,11 @@ function makeFlowerMaterial(shared: Shared, patches: THREE.DataTexture, range: T
   const mat = new THREE.MeshLambertMaterial({ side: THREE.DoubleSide });
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, {
-      uHeight: { value: shared.tex.height },
-      uGround: { value: shared.tex.ground },
-      uMask: { value: shared.tex.mask },
+      uHeight: { value: shared.win.height },
+      uGround: { value: shared.win.ground },
+      uMask: { value: shared.win.mask },
+      uWinOrigin: shared.win.uniforms.uWinOrigin,
+      uWinSize: shared.win.uniforms.uWinSize,
       uTownMask: { value: shared.townMask },
       uTownBox: { value: shared.townBox },
       uPatches: { value: patches },
@@ -364,7 +375,7 @@ class PatchLayer {
   private outer: number;
 
   constructor(
-    private readonly terrain: TerrainQuery,
+    private readonly win: GroundWindow,
     private readonly patch: number,
     outer: number,
     private readonly info: PatchInfo,
@@ -394,12 +405,17 @@ class PatchLayer {
     const S = this.patch;
     const cx = camera.position.x, cz = camera.position.z;
     const R = this.outer;
+    // Blades only exist where the window has ground data.
+    const wx0 = this.win.origin.x + 2, wz0 = this.win.origin.y + 2;
+    const span = (this.win.uniforms.uWinSize.value - 2) * CELL - 4;
+    const wx1 = wx0 + span, wz1 = wz0 + span;
     const i0 = Math.floor((cx - R) / S), i1 = Math.floor((cx + R) / S);
     const j0 = Math.floor((cz - R) / S), j1 = Math.floor((cz + R) / S);
     let n = 0;
     for (let j = j0; j <= j1 && n < MAX_PATCHES; j++) {
       for (let i = i0; i <= i1 && n < MAX_PATCHES; i++) {
         const px = i * S, pz = j * S;
+        if (px < wx0 || pz < wz0 || px + S > wx1 || pz + S > wz1) continue;
         const dx = Math.max(px - cx, 0, cx - (px + S));
         const dz = Math.max(pz - cz, 0, cz - (pz + S));
         if (dx * dx + dz * dz > R * R) continue;
@@ -415,44 +431,40 @@ class PatchLayer {
     }
     geo.instanceCount = n;
     this.tex.needsUpdate = true;
-    void this.terrain;
   }
 }
 
 /** Cached per-patch grass coverage and height range. */
 class PatchInfo {
   private readonly cache = new Map<string, { grass: number; minY: number; maxY: number }>();
-  constructor(private readonly terrain: TerrainQuery, private readonly blocked: (x: number, z: number) => boolean) {}
+  constructor(private readonly ground: GrassGround, private readonly blocked: (x: number, z: number) => boolean) {}
   get(px: number, pz: number, S: number): { grass: number; minY: number; maxY: number } {
     const key = `${S}:${px}:${pz}`;
     let v = this.cache.get(key);
     if (v) return v;
-    let grass = 0, minY = Infinity, maxY = -Infinity;
+    let grass = 0, minY = Infinity, maxY = -Infinity, known = true;
     const n = 4;
     for (let b = 0; b <= n; b++) {
       for (let a = 0; a <= n; a++) {
         const x = px + (a / n) * S, z = pz + (b / n) * S;
-        const y = this.terrain.heightAt(x, z);
+        if (!this.ground.hasData(x, z)) known = false;
+        const y = this.ground.heightAt(x, z);
         if (y < minY) minY = y;
         if (y > maxY) maxY = y;
-        const g = this.terrain.data.grass[this.terrainIndex(x, z)];
+        const g = this.ground.rawGrassAt(x, z);
         if (g > 0.02 && !this.blocked(x, z)) grass = Math.max(grass, g);
       }
     }
     // neighbours of the sample points may still grow grass; keep a little margin
     if (grass === 0) {
       for (const [x, z] of [[px - CELL, pz - CELL], [px + S + CELL, pz + S + CELL], [px - CELL, pz + S + CELL], [px + S + CELL, pz - CELL]]) {
-        if (this.terrain.data.grass[this.terrainIndex(x, z)] > 0.02) grass = 0.01;
+        if (this.ground.rawGrassAt(x, z) > 0.02) grass = 0.01;
       }
     }
     v = { grass, minY, maxY: maxY + 0.8 };
-    this.cache.set(key, v);
+    // Patches over ground that hasn't streamed in yet are judged again later.
+    if (known) this.cache.set(key, v);
     return v;
-  }
-  private terrainIndex(x: number, z: number): number {
-    const i = Math.max(0, Math.min(GRID_N, Math.round((x + GRID_HALF) / CELL)));
-    const j = Math.max(0, Math.min(GRID_N, Math.round((z + GRID_HALF) / CELL)));
-    return j * GRID_V + i;
   }
 }
 
@@ -492,16 +504,16 @@ export class GrassSystem {
   readonly grassRadius: { value: number };
 
   constructor(
-    private readonly terrain: TerrainQuery,
-    tex: TerrainTextures,
+    ground: GrassGround,
+    private readonly win: GroundWindow,
     townMask: { tex: THREE.Texture; box: THREE.Vector4 },
     blocked: (x: number, z: number) => boolean,
     grassRadius: { value: number } = { value: 40 },
   ) {
     this.grassRadius = grassRadius;
     this.group.name = 'grass';
-    this.info = new PatchInfo(terrain, blocked);
-    this.shared = { tex, townMask: townMask.tex, townBox: townMask.box };
+    this.info = new PatchInfo(ground, blocked);
+    this.shared = { win, townMask: townMask.tex, townBox: townMask.box };
     this.build('medium');
   }
 
@@ -521,11 +533,11 @@ export class GrassSystem {
     this.layers = [];
     const cfg = QUALITY[q];
     const mkBlades = (spec: LayerSpec, seed: number, name: string) =>
-      new PatchLayer(this.terrain, spec.patch, spec.r3 + 2, this.info, (tex) => ({ geo: bladeGeometry(spec, seed), mat: makeBladeMaterial(this.shared, tex, spec) }), name);
+      new PatchLayer(this.win, spec.patch, spec.r3 + 2, this.info, (tex) => ({ geo: bladeGeometry(spec, seed), mat: makeBladeMaterial(this.shared, tex, spec) }), name);
     this.layers.push(mkBlades(cfg.base, 101, 'grass-base'));
     this.layers.push(mkBlades(cfg.detail, 202, 'grass-detail'));
     const fr = new THREE.Vector4(0, 0, cfg.flowerR * 0.75, cfg.flowerR);
-    this.layers.push(new PatchLayer(this.terrain, 10, cfg.flowerR + 2, this.info, (tex) => ({ geo: flowerGeometry(10, cfg.flowers * 0.35, 303), mat: makeFlowerMaterial(this.shared, tex, fr) }), 'flowers'));
+    this.layers.push(new PatchLayer(this.win, 10, cfg.flowerR + 2, this.info, (tex) => ({ geo: flowerGeometry(10, cfg.flowers * 0.35, 303), mat: makeFlowerMaterial(this.shared, tex, fr) }), 'flowers'));
     for (const l of this.layers) this.group.add(l.mesh);
     this.grassRadius.value = cfg.base.r3;
   }

@@ -578,6 +578,8 @@ export class Game {
 
   /** Compiles shaders up front so the first seconds of play aren't a stutter, then starts the loop. */
   async start(): Promise<void> {
+    // Stream in the ground round the player before the first frame.
+    await this.world.warmUp?.(this.controller.position, this.cam.camera.position);
     try {
       await this.renderer.compileAsync(this.scene, this.cam.camera);
     } catch {
@@ -2882,7 +2884,7 @@ export class Game {
     this.net.send({ ...snap, lead, leadAlpha, trainer: this.trainerEngaged?.def.id, work, lantern: this.lantern.lit || undefined, battle: inBattle || undefined, battleFrame: battle?.director.snapshot(), battleControl: this.battleControl, ballThrow, ballCatch, down: down > 0 ? Math.round(down * 100) / 100 : undefined, wildTaken: wildTaken.length ? wildTaken : undefined, wildBusy: wildBusy.length ? wildBusy : undefined, wildCells: wildCells.length ? wildCells : undefined }, now);
 
     // Also keeps the sun's shadow camera centred on the player.
-    this.world.update(dt, this.elapsed, this.controller.position);
+    this.world.update(dt, this.elapsed, this.controller.position, this.cam.camera.position);
     this.discoveries.update(dt, this.elapsed, this.controller.position);
     this.updateLanterns(dt);
     this.updateStardust();

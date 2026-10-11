@@ -397,7 +397,8 @@ interface BatchItem { id: number; x: number; z: number; hi: number; lo: number; 
 export class VegBatch {
   readonly mesh: THREE.BatchedMesh;
   private readonly geoIds = new Map<THREE.BufferGeometry, number>();
-  private readonly items: BatchItem[] = [];
+  private readonly items = new Map<number, BatchItem>();
+  private readonly free: number[] = [];
   private readonly last = new THREE.Vector3(1e9, 0, 1e9);
   private readonly m = new THREE.Matrix4();
   private readonly q = new THREE.Quaternion();
@@ -424,13 +425,32 @@ export class VegBatch {
   add(hi: THREE.BufferGeometry, lo: THREE.BufferGeometry, x: number, y: number, z: number, rot: number, sx: number, sy: number, color: THREE.Color): number {
     const hiId = this.geoIds.get(hi)!;
     const loId = this.geoIds.get(lo)!;
-    const id = this.mesh.addInstance(loId);
+    // Reuse a slot freed by `remove` (three's own free list re-sorts on every add).
+    const reuse = this.free.pop();
+    const id = reuse ?? this.mesh.addInstance(loId);
+    if (reuse !== undefined) {
+      this.mesh.setGeometryIdAt(id, loId);
+      this.mesh.setVisibleAt(id, true);
+    }
     this.q.setFromAxisAngle(this.up, rot);
     this.m.compose(this.p.set(x, y, z), this.q, this.s.set(sx, sy, sx));
     this.mesh.setMatrixAt(id, this.m);
     this.mesh.setColorAt(id, color);
-    this.items.push({ id, x, z, hi: hiId, lo: loId, isHi: false });
+    this.items.set(id, { id, x, z, hi: hiId, lo: loId, isHi: false });
+    this.last.set(1e9, 0, 1e9);
     return id;
+  }
+
+  /** Take an instance out for good (its terrain chunk streamed away); the slot is reused. */
+  remove(id: number): void {
+    if (!this.items.delete(id)) return;
+    this.mesh.setVisibleAt(id, false);
+    this.free.push(id);
+  }
+
+  /** Whether the batch has room for `n` more instances. */
+  hasRoom(n: number): boolean {
+    return this.items.size + n <= this.mesh.maxInstanceCount;
   }
 
   /** Show or hide one instance (a stone that was picked up). */
@@ -449,7 +469,7 @@ export class VegBatch {
     this.last.copy(focus);
     const ld = this.lodDist * this.lodScale;
     const d2 = ld * ld;
-    for (const it of this.items) {
+    for (const it of this.items.values()) {
       if (it.hi === it.lo) continue;
       const ex = it.x - focus.x, ez = it.z - focus.z;
       const near = ex * ex + ez * ez < d2;
@@ -461,7 +481,7 @@ export class VegBatch {
   }
 
   get count(): number {
-    return this.items.length;
+    return this.items.size;
   }
 }
 
@@ -494,16 +514,39 @@ export interface ScatterNodes {
   boulders: { x: number; y: number; z: number; r: number; top: number }[];
 }
 
+/** The shared trees, bush and rock models and their materials (vale and streamed land alike). */
+export interface VegKit {
+  kinds: Record<string, TreeKind>;
+  foliage: THREE.MeshLambertMaterial;
+  depth: THREE.MeshDepthMaterial;
+  rockMat: THREE.Material;
+  bushHi: THREE.BufferGeometry;
+  bushLo: THREE.BufferGeometry;
+  rockGeos: THREE.BufferGeometry[];
+  rockLo: THREE.BufferGeometry[];
+}
+
+let vegKit: VegKit | null = null;
+export function getVegKit(): VegKit {
+  if (vegKit) return vegKit;
+  const rockGeos = [makeRockGeometry(1), makeRockGeometry(2), makeRockGeometry(3), makeRockGeometry(4, 1, true), makeRockGeometry(5, 1, true)];
+  vegKit = {
+    kinds: makeTreeKinds(),
+    foliage: makeFoliageMaterial(true),
+    depth: makeFoliageDepthMaterial(),
+    rockMat: makeStoneMaterial(1.0),
+    bushHi: makeBushGeometry(false),
+    bushLo: makeBushGeometry(true),
+    rockGeos,
+    rockLo: [makeRockGeometry(1, 0), makeRockGeometry(2, 0), makeRockGeometry(3, 0), rockGeos[3], rockGeos[4]],
+  };
+  return vegKit;
+}
+
 export function scatterVegetation(ctx: ScatterContext): { group: THREE.Group; batches: VegBatch[]; foliage: THREE.MeshLambertMaterial; rocks: VegBatch; nodes: ScatterNodes } {
   const group = new THREE.Group();
   group.name = 'vegetation';
-  const kinds = makeTreeKinds();
-  const foliage = makeFoliageMaterial(true);
-  const depth = makeFoliageDepthMaterial();
-  const rockMat = makeStoneMaterial(1.0);
-  const bushHi = makeBushGeometry(false), bushLo = makeBushGeometry(true);
-  const rockGeos = [makeRockGeometry(1), makeRockGeometry(2), makeRockGeometry(3), makeRockGeometry(4, 1, true), makeRockGeometry(5, 1, true)];
-  const rockLo = [makeRockGeometry(1, 0), makeRockGeometry(2, 0), makeRockGeometry(3, 0), rockGeos[3], rockGeos[4]];
+  const { kinds, foliage, depth, rockMat, bushHi, bushLo, rockGeos, rockLo } = getVegKit();
 
   type P = { kind: string; x: number; y: number; z: number; rot: number; sx: number; sy: number; c: THREE.Color; top?: number; r?: number };
   const treeList: P[] = [];

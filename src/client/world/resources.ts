@@ -55,6 +55,8 @@ export class ResourceField {
   private grid = new Map<number, ResourceNode[]>();
   private byKey = new Map<string, ResourceNode>();
   private empty = new Set<string>();
+  /** Emptied keys from the save whose nodes haven't streamed in yet. */
+  private wantEmpty = new Set<string>();
   private visuals = new Map<string, (empty: boolean) => void>();
   private props: THREE.Object3D[] = [];
 
@@ -87,6 +89,39 @@ export class ResourceField {
     else this.grid.set(k, [n]);
   }
 
+  /**
+   * A node on streamed land (its chunk just loaded). Keys are stable per chunk, so an emptied
+   * node stays empty when its chunk streams out and back in.
+   */
+  addNode(n: ResourceNode, visual?: (empty: boolean) => void): void {
+    if (this.byKey.has(n.key)) return;
+    this.byKey.set(n.key, n);
+    if (visual) this.visuals.set(n.key, visual);
+    const k = key(Math.floor(n.x / CELL), Math.floor(n.z / CELL));
+    const list = this.grid.get(k);
+    if (list) list.push(n);
+    else this.grid.set(k, [n]);
+    if (this.wantEmpty.has(n.key)) {
+      this.empty.add(n.key);
+      visual?.(true);
+    }
+  }
+
+  /** Forget a streamed node (its chunk streamed out); its emptied state is remembered. */
+  removeNode(k: string): void {
+    const n = this.byKey.get(k);
+    if (!n) return;
+    this.byKey.delete(k);
+    this.visuals.delete(k);
+    if (this.empty.delete(k)) this.wantEmpty.add(k);
+    const gk = key(Math.floor(n.x / CELL), Math.floor(n.z / CELL));
+    const list = this.grid.get(gk);
+    if (list) {
+      const i = list.indexOf(n);
+      if (i >= 0) list.splice(i, 1);
+    }
+  }
+
   /** The closest node the trainer at (x, y, z) can reach that `accept` allows, if any. */
   nearest(x: number, y: number, z: number, accept: (n: ResourceNode) => boolean): ResourceNode | null {
     let best: ResourceNode | null = null, bd = Infinity;
@@ -117,7 +152,12 @@ export class ResourceField {
 
   /** Mark a node emptied (berries picked, ore mined) or grown back. */
   setEmpty(k: string, empty: boolean): void {
-    if (empty === this.empty.has(k) || !this.byKey.has(k)) return;
+    if (!this.byKey.has(k)) {
+      if (empty) this.wantEmpty.add(k);
+      else this.wantEmpty.delete(k);
+      return;
+    }
+    if (empty === this.empty.has(k)) return;
     if (empty) this.empty.add(k);
     else this.empty.delete(k);
     this.visuals.get(k)?.(empty);
@@ -126,6 +166,7 @@ export class ResourceField {
   /** Replace the whole emptied set (loading a save). */
   setAllEmpty(keys: Iterable<string>): void {
     const want = new Set(keys);
+    this.wantEmpty = new Set([...want].filter((k) => !this.byKey.has(k)));
     for (const k of [...this.empty]) if (!want.has(k)) this.setEmpty(k, false);
     for (const k of want) this.setEmpty(k, true);
   }
