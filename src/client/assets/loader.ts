@@ -3,7 +3,7 @@ import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { worldCharacterMaterial } from './materials';
-import { POKEMON_VISUALS, inGameplayPack, pokemonModelPath } from '../../shared/pokemon-visuals';
+import { POKEMON_VISUALS, REGION_ONLY, inGameplayPack, pokemonModelPath } from '../../shared/pokemon-visuals';
 
 /** Local files use the same paths on Pages and Vite. Single-file downloads use the published assets. */
 export function assetUrl(path: string): string {
@@ -90,7 +90,15 @@ let regional: Promise<void> | undefined;
  * spawn once its model is in (see creatureModelReady), so nothing pops in as a placeholder.
  */
 export function loadRegionalModels(): Promise<void> {
-  return regional ??= loadPinned(Object.values(POKEMON_VISUALS).map((v) => pokemonUrl(v.dex)));
+  // The vale's species come in the background after the world is built; the wider region's
+  // species are fetched on demand (requestModel) the first time one is about to appear.
+  return regional ??= loadPinned(Object.entries(POKEMON_VISUALS).filter(([id]) => !REGION_ONLY.has(id)).map(([, v]) => pokemonUrl(v.dex)));
+}
+
+/** Start fetching a model if it isn't loaded, loading or failed (kept once loaded). */
+export function requestModel(url: string): void {
+  if (loadedAsset(url) || assetStatus.loading.has(url) || assetStatus.failed.has(url)) return;
+  loadAsset(url, true).catch(() => { /* the procedural stand-in is used instead */ });
 }
 
 /** Independent skeletons and materials; immutable geometries/textures are shared between instances. */

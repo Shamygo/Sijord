@@ -1028,6 +1028,10 @@ export class Battle {
         this.emit({ t: 'immune', pos: tPos, text: `It doesn't affect ${target.name}...` });
         return 0;
       }
+      if (move.sound && target.ability === 'soundproof') {
+        this.emit({ t: 'ability', pos: tPos, ability: 'soundproof', text: `${target.name}'s Soundproof blocks the sound!` });
+        return 0;
+      }
     }
 
     const typeEff = move === STRUGGLE ? 1 : this.typeEffect(user, move, target);
@@ -1047,7 +1051,7 @@ export class Battle {
       return 0;
     }
 
-    const hits = move.multihit ? this.rollHits(move.multihit) : 1;
+    const hits = move.multihit ? (user.ability === 'skill-link' ? move.multihit[1] : this.rollHits(move.multihit)) : 1;
     // Fixed-damage moves ignore type matchups beyond immunity, and never crit.
     const fixed = move.special === 'seismic-toss' || move.special === 'super-fang';
     const shownEff = fixed ? 1 : typeEff;
@@ -1055,7 +1059,7 @@ export class Battle {
     let landed = 0;
     for (let i = 0; i < hits; i++) {
       if (!alive(target) || !alive(user)) break;
-      const crit = !fixed && this.rollCrit(user, move);
+      const crit = !fixed && target.ability !== 'shell-armor' && target.ability !== 'battle-armor' && this.rollCrit(user, move);
       let dmg = this.computeDamage(user, target, tPos, move, typeEff, spread, crit, this.rng.int(85, 100));
       // Sturdy: survive a hit from full HP.
       if (target.ability === 'sturdy' && target.hp === target.maxHp && dmg >= target.hp) {
@@ -1146,6 +1150,8 @@ export class Battle {
     const physical = move.category === 'physical';
     let power = this.movePower(user, target, move);
     if (user.ability === 'technician' && power <= 60) power = modify(power, 1.5);
+    if (user.ability === 'reckless' && move.recoil) power = modify(power, 1.2);
+    if (user.ability === 'iron-fist' && move.id.includes('punch')) power = modify(power, 1.2);
     if (user.helpingHand) power = modify(power, 1.5);
 
     const atkStat = physical ? 'atk' : 'spa';
@@ -1157,7 +1163,8 @@ export class Battle {
       defStage = Math.min(0, defStage);
     }
     let attack = Math.floor(user.stats[atkStat] * stageMultiplier(atkStage));
-    const defense = Math.max(1, Math.floor(target.stats[defStat] * stageMultiplier(defStage)));
+    let defense = Math.max(1, Math.floor(target.stats[defStat] * stageMultiplier(defStage)));
+    if (physical && target.ability === 'marvel-scale' && target.status) defense = modify(defense, 1.5);
 
     const pinch = user.hp <= Math.floor(user.maxHp / 3);
     const pinchType: Record<string, TypeName> = { overgrow: 'grass', blaze: 'fire', torrent: 'water', swarm: 'bug' };
@@ -1173,6 +1180,8 @@ export class Battle {
     if (targetAlly && !targetAlly.fainted && targetAlly.ability === 'friend-guard') final.push(0.75);
     if (crit && user.ability === 'sniper') final.push(1.5);
     if (typeEff < 1 && user.ability === 'tinted-lens') final.push(2);
+    if (typeEff > 1 && (target.ability === 'filter' || target.ability === 'solid-rock')) final.push(0.75);
+    if (target.ability === 'multiscale' && target.hp === target.maxHp) final.push(0.5);
 
     return calcDamage({
       level: user.creature.level,
@@ -1245,6 +1254,10 @@ export class Battle {
     if (target.ability === 'poison-point' && !user.status && !user.types.includes('poison') && !user.types.includes('steel') && this.rng.chance(30)) {
       this.emit({ t: 'ability', pos: tPos, ability: 'poison-point', text: `${target.name}'s Poison Point!` });
       this.setStatus(pos, 'psn', false);
+    }
+    if (target.ability === 'effect-spore' && !user.status && !user.types.includes('grass') && this.rng.chance(30)) {
+      this.emit({ t: 'ability', pos: tPos, ability: 'effect-spore', text: `${target.name}'s Effect Spore!` });
+      this.setStatus(pos, (['psn', 'par', 'slp'] as const)[this.rng.int(0, 2)], false);
     }
   }
 
@@ -1347,6 +1360,8 @@ export class Battle {
     if ((status === 'psn' || status === 'tox') && (m.types.includes('poison') || m.types.includes('steel'))) return fail(`It doesn't affect ${m.name}...`);
     if (status === 'frz' && m.types.includes('ice')) return false;
     if (status === 'slp' && m.ability === 'vital-spirit') return fail(`${m.name}'s Vital Spirit keeps it awake!`);
+    const guard: Partial<Record<string, MajorStatus[]>> = { insomnia: ['slp'], limber: ['par'], immunity: ['psn', 'tox'], 'water-veil': ['brn'], 'magma-armor': ['frz'] };
+    if (guard[m.ability]?.includes(status)) return fail(`${m.name}'s ${ABILITIES[m.ability].name} prevents it!`);
     m.status = status;
     if (status === 'slp') m.sleepTurns = this.rng.int(2, 4);
     if (status === 'tox') m.toxicCounter = 0;
@@ -1381,6 +1396,10 @@ export class Battle {
       }
       if (stat === 'def' && m.ability === 'big-pecks') {
         this.emit({ t: 'ability', pos, ability: 'big-pecks', text: `${m.name}'s Big Pecks prevents Defense loss!` });
+        return false;
+      }
+      if (m.ability === 'clear-body' || (stat === 'atk' && m.ability === 'hyper-cutter')) {
+        this.emit({ t: 'ability', pos, ability: m.ability, text: `${m.name}'s ${ABILITIES[m.ability].name} prevents stat loss!` });
         return false;
       }
       if (m.protect) return false;

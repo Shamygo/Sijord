@@ -28,9 +28,14 @@ describe('species, moves and abilities data', () => {
     for (const sp of Object.values(SPECIES)) {
       const levels = sp.learnset.map((e) => e.level);
       expect([...levels].sort((a, b) => a - b), sp.id).toEqual(levels);
-      // Abra is the one exception, as in the mainline games: it only knows Teleport.
+      // Abra and Magikarp are the exceptions, as in the mainline games: Abra only knows
+      // Teleport, and Magikarp only Splash until level 15.
       if (sp.id === 'abra') {
         expect(defaultMoves(sp.id, 15)).toEqual(['teleport']);
+        continue;
+      }
+      if (sp.id === 'magikarp') {
+        expect(defaultMoves(sp.id, 14)).toEqual(['splash']);
         continue;
       }
       expect(defaultMoves(sp.id, 2).some((m) => MOVES[m].category !== 'status'), sp.id).toBe(true);

@@ -9,6 +9,9 @@ import { SPECIES } from '../../shared/data/species';
 import { disposeBall, makeTreat } from '../battle/fx';
 import { createCreatureModel, creatureModelReady, type CreatureModel } from '../creatures';
 import { MESAS, POND, RIVER_IN, RIVER_OUT, TOWN, distToPolyline, lakeDist } from '../world/layout';
+import { biomeAt, inVale, settlementAt } from '../../shared/region';
+import { BIOME_SPAWNS } from '../../shared/biome-spawns';
+import { anyWaterDistance } from '../world/heightfield';
 import type { World } from '../world/types';
 import { Mover } from './mover';
 
@@ -284,8 +287,23 @@ export const ZONES: { maxDist: number; entries: ZoneEntry[] }[] = [
   },
 ];
 
+/** The spawn table for a spot: the vale's by distance from Bramblewick, else the local biome's. */
+export function spawnTableAt(x: number, z: number): ZoneEntry[] {
+  if (inVale(x, z, 30)) {
+    const d = Math.hypot(x - TOWN.x, z - TOWN.z);
+    return (ZONES.find((zn) => d < zn.maxDist) ?? ZONES[ZONES.length - 1]).entries;
+  }
+  return BIOME_SPAWNS[biomeAt(x, z)];
+}
+
 /** Whether a spot suits a habitat: close to water, or among the stone mesas. */
-function habitatAt(x: number, z: number, habitat: Habitat): boolean {
+function habitatAt(x: number, z: number, habitat: Habitat, world?: World): boolean {
+  if (!inVale(x, z, 30)) {
+    if (habitat === 'water') return anyWaterDistance(x, z).d < 35;
+    // Rocky ground: steep slopes, high ground or near the cliffs.
+    const slope = world?.streamer?.slopeAt(x, z) ?? 0;
+    return slope > 0.16 || (world?.heightAt(x, z) ?? 0) > 110;
+  }
   if (habitat === 'water') {
     const water = Math.min(distToPolyline(x, z, RIVER_IN), distToPolyline(x, z, RIVER_OUT), lakeDist(x, z), Math.hypot(x - POND.x, z - POND.z) - POND.r);
     return water < 35;
@@ -989,11 +1007,11 @@ export class WildManager {
     const x = (i + 0.2 + rng.next() * 0.6) * C;
     const z = (j + 0.2 + rng.next() * 0.6) * C;
     if (!this.spawnable(x, z)) return null;
-    const d = Math.hypot(x - TOWN.x, z - TOWN.z);
-    const zone = ZONES.find((zn) => d < zn.maxDist) ?? ZONES[ZONES.length - 1];
+    const table = spawnTableAt(x, z);
     const night = (epoch & 1) === 1;
-    const out = zone.entries.filter((e) => entryWeight(e, night) > 0);
-    const fits = out.filter((e) => !e.habitat || habitatAt(x, z, e.habitat));
+    const out = table.filter((e) => entryWeight(e, night) > 0);
+    if (!out.length) return null;
+    const fits = out.filter((e) => !e.habitat || habitatAt(x, z, e.habitat, this.world));
     const entry = this.pickEntry(fits.length ? fits : out.filter((e) => !e.habitat), rng, night);
     return { x, z, entry, seed: rng.int(0, 0x7fffffff) };
   }
@@ -1035,8 +1053,11 @@ export class WildManager {
 
   spawnable(x: number, z: number): boolean {
     const w = this.world;
-    if (Math.abs(x) > w.halfSize - 20 || Math.abs(z) > w.halfSize - 20) return false;
+    const b = w.bounds;
+    if (b ? x < b.minX + 20 || x > b.maxX - 20 || z < b.minZ + 20 || z > b.maxZ - 20 : Math.abs(x) > w.halfSize - 20 || Math.abs(z) > w.halfSize - 20) return false;
     if (Math.hypot(x - TOWN.x, z - TOWN.z) < TOWN.fenceR + 22) return false;
+    // No wild herds inside towns (DESIGN §2.3), with a little room round their fences.
+    if (settlementAt(x, z, 22)) return false;
     if (w.heightAt(x, z) < w.waterLevel + 0.4) return false;
     for (const m of MESAS) if (Math.hypot(x - m.x, z - m.z) < m.r * 0.9) return false;
     return true;
@@ -1047,9 +1068,8 @@ export class WildManager {
    * every member comes out identical on each machine; debugging tools pass just a species.
    */
   spawnHerd(x: number, z: number, forceSpecies?: string, forceLevel?: number, shared?: { entry: ZoneEntry; rng: Rng; keyPrefix: string }): Herd {
-    const d = Math.hypot(x - TOWN.x, z - TOWN.z);
-    const zone = ZONES.find((zn) => d < zn.maxDist) ?? ZONES[ZONES.length - 1];
-    const entry = shared?.entry ?? (forceSpecies ? zone.entries.find((e) => e.species === forceSpecies) ?? { species: forceSpecies, weight: 1, min: 3, max: 5, herd: [2, 2] as [number, number] } : this.pickEntry(this.candidates(zone.entries, x, z)));
+    const table = spawnTableAt(x, z);
+    const entry = shared?.entry ?? (forceSpecies ? table.find((e) => e.species === forceSpecies) ?? { species: forceSpecies, weight: 1, min: 3, max: 5, herd: [2, 2] as [number, number] } : this.pickEntry(this.candidates(table, x, z)));
     const rng = shared?.rng ?? this.rng;
     const herd: Herd = { id: this.nextId++, species: entry.species, cx: x, cz: z, members: [] };
     const n = rng.int(entry.herd[0], entry.herd[1]);
@@ -1092,7 +1112,7 @@ export class WildManager {
    */
   private candidates(entries: ZoneEntry[], x: number, z: number): ZoneEntry[] {
     const awake = entries.filter((e) => e.weight > 0);
-    const ok = awake.filter((e) => (!e.habitat || habitatAt(x, z, e.habitat)) && creatureModelReady(e.species));
+    const ok = awake.filter((e) => (!e.habitat || habitatAt(x, z, e.habitat, this.world)) && creatureModelReady(e.species));
     return ok.length ? ok : awake.filter((e) => !e.habitat);
   }
 

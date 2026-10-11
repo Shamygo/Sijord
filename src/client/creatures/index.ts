@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { ALPHA } from '../../shared/alpha';
 import { POKEMON_VISUALS } from '../../shared/pokemon-visuals';
-import { assetStatus, loadedAsset, pokemonUrl } from '../assets/loader';
+import { assetStatus, loadedAsset, pokemonUrl, requestModel } from '../assets/loader';
 import { importedCreature } from './imported';
 import { hashString, type BaseInit, type Clip } from './core';
 import { quadClips } from './clips';
@@ -134,7 +134,10 @@ export function creatureModelReady(speciesId: string): boolean {
   const visual = POKEMON_VISUALS[speciesId.toLowerCase()];
   if (!visual) return true;
   const url = pokemonUrl(visual.dex);
-  return !!loadedAsset(url) || assetStatus.failed.has(url);
+  if (loadedAsset(url) || assetStatus.failed.has(url)) return true;
+  // Not here yet: start the download, so the herd that asked can appear shortly.
+  requestModel(url);
+  return false;
 }
 
 /** An Alpha (DESIGN §4.6) is the same model, bigger, with glowing red eyes. */

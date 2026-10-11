@@ -13,7 +13,9 @@ Read this before "Start here". Two commits on `claude/sijord-region`, not yet me
 
 **Backups:** tag `backup/pre-2026-10-11` = old `main` (d7fc32c). Local copies in `~/Documents/Sijord/backups/` on Simon's Mac.
 
-**Next up, in order:** wild spawns per biome with DESIGN §3.2 level bands (`overworld/wild.ts` ZONES still only know the vale) and more species (DEX_PLAN); NPCs in towns (`layout.npcs` has spots and roles, nothing spawns them yet); gyms (M6: twin plates are anchors `plateA`/`plateB` on gym models, co-op puzzle interiors, boss battles, badges, level caps); skill trees (M7); riding (M9); bases and automation (M8); Mega/Z/Dynamax (M11); story; desktop builds. Art still to improve: mountains read as smooth snow, Mirefen needs more pools and mist, cities have no residents.
+3. **Wildlife for every biome** (branch `claude/biome-wilds`): the rest of Kanto (90 species, `src/shared/data/species-region.ts`, all with walking models; stone and trade evolutions use stand-in levels) plus 93 moves (`moves-region.ts`) and 21 abilities in the engine. `src/shared/biome-spawns.ts` gives each biome its table inside its DESIGN §3.2 band (Hearthmeadow 4-16 ... Stormcrown 55-75); `spawnTableAt` in `overworld/wild.ts` keeps the vale on its old tables. Evolved forms inherit pre-evolution moves at build time (`inheritMoves` in species.ts). Region-only species' models load on demand (`REGION_ONLY`, `requestModel`).
+
+**Next up, in order:** NPCs in towns (`layout.npcs` has spots and roles, nothing spawns them yet); gyms (M6: twin plates are anchors `plateA`/`plateB` on gym models, co-op puzzle interiors, boss battles, badges, level caps); skill trees (M7); riding (M9); bases and automation (M8); Mega/Z/Dynamax (M11); story; desktop builds. Art still to improve: mountains read as smooth snow, Mirefen needs more pools and mist, cities have no residents.
 
 **Testing on a Mac without the pane:** headless Chrome via the DevTools protocol worked well (60 fps): launch Chrome with `--headless=new --remote-debugging-port=9333 --user-data-dir=<temp>` and drive it with `Runtime.evaluate` (use `replMode: true` for top-level await).
 
