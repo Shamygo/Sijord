@@ -27,7 +27,9 @@ Read this before "Start here". Two commits on `claude/sijord-region`, not yet me
 
 **Testing co-op on one Mac:** two headless Chrome windows on the same dev server and room (`Target.createTarget` with `newWindow: true`, so neither is a background tab) join as partners. `window.sijord` is the game; `gymSpot(pos).act()`, `debugTeleport`, and setting `setup.ai = 't2'` on side-0 teams autoplay battles.
 
-**Next up, in order:** M6 leftovers above; skill trees (M7); riding (M9); bases and automation (M8); Mega/Z/Dynamax (M11); story; desktop builds. Art still to improve: mountains read as smooth snow, Mirefen needs more pools and mist.
+   - The quest list's main quest points at the nearest unbeaten gym (`refreshQuests`), then at Crownspire once all ten are won.
+
+**Next up, in order** (Simon: "keep going until finished product"): riding (M9), because the region is 6.4 km across; the Battle Tower (5 badges) and the League (Elite Four and Champion at Crownspire, 10 badges) using the gym interior framework; the main story (Team Tether, Krane Industries) as quests; skill trees (M7); bases and automation (M8); Mega/Z/Dynamax (M11); M6 leftovers above; desktop builds. Art still to improve: mountains read as smooth snow, Mirefen needs more pools and mist.
 
 **Testing on a Mac without the pane:** headless Chrome via the DevTools protocol worked well (60 fps): launch Chrome with `--headless=new --remote-debugging-port=9333 --user-data-dir=<temp>` and drive it with `Runtime.evaluate` (use `replMode: true` for top-level await).
 
