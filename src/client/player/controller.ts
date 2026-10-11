@@ -499,13 +499,13 @@ export class PlayerController {
     }
 
     // Map bounds.
-    const lim = world.halfSize - T.radius;
-    if (nx < -lim || nx > lim) {
-      nx = clamp(nx, -lim, lim);
+    const b = mapBounds(world, T.radius);
+    if (nx < b.minX || nx > b.maxX) {
+      nx = clamp(nx, b.minX, b.maxX);
       vel.x = 0;
     }
-    if (nz < -lim || nz > lim) {
-      nz = clamp(nz, -lim, lim);
+    if (nz < b.minZ || nz > b.maxZ) {
+      nz = clamp(nz, b.minZ, b.maxZ);
       vel.z = 0;
     }
     pos.x = nx;
@@ -674,9 +674,9 @@ export class PlayerController {
     const nx = n.x + (body.hit.nx - n.x) * a, nz = n.z + (body.hit.nz - n.z) * a, nl = Math.hypot(nx, nz) || 1;
     n.x = nx / nl;
     n.z = nz / nl;
-    const lim = world.halfSize - T.radius;
-    x = clamp(x, -lim, lim);
-    z = clamp(z, -lim, lim);
+    const b = mapBounds(world, T.radius);
+    x = clamp(x, b.minX, b.maxX);
+    z = clamp(z, b.minZ, b.maxZ);
     // Back on walkable ground at the foot of the wall: stand up.
     const ground = this.groundAt(world, x, z, y + 0.05);
     if (y < ground) y = ground;
@@ -819,4 +819,12 @@ export class PlayerController {
     };
     return s;
   }
+}
+
+/** Where the player may stand: the region's bounds, or the vale's square on older worlds. */
+function mapBounds(world: World, radius: number): { minX: number; maxX: number; minZ: number; maxZ: number } {
+  const b = world.bounds;
+  if (b) return { minX: b.minX + radius, maxX: b.maxX - radius, minZ: b.minZ + radius, maxZ: b.maxZ - radius };
+  const lim = world.halfSize - radius;
+  return { minX: -lim, maxX: lim, minZ: -lim, maxZ: lim };
 }

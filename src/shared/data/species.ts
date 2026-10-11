@@ -1,5 +1,6 @@
 import { POKEMON_VISUALS } from '../pokemon-visuals';
 import type { LearnEntry, SpeciesData, StatTable } from '../battle/types';
+import { REGION_SPECIES } from './species-region';
 
 /** Shorthand for a learnset: [[level, move], ...]. */
 function learn(...entries: [number, string][]): LearnEntry[] {
@@ -203,7 +204,7 @@ const LIST: Entry[] = [
   {
     id: 'ekans', types: ['poison'], baseStats: stats(35, 60, 44, 40, 54, 55),
     abilities: ['intimidate', 'shed-skin'], hiddenAbility: 'unnerve', growth: 'medium-fast', baseExp: 58, evYield: { atk: 1 },
-    catchRate: 255, temperament: 'territorial', height: 2.0,
+    catchRate: 255, temperament: 'territorial', height: 2.0, evolution: { into: 'arbok', level: 22 },
     description: 'It slides silently through tall grass and coils around any egg it finds in an unguarded nest.',
     learnset: learn([1, 'leer'], [1, 'wrap'], [4, 'poison-sting'], [9, 'bite'], [12, 'glare'], [17, 'screech'], [20, 'acid'], [28, 'acid-spray'], [33, 'sludge-bomb'], [44, 'coil'], [49, 'gunk-shot']),
   },
@@ -228,14 +229,14 @@ const LIST: Entry[] = [
   {
     id: 'nidoran-f', types: ['poison'], baseStats: stats(55, 47, 52, 40, 40, 41),
     abilities: ['poison-point'], hiddenAbility: 'hustle', growth: 'medium-slow', baseExp: 55, evYield: { hp: 1 },
-    catchRate: 235, temperament: 'docile', height: 0.4,
+    catchRate: 235, temperament: 'docile', height: 0.4, evolution: { into: 'nidorina', level: 16 },
     description: 'Small and gentle, it only raises its poison barbs when it truly has to defend itself.',
     learnset: learn([1, 'growl'], [1, 'poison-sting'], [5, 'scratch'], [10, 'tail-whip'], [15, 'fury-swipes'], [25, 'double-kick'], [30, 'bite'], [35, 'helping-hand'], [40, 'toxic'], [45, 'flatter'], [50, 'crunch'], [55, 'earth-power']),
   },
   {
     id: 'nidoran-m', types: ['poison'], baseStats: stats(46, 57, 40, 40, 40, 50),
     abilities: ['poison-point'], hiddenAbility: 'hustle', growth: 'medium-slow', baseExp: 55, evYield: { atk: 1 },
-    catchRate: 235, temperament: 'territorial', height: 0.5,
+    catchRate: 235, temperament: 'territorial', height: 0.5, evolution: { into: 'nidorino', level: 16 },
     description: 'It swivels its big ears toward every rustle, and the horn on its head hides a stinging poison.',
     learnset: learn([1, 'leer'], [1, 'poison-sting'], [5, 'peck'], [10, 'focus-energy'], [15, 'fury-attack'], [25, 'double-kick'], [30, 'horn-attack'], [35, 'helping-hand'], [40, 'toxic'], [45, 'flatter'], [50, 'poison-jab'], [55, 'earth-power']),
   },
@@ -260,7 +261,7 @@ const LIST: Entry[] = [
   {
     id: 'vulpix', types: ['fire'], baseStats: stats(38, 41, 40, 50, 65, 65),
     abilities: ['flash-fire'], growth: 'medium-fast', baseExp: 60, evYield: { spe: 1 },
-    catchRate: 190, temperament: 'skittish', height: 0.6,
+    catchRate: 190, temperament: 'skittish', height: 0.6, evolution: { into: 'ninetales', level: 32 },
     description: 'Its six curled tails grow fuller and warmer as it matures, and glow faintly on cold evenings.',
     learnset: learn([1, 'ember'], [1, 'tail-whip'], [8, 'quick-attack'], [16, 'incinerate'], [20, 'confuse-ray'], [24, 'will-o-wisp'], [28, 'extrasensory'], [32, 'flamethrower'], [40, 'fire-spin'], [48, 'inferno'], [52, 'fire-blast']),
   },
@@ -268,7 +269,7 @@ const LIST: Entry[] = [
   {
     id: 'jigglypuff', types: ['normal', 'fairy'], baseStats: stats(115, 45, 20, 45, 25, 20),
     abilities: ['competitive'], hiddenAbility: 'friend-guard', growth: 'fast', baseExp: 95, evYield: { hp: 2 },
-    catchRate: 170, temperament: 'docile', height: 0.5,
+    catchRate: 170, temperament: 'docile', height: 0.5, evolution: { into: 'wigglytuff', level: 30 },
     description: 'It puffs up its round body and hums a lullaby that few listeners manage to stay awake through.',
     learnset: learn([1, 'charm'], [1, 'defense-curl'], [1, 'disarming-voice'], [1, 'pound'], [1, 'sing'], [1, 'sweet-kiss'], [4, 'echoed-voice'], [8, 'covet'], [16, 'round'], [20, 'rest'], [24, 'body-slam'], [36, 'hyper-voice'], [44, 'double-edge']),
   },
@@ -276,7 +277,7 @@ const LIST: Entry[] = [
   {
     id: 'zubat', types: ['poison', 'flying'], baseStats: stats(40, 45, 35, 30, 40, 55),
     abilities: ['inner-focus'], growth: 'medium-fast', baseExp: 49, evYield: { spe: 1 },
-    catchRate: 255, temperament: 'aggressive', height: 0.8,
+    catchRate: 255, temperament: 'aggressive', height: 0.8, evolution: { into: 'golbat', level: 22 },
     description: 'It flits through the dark with its eyes shut, steering by the echoes of its own thin cries.',
     learnset: learn([1, 'absorb'], [1, 'supersonic'], [5, 'astonish'], [15, 'poison-fang'], [25, 'air-cutter'], [30, 'bite'], [40, 'venoshock'], [45, 'confuse-ray'], [50, 'air-slash'], [55, 'leech-life']),
   },
@@ -291,7 +292,7 @@ const LIST: Entry[] = [
   {
     id: 'gloom', types: ['grass', 'poison'], baseStats: stats(60, 65, 70, 85, 75, 40),
     abilities: ['chlorophyll'], hiddenAbility: 'stench', growth: 'medium-slow', baseExp: 138, evYield: { spa: 2 },
-    catchRate: 120, temperament: 'docile', height: 0.8,
+    catchRate: 120, temperament: 'docile', height: 0.8, evolution: { into: 'vileplume', level: 32 },
     description: 'The sticky nectar dribbling from its mouth smells dreadful, yet a few odd collectors adore it.',
     learnset: learn([1, 'absorb'], [1, 'growth'], [1, 'acid'], [1, 'sweet-scent'], [12, 'mega-drain'], [14, 'poison-powder'], [16, 'stun-spore'], [18, 'sleep-powder'], [20, 'giga-drain'], [26, 'toxic'], [32, 'moonblast'], [44, 'moonlight']),
   },
@@ -299,7 +300,7 @@ const LIST: Entry[] = [
   {
     id: 'meowth', types: ['normal'], baseStats: stats(40, 45, 35, 40, 40, 90),
     abilities: ['pickup', 'technician'], hiddenAbility: 'unnerve', growth: 'medium-fast', baseExp: 58, evYield: { spe: 1 },
-    catchRate: 255, temperament: 'skittish', height: 0.4,
+    catchRate: 255, temperament: 'skittish', height: 0.4, evolution: { into: 'persian', level: 28 },
     description: 'It prowls the village lanes at dusk for anything that glints, especially coins dropped near the market.',
     learnset: learn([1, 'fake-out'], [1, 'growl'], [4, 'feint'], [8, 'scratch'], [12, 'pay-day'], [16, 'bite'], [24, 'assurance'], [29, 'fury-swipes'], [32, 'screech'], [36, 'slash'], [40, 'nasty-plot'], [44, 'play-rough']),
   },
@@ -307,7 +308,7 @@ const LIST: Entry[] = [
   {
     id: 'psyduck', types: ['water'], baseStats: stats(50, 52, 48, 65, 50, 55),
     abilities: ['damp', 'cloud-nine'], growth: 'medium-fast', baseExp: 64, evYield: { spa: 1 },
-    catchRate: 190, temperament: 'docile', height: 0.8,
+    catchRate: 190, temperament: 'docile', height: 0.8, evolution: { into: 'golduck', level: 33 },
     description: 'Its constant headaches sometimes unleash strange psychic power that it never remembers using.',
     learnset: learn([1, 'scratch'], [1, 'tail-whip'], [3, 'water-gun'], [6, 'confusion'], [9, 'fury-swipes'], [12, 'water-pulse'], [18, 'zen-headbutt'], [21, 'screech'], [24, 'aqua-tail'], [27, 'soak'], [34, 'amnesia']),
   },
@@ -315,7 +316,7 @@ const LIST: Entry[] = [
   {
     id: 'mankey', types: ['fighting'], baseStats: stats(40, 80, 35, 35, 45, 70),
     abilities: ['vital-spirit', 'anger-point'], hiddenAbility: 'defiant', growth: 'medium-fast', baseExp: 61, evYield: { atk: 1 },
-    catchRate: 190, temperament: 'aggressive', height: 0.5,
+    catchRate: 190, temperament: 'aggressive', height: 0.5, evolution: { into: 'primeape', level: 28 },
     description: 'Quick to anger and slow to cool off, it will chase a trainer across the meadow over an imagined slight.',
     learnset: learn([1, 'covet'], [1, 'focus-energy'], [1, 'leer'], [1, 'scratch'], [5, 'fury-swipes'], [12, 'seismic-toss'], [17, 'swagger'], [22, 'cross-chop'], [26, 'assurance'], [33, 'close-combat'], [36, 'screech'], [40, 'stomping-tantrum']),
   },
@@ -340,7 +341,7 @@ const LIST: Entry[] = [
   {
     id: 'poliwag', types: ['water'], baseStats: stats(40, 50, 40, 40, 40, 90),
     abilities: ['water-absorb', 'damp'], growth: 'medium-slow', baseExp: 60, evYield: { spe: 1 },
-    catchRate: 255, temperament: 'skittish', height: 0.6,
+    catchRate: 255, temperament: 'skittish', height: 0.6, evolution: { into: 'poliwhirl', level: 25 },
     description: 'It waddles clumsily on its new legs, so it spends most of its day paddling around the lake shallows.',
     learnset: learn([1, 'water-gun'], [1, 'hypnosis'], [6, 'pound'], [12, 'mud-shot'], [18, 'bubble-beam'], [30, 'body-slam'], [36, 'earth-power'], [42, 'hydro-pump'], [54, 'double-edge']),
   },
@@ -348,7 +349,7 @@ const LIST: Entry[] = [
   {
     id: 'abra', types: ['psychic'], baseStats: stats(25, 20, 15, 105, 55, 90),
     abilities: ['inner-focus'], hiddenAbility: 'magic-guard', growth: 'medium-slow', baseExp: 62, evYield: { spa: 1 },
-    catchRate: 200, temperament: 'skittish', height: 0.9,
+    catchRate: 200, temperament: 'skittish', height: 0.9, evolution: { into: 'kadabra', level: 16 },
     // As in the main games, Teleport is the only move it learns by level.
     description: 'It dozes most of the day and vanishes the instant it senses danger, which makes it very hard to catch.',
     learnset: learn([1, 'teleport']),
@@ -357,7 +358,7 @@ const LIST: Entry[] = [
   {
     id: 'bellsprout', types: ['grass', 'poison'], baseStats: stats(50, 75, 35, 70, 30, 40),
     abilities: ['chlorophyll'], growth: 'medium-slow', baseExp: 60, evYield: { atk: 1 },
-    catchRate: 255, temperament: 'docile', height: 0.7,
+    catchRate: 255, temperament: 'docile', height: 0.7, evolution: { into: 'weepinbell', level: 21 },
     description: 'It sways on its thin stem and snaps its vines out at insects that drift too close.',
     learnset: learn([1, 'vine-whip'], [7, 'growth'], [11, 'wrap'], [13, 'sleep-powder'], [15, 'poison-powder'], [17, 'stun-spore'], [23, 'acid'], [27, 'knock-off'], [29, 'sweet-scent'], [39, 'razor-leaf'], [41, 'poison-jab'], [47, 'slam'], [52, 'power-whip']),
   },
@@ -365,7 +366,7 @@ const LIST: Entry[] = [
   {
     id: 'geodude', types: ['rock', 'ground'], baseStats: stats(40, 80, 100, 30, 30, 20),
     abilities: ['rock-head', 'sturdy'], growth: 'medium-slow', baseExp: 60, evYield: { def: 1 },
-    catchRate: 255, temperament: 'territorial', height: 0.4,
+    catchRate: 255, temperament: 'territorial', height: 0.4, evolution: { into: 'graveler', level: 25 },
     description: 'Hikers often sit on it by mistake, and it makes them regret it the moment it sprouts arms.',
     learnset: learn([1, 'tackle'], [1, 'defense-curl'], [6, 'rock-polish'], [12, 'bulldoze'], [16, 'rock-throw'], [18, 'smack-down'], [24, 'self-destruct'], [30, 'rock-blast'], [34, 'earthquake'], [36, 'explosion'], [40, 'double-edge'], [42, 'stone-edge']),
   },
@@ -373,7 +374,7 @@ const LIST: Entry[] = [
   {
     id: 'ponyta', types: ['fire'], baseStats: stats(50, 85, 55, 65, 65, 90),
     abilities: ['run-away', 'flash-fire'], hiddenAbility: 'flame-body', growth: 'medium-fast', baseExp: 82, evYield: { spe: 1 },
-    catchRate: 190, temperament: 'skittish', height: 1.0,
+    catchRate: 190, temperament: 'skittish', height: 1.0, evolution: { into: 'rapidash', level: 40 },
     description: 'Its fiery mane cannot burn anyone it trusts, and it gallops faster every season as its legs grow strong.',
     learnset: learn([1, 'tackle'], [1, 'growl'], [5, 'tail-whip'], [10, 'ember'], [15, 'flame-charge'], [20, 'agility'], [25, 'flame-wheel'], [30, 'stomp'], [35, 'fire-spin'], [41, 'take-down'], [45, 'inferno'], [50, 'fire-blast'], [55, 'flare-blitz']),
   },
@@ -387,11 +388,32 @@ const LIST: Entry[] = [
   },
 ];
 
-const BUILT: SpeciesData[] = LIST.map((s) => {
+const BUILT: SpeciesData[] = inheritMoves([...LIST, ...REGION_SPECIES]).map((s) => {
   const visual = POKEMON_VISUALS[s.id];
   if (!visual) throw new Error(`Species "${s.id}" has no POKEMON_VISUALS entry`);
   return { ...s, name: visual.name, dex: `#${String(visual.dex).padStart(3, '0')}` };
 });
+
+/**
+ * An evolved form keeps every move its earlier form learns before evolving: any it doesn't
+ * list itself are added at level 1 (they show up as "evolution" moves in the games).
+ */
+function inheritMoves(list: Entry[]): Entry[] {
+  const byId = new Map(list.map((s) => [s.id, { ...s, learnset: [...s.learnset] }]));
+  // Walk each line from its first stage so a third stage inherits what the second inherited.
+  const isTarget = new Set(list.flatMap((s) => (s.evolution ? [s.evolution.into] : [])));
+  const visit = (s: Entry) => {
+    if (!s.evolution) return;
+    const next = byId.get(s.evolution.into);
+    if (!next) return;
+    const have = new Set(next.learnset.map((e) => e.move));
+    const keep = s.learnset.filter((e) => e.level < s.evolution!.level && !have.has(e.move)).map((e) => ({ level: 1, move: e.move }));
+    next.learnset = [...keep, ...next.learnset].sort((a, b) => a.level - b.level);
+    visit(next);
+  };
+  for (const s of byId.values()) if (!isTarget.has(s.id)) visit(s);
+  return list.map((s) => byId.get(s.id)!);
+}
 
 export const SPECIES: Record<string, SpeciesData> = Object.fromEntries(BUILT.map((s) => [s.id, s]));
 export const SPECIES_IDS = BUILT.map((s) => s.id);

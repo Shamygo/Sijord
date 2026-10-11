@@ -63,6 +63,10 @@ export interface PlayerSnapshot {
   trainer?: string;
   /** This player's lantern is lit. */
   lantern?: boolean;
+  /** Gym badges held: gyms scale to the higher count of the two players (DESIGN §3.1). */
+  badges?: number;
+  /** The gym this player is inside, with the chambers they've solved there (shared so both agree). */
+  gym?: { id: string; solved: number[]; trainers?: boolean };
 }
 
 /** A thrown ball: the partner replays the same physical flight from the same launch. */

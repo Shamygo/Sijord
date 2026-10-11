@@ -201,6 +201,7 @@ unbeatenGyms.forEach(g => scaleGym(g, world));
 - **Team templates per band.** Each leader has species planned for 4 bands: badges 0-2, 3-5, 6-8 and 9. That way an early-game Ground leader fights with Sandile and Diglett, while a late-game one brings Krookodile and Garchomp with a Mega slot. Species are hand-picked; the code only sets levels.
 - **The "levels at which previous gyms were beaten" rule** is the levelRecord `R`. If you beat a gym at a given level, every remaining gym starts from at least the next step above it.
 - **Team quality scales too**, not just levels: the spread quality, the held items and the AI tier all step up per band (see §4.5).
+- **As built (2026-10-11):** leaders bring `min(6, 4 + floor(b/2))` creatures, one more than the sketch above, because two players bring six between them; leaders play one AI tier above their gym trainers (t2 at 0-2 badges, t3 after). The two gym trainers fight as a tag team.
 
 ### 3.4 Level cap rules
 - **XP banking.** A creature at the cap stops levelling. Extra XP banks, up to one level's worth, and is applied the moment the cap rises. Grinding is never wasted, but it can't break the curve.
@@ -816,7 +817,7 @@ Electron is the safer first choice because the Node server can run in-process. T
 
 ## 18. Open questions for Simon
 
-1. **Solo worlds and gyms.** The vision says gyms need both players. If one player is offline, should gyms (a) wait for the partner, or (b) offer an optional **AI "Echo" partner** for solo saves? The current design assumes (a), with (b) as a toggle.
+1. **Solo worlds and gyms.** The vision says gyms need both players. If one player is offline, should gyms (a) wait for the partner, or (b) offer an optional **AI "Echo" partner** for solo saves? The current design assumes (a), with (b) as a toggle. *Built: (a) by default, (b) as the "Echo partner" setting, off by default.*
 2. **Badge sharing.** If a second player joins a world later, should they inherit the host's badges or earn their own? The design currently uses separate badges, scaling to the higher count, plus a catch-up cap for the newcomer.
 3. **Number of gyms.** 10 gyms fits "10-12 large cities with gym leaders". The classic count is 8. Easy to change.
 4. **Real-time player damage.** Is it okay that charging creatures can knock players down (§5.3)?

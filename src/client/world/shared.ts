@@ -5,6 +5,8 @@ import { paintPropMaterial } from './materials';
 /** Uniforms shared by every animated world material. */
 export const worldUniforms = {
   uTime: { value: 0 },
+  /** 0 by day, 1 at night (lit windows, lanterns). */
+  uNight: { value: 0 },
   uWind: { value: new THREE.Vector2(0.8, 0.45) },
   uFocus: { value: new THREE.Vector3() },
 };

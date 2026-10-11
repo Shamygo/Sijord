@@ -60,12 +60,92 @@ function key(cx: number, cz: number): number {
 const grids = new WeakMap<readonly Collider[], ColliderGrid>();
 const GRID_THRESHOLD = 64;
 
+/**
+ * Colliders that come and go in groups (the trees and rocks of a streamed terrain chunk), kept in
+ * their own grid so adding or dropping a chunk never rebuilds the big static one. Attach it to a
+ * collider list with `attachDynamic` and every query against that list sees both.
+ */
+export class DynamicColliders {
+  private cells = new Map<number, Collider[]>();
+  private groups = new Map<number, { list: Collider[]; cells: number[] }>();
+  private seen = new Set<Collider>();
+
+  addGroup(id: number, list: Collider[]): void {
+    this.removeGroup(id);
+    const cells: number[] = [];
+    for (const c of list) {
+      const [minX, maxX, minZ, maxZ] = bounds(c);
+      for (let cx = Math.floor(minX / CELL); cx <= Math.floor(maxX / CELL); cx++) {
+        for (let cz = Math.floor(minZ / CELL); cz <= Math.floor(maxZ / CELL); cz++) {
+          const k = key(cx, cz);
+          const cell = this.cells.get(k);
+          if (cell) cell.push(c);
+          else this.cells.set(k, [c]);
+          cells.push(k);
+        }
+      }
+    }
+    this.groups.set(id, { list, cells });
+  }
+
+  removeGroup(id: number): void {
+    const g = this.groups.get(id);
+    if (!g) return;
+    const drop = new Set(g.list);
+    for (const k of new Set(g.cells)) {
+      const cell = this.cells.get(k);
+      if (!cell) continue;
+      const kept = cell.filter((c) => !drop.has(c));
+      if (kept.length) this.cells.set(k, kept);
+      else this.cells.delete(k);
+    }
+    this.groups.delete(id);
+  }
+
+  /** Append colliders near (x, z) to `out`, skipping any already in it. */
+  queryInto(x: number, z: number, r: number, out: Collider[]): void {
+    this.seen.clear();
+    for (let cx = Math.floor((x - r) / CELL); cx <= Math.floor((x + r) / CELL); cx++) {
+      for (let cz = Math.floor((z - r) / CELL); cz <= Math.floor((z + r) / CELL); cz++) {
+        const list = this.cells.get(key(cx, cz));
+        if (!list) continue;
+        for (const c of list) {
+          if (this.seen.has(c)) continue;
+          this.seen.add(c);
+          out.push(c);
+        }
+      }
+    }
+  }
+
+  get groupCount(): number {
+    return this.groups.size;
+  }
+}
+
+const dynamics = new WeakMap<readonly Collider[], DynamicColliders>();
+const merged: Collider[] = [];
+
+/** Make queries against `all` include a dynamic layer's colliders too. */
+export function attachDynamic(all: readonly Collider[], dyn: DynamicColliders): void {
+  dynamics.set(all, dyn);
+}
+
 /** Colliders whose bounds come within `r` of (x, z). The returned array is reused between calls. */
 export function collidersNear(x: number, z: number, r: number, all: readonly Collider[]): readonly Collider[] {
-  if (all.length <= GRID_THRESHOLD) return all;
-  let grid = grids.get(all);
-  if (!grid || grid.count !== all.length) grids.set(all, (grid = new ColliderGrid(all)));
-  return grid.query(x, z, r);
+  let base: readonly Collider[];
+  if (all.length <= GRID_THRESHOLD) base = all;
+  else {
+    let grid = grids.get(all);
+    if (!grid || grid.count !== all.length) grids.set(all, (grid = new ColliderGrid(all)));
+    base = grid.query(x, z, r);
+  }
+  const dyn = dynamics.get(all);
+  if (!dyn) return base;
+  merged.length = 0;
+  for (const c of base) merged.push(c);
+  dyn.queryInto(x, z, r, merged);
+  return merged;
 }
 
 /**

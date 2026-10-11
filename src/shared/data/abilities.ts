@@ -58,6 +58,28 @@ export const ABILITIES: Record<string, AbilityData> = {
   // Weather abilities: Sijord's battles have no weather yet, so these do nothing for now.
   'chlorophyll': { id: 'chlorophyll', name: 'Chlorophyll', description: 'Doubles its Speed in harsh sunlight. Sijord has no battle weather yet, so this has no effect for now.' },
   'cloud-nine': { id: 'cloud-nine', name: 'Cloud Nine', description: 'Cancels the effects of weather. Sijord has no battle weather yet, so this has no effect for now.' },
+  // Added with the wider region's Pokémon (2026-10-11).
+  'shell-armor': { id: 'shell-armor', name: 'Shell Armor', description: 'A hard shell that critical hits cannot get through.' },
+  'battle-armor': { id: 'battle-armor', name: 'Battle Armor', description: 'Tough armour that critical hits cannot get through.' },
+  'clear-body': { id: 'clear-body', name: 'Clear Body', description: "Other Pokémon can't lower its stats." },
+  'hyper-cutter': { id: 'hyper-cutter', name: 'Hyper Cutter', description: "Proud pincers: other Pokémon can't lower its Attack." },
+  'limber': { id: 'limber', name: 'Limber', description: 'Its limber body never becomes paralysed.' },
+  'immunity': { id: 'immunity', name: 'Immunity', description: 'It is never poisoned.' },
+  'insomnia': { id: 'insomnia', name: 'Insomnia', description: 'It never falls asleep.' },
+  'water-veil': { id: 'water-veil', name: 'Water Veil', description: 'A veil of water that prevents burns.' },
+  'magma-armor': { id: 'magma-armor', name: 'Magma Armor', description: 'Hot magma that keeps it from freezing.' },
+  'effect-spore': { id: 'effect-spore', name: 'Effect Spore', description: '30% chance to poison, paralyse or put to sleep attackers that make contact.' },
+  'multiscale': { id: 'multiscale', name: 'Multiscale', description: 'Halves the damage it takes while at full HP.' },
+  'marvel-scale': { id: 'marvel-scale', name: 'Marvel Scale', description: 'Defense rises by half while it has a status problem.' },
+  'filter': { id: 'filter', name: 'Filter', description: 'Takes a quarter less damage from super-effective moves.' },
+  'solid-rock': { id: 'solid-rock', name: 'Solid Rock', description: 'Takes a quarter less damage from super-effective moves.' },
+  'soundproof': { id: 'soundproof', name: 'Soundproof', description: 'Sound-based moves have no effect on it.' },
+  'reckless': { id: 'reckless', name: 'Reckless', description: 'Moves with recoil hit a fifth harder.' },
+  'skill-link': { id: 'skill-link', name: 'Skill Link', description: 'Moves that hit several times always hit the most times.' },
+  'iron-fist': { id: 'iron-fist', name: 'Iron Fist', description: 'Punching moves hit a fifth harder.' },
+  'sand-veil': { id: 'sand-veil', name: 'Sand Veil', description: 'Raises evasion in a sandstorm. (Sijord has no sandstorms in battle yet, so it has no effect for now.)' },
+  'swift-swim': { id: 'swift-swim', name: 'Swift Swim', description: 'Doubles Speed in rain. (Sijord has no rain in battle yet, so it has no effect for now.)' },
+  'oblivious': { id: 'oblivious', name: 'Oblivious', description: 'Too absent-minded to be charmed or taunted. (No effect in Sijord yet.)' },
 };
 
 export function abilityName(id: string): string {

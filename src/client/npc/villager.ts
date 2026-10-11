@@ -67,7 +67,8 @@ export class Villager<D extends VillagerDef = VillagerDef> {
   private lookYaw: number;
   private t = Math.random() * 10;
 
-  constructor(readonly def: D, world: World) {
+  /** `solid: false` for townsfolk who come and go (their colliders would pile up in the static list). */
+  constructor(readonly def: D, world: World, solid = true) {
     this.name = def.giver;
     this.avatar = createAvatar(def.look);
     this.avatar.setGround((x, z) => world.heightAt(x, z));
@@ -77,7 +78,7 @@ export class Villager<D extends VillagerDef = VillagerDef> {
     this.avatar.root.scale.setScalar(def.size ?? 1);
     this.root.add(this.avatar.root);
     this.root.name = `villager:${def.id}`;
-    world.colliders.push({ kind: 'circle', x: def.x, z: def.z, r: 0.4 });
+    if (solid) world.colliders.push({ kind: 'circle', x: def.x, z: def.z, r: 0.4 });
   }
 
   get position(): THREE.Vector3 {

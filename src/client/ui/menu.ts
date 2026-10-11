@@ -714,6 +714,7 @@ export class GameMenu {
           ),
           h('span'),
         ),
+        toggle('Echo partner in gyms when playing alone', s.echoPartner, (v) => (s.echoPartner = v)),
         toggle('Show controls hint', s.showControlsHint, (v) => (s.showControlsHint = v)),
       ),
       h(
@@ -754,7 +755,7 @@ class MapView {
     const p = deps.player();
     this.viewX = p.x;
     this.viewZ = p.z;
-    this.el.append(this.canvas, this.info, h('div.map-controls', {}, h('button.act', {onclick:()=>{const p=this.deps.player();this.viewX=p.x;this.viewZ=p.z;}}, 'Recenter'), h('button.act', {onclick:()=>{this.scale=Math.min(6,this.scale*1.3);}}, '+'), h('button.act', {onclick:()=>{this.scale=Math.max(.35,this.scale/1.3);}}, '−')), h('div.map-legend', {}, h('span', {}, '▲ You'), h('span.legend-partner', {}, '● Partner'), h('span.legend-quest', {}, '◆ Quest'), h('span.legend-find', {}, '■ Found'), h('span', {}, 'Drag to pan · scroll to zoom')));
+    this.el.append(this.canvas, this.info, h('div.map-controls', {}, h('button.act', {onclick:()=>{const p=this.deps.player();this.viewX=p.x;this.viewZ=p.z;}}, 'Recenter'), h('button.act', {onclick:()=>{this.scale=Math.min(6,this.scale*1.3);}}, '+'), h('button.act', {onclick:()=>{this.scale=Math.max(.08,this.scale/1.3);}}, '−')), h('div.map-legend', {}, h('span', {}, '▲ You'), h('span.legend-partner', {}, '● Partner'), h('span.legend-quest', {}, '◆ Quest'), h('span.legend-find', {}, '■ Found'), h('span', {}, 'Drag to pan · scroll to zoom')));
     this.canvas.addEventListener('mousedown', () => {this.dragging = true;this.dragged = false;});
     this.canvas.addEventListener('click', e => {if(this.dragged)return;const rect=this.canvas.getBoundingClientRect();const x=this.viewX-(e.clientX-rect.left-rect.width/2)/this.scale,z=this.viewZ-(e.clientY-rect.top-rect.height/2)/this.scale;this.deps.setDestination({x,z,label:'Destination'});this.drawInfo();});
     this.drawInfo();
@@ -768,7 +769,7 @@ class MapView {
     });
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
-      this.scale = Math.max(0.35, Math.min(6, this.scale * Math.exp(-e.deltaY * 0.0015)));
+      this.scale = Math.max(0.08, Math.min(6, this.scale * Math.exp(-e.deltaY * 0.0015)));
     });
   }
 
@@ -808,6 +809,11 @@ class MapView {
 
     ctx.save();
     ctx.translate(w / 2, ht / 2);
+    ctx.scale(-1, -1);
+    minimap.drawStreamed(ctx, this.viewX, this.viewZ, s, s > 0.8);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(w / 2, ht / 2);
     ctx.scale(-s * minimap.metresPerPx, -s * minimap.metresPerPx);
     ctx.translate(-(this.viewX + half) / minimap.metresPerPx, -(this.viewZ + half) / minimap.metresPerPx);
     ctx.drawImage(minimap.terrain, 0, 0);
@@ -825,7 +831,8 @@ class MapView {
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.setLineDash([]);
-      label(ctx, r.name, sx, sy - r.radius * s - 10, 15, '#fff7d6');
+      // Cities always; towns and villages once zoomed in enough to read them.
+      if (r.tier === 'large' || (r.tier === 'medium' && s > 0.12) || s > 0.3) label(ctx, r.name, sx, sy - r.radius * s - 10, r.tier === 'large' ? 16 : 13, r.tier === 'large' ? '#ffe9a8' : '#fff7d6');
     }
     for (const l of world.anchors.landmarks) {
       const [sx, sy] = toScreen(l.position.x, l.position.z);

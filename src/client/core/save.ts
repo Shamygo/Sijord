@@ -59,8 +59,18 @@ export interface SaveData {
   picnicker?: { wins: number; day?: number };
   /** Side quests taken and finished, by quest id (`src/shared/sidequests.ts`). */
   sideQuests?: Record<string, { state: 'active' | 'done'; n?: number }>;
+  /** Pokémon Centers registered at (settlement ids): fast travel goes between them. */
+  centers?: string[];
+  /** The Pokémon Center a blackout sends you back to (else Hazel's lab). */
+  respawn?: string;
   /** Edvin the cartographer: his pages you've checked and corrected, and his treasure. */
   cartographer?: { taken: boolean; seen: string[]; fixed: string[]; dug: boolean };
+  /** Gyms beaten (gym ids, in order). `badges` is their count. */
+  gymBadges?: string[];
+  /** The strongest gym ace beaten so far: no unbeaten gym scales below it plus six (DESIGN §3.3). */
+  levelRecord?: number;
+  /** Chambers solved and trainers beaten in each gym, kept between visits. */
+  gymProgress?: Record<string, { solved: number[]; trainers?: boolean }>;
 }
 
 export function loadSave(): SaveData | null {

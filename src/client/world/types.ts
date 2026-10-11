@@ -1,6 +1,8 @@
 import type * as THREE from 'three';
 import type { ShopId } from '../../shared/economy';
 import type { ResourceField } from './resources';
+import type { TerrainStreamer } from './stream/streamer';
+import type { SettlementRenderer } from './settlements';
 
 /**
  * Static obstacles on the ground plane. Players are resolved as circles against these.
@@ -65,8 +67,18 @@ export interface World {
   resources?: ResourceField;
   regions: Region[];
   anchors: WorldAnchors;
-  /** Half the side length of the playable square, centred on the origin. */
+  /** Half the side length of the hand-built vale, centred on the origin. */
   halfSize: number;
+  /** Where the player can go: the whole region, inside its ring of sea. */
+  bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /** The streamed terrain (heights, chunks, the coarse map of the whole region). */
+  streamer?: TerrainStreamer;
+  /** The gyms' interiors (DESIGN §13). */
+  gymRooms?: import('./gym-rooms').GymRooms;
+  /** The region's towns and cities (set once the Blender kit has loaded). */
+  settlements?: SettlementRenderer;
+  /** Load the ground round a point before the first frame. */
+  warmUp?(at: THREE.Vector3, camera: THREE.Vector3): Promise<void>;
   /** The main directional light, so the game can keep its shadow camera centred on the player. */
   sun: THREE.DirectionalLight;
   /**
@@ -74,8 +86,8 @@ export interface World {
    * the exposure and fog colour for the game to apply to the renderer and scene.
    */
   setTimeOfDay?(minutes: number): { exposure: number; fog: THREE.Color; night: number };
-  /** Per-frame animation (water, swaying grass, clouds, critters). */
-  update(dt: number, elapsed: number, focus: THREE.Vector3): void;
+  /** Per-frame animation (water, swaying grass, clouds, critters) and streaming round the camera. */
+  update(dt: number, elapsed: number, focus: THREE.Vector3, camera?: THREE.Vector3): void;
   /** Base colour of the ground near a point, used to paint the minimap. */
   groundColorAt(x: number, z: number): THREE.Color;
   /**

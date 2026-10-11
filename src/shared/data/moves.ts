@@ -1,4 +1,5 @@
 import type { MoveData } from '../battle/types';
+import { REGION_MOVE_DEFS } from './moves-region';
 
 type Def = Omit<MoveData, 'id' | 'priority' | 'target'> & Partial<Pick<MoveData, 'priority' | 'target'>>;
 
@@ -243,7 +244,7 @@ const DEFS: Record<string, Def> = {
 };
 
 export const MOVES: Record<string, MoveData> = Object.fromEntries(
-  Object.entries(DEFS).map(([id, d]) => [id, { id, priority: 0, target: 'normal', ...d } as MoveData]),
+  Object.entries({ ...DEFS, ...REGION_MOVE_DEFS }).map(([id, d]) => [id, { id, priority: 0, target: 'normal', ...d } as MoveData]),
 );
 
 /** Used when a creature has no PP left in any move. */
