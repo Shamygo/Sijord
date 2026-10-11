@@ -43,7 +43,8 @@ export type Choice =
   | { kind: 'ball'; ball: string; target: Pos }
   | { kind: 'pass' };
 
-export type AiKind = 'wild' | 't1';
+/** Computer tiers (DESIGN §4.5): wild instinct, early trainers, then gym trainers up to the League. */
+export type AiKind = 'wild' | 't1' | 't2' | 't3' | 't4';
 
 export interface TeamSetup {
   owner: string;
@@ -58,6 +59,8 @@ export interface TeamSetup {
   xpMult?: number;
   /** Catch multiplier from class and skills. */
   catchMult?: number;
+  /** Levels above the cap that still obey (the Tamer's Kindred Command, DESIGN §7.3). */
+  obedienceBonus?: number;
 }
 
 export interface SideSetup {
@@ -190,6 +193,14 @@ const ALPHA_AURA: BoostName[] = ['atk', 'def', 'spa', 'spd', 'spe'];
 const BERRIES: Record<string, (m: BattleMon) => number> = {
   'oran-berry': () => 10,
   'sitrus-berry': (m) => Math.floor(m.maxHp / 4),
+};
+
+/** Type-boosting held items: moves of their type hit a fifth harder. */
+export const TYPE_BOOSTERS: Record<string, TypeName> = {
+  charcoal: 'fire', 'mystic-water': 'water', 'miracle-seed': 'grass', magnet: 'electric', 'never-melt-ice': 'ice',
+  'black-belt': 'fighting', 'poison-barb': 'poison', 'soft-sand': 'ground', 'sharp-beak': 'flying', 'twisted-spoon': 'psychic',
+  'silver-powder': 'bug', 'hard-stone': 'rock', 'spell-tag': 'ghost', 'dragon-fang': 'dragon', 'black-glasses': 'dark',
+  'metal-coat': 'steel', 'silk-scarf': 'normal', 'fairy-feather': 'fairy',
 };
 
 interface QueuedAction {
@@ -737,6 +748,38 @@ export class Battle {
       mon.protectChain = 0;
       return;
     }
+    // Disobedience (DESIGN §3.5): a creature above its trainer's level cap may not listen.
+    const p = disobeyChance(mon.creature.level, this.teamSetup(mon.owner));
+    if (p > 0 && this.rng.next() < p) {
+      const r = this.rng.next();
+      mon.protectChain = 0;
+      if (r < 0.125) {
+        const atk = Math.floor(mon.stats.atk * stageMultiplier(mon.boosts.atk));
+        const def = Math.floor(mon.stats.def * stageMultiplier(mon.boosts.def));
+        this.emit({ t: 'msg', text: `${mon.name} won't obey! It hurt itself instead!` });
+        this.damage(pos, calcDamage({ level: mon.creature.level, power: 40, attack: atk, defense: def, random: this.rng.int(85, 100), effectiveness: 1 }), 'confusion');
+        return;
+      }
+      if (r < 0.35 && !mon.status) {
+        mon.status = 'slp';
+        mon.sleepTurns = this.rng.int(1, 3);
+        this.emit({ t: 'status', pos, status: 'slp', text: `${mon.name} ignored the order and took a nap!` });
+        return;
+      }
+      if (r < 0.6) {
+        const usable = mon.moves.map((m, i) => (m.pp > 0 && i !== choice.move ? i : -1)).filter((i) => i >= 0);
+        if (usable.length) {
+          this.emit({ t: 'msg', text: `${mon.name} ignored the order and did its own thing!` });
+          choice = { move: this.rng.pick(usable) };
+        } else {
+          this.emit({ t: 'msg', text: `${mon.name} is loafing around!` });
+          return;
+        }
+      } else {
+        this.emit({ t: 'msg', text: `${mon.name} is ${this.rng.pick(['loafing around', 'turning away', 'pretending not to hear'])}!` });
+        return;
+      }
+    }
     const slot = mon.moves[choice.move];
     let move: MoveData;
     if (slot && slot.pp > 0) {
@@ -889,6 +932,7 @@ export class Battle {
     }
     if (move === STRUGGLE && alive(mon)) this.damage(pos, Math.max(1, Math.floor(mon.maxHp / 4)), 'recoil', `${mon.name} is hit with recoil!`);
     else if (move.recoil && totalDamage > 0 && alive(mon) && mon.ability !== 'rock-head') this.indirect(pos, Math.max(1, Math.floor(totalDamage * move.recoil)), 'recoil', `${mon.name} is hit with recoil!`);
+    if (mon.item === 'life-orb' && totalDamage > 0 && alive(mon)) this.indirect(pos, Math.max(1, Math.floor(mon.maxHp / 10)), 'recoil', `${mon.name} lost some of its HP!`);
     if (move.drain && totalDamage > 0 && alive(mon)) this.heal(pos, Math.max(1, Math.floor(totalDamage * move.drain)), `${mon.name} drained some energy!`);
     if (move.special === 'rapid-spin' && totalDamage > 0 && alive(mon) && (mon.seededBy || mon.bound)) {
       mon.seededBy = null;
@@ -1065,6 +1109,10 @@ export class Battle {
       if (target.ability === 'sturdy' && target.hp === target.maxHp && dmg >= target.hp) {
         dmg = target.hp - 1;
         this.emit({ t: 'ability', pos: tPos, ability: 'sturdy', text: `${target.name} endured the hit!` });
+      } else if (target.item === 'focus-sash' && target.hp === target.maxHp && dmg >= target.hp && target.hp > 1) {
+        dmg = target.hp - 1;
+        target.item = undefined;
+        this.emit({ t: 'item', pos: tPos, item: 'focus-sash', text: `${target.name} hung on using its Focus Sash!` });
       }
       dmg = Math.min(dmg, target.hp);
       landed++;
@@ -1152,6 +1200,9 @@ export class Battle {
     if (user.ability === 'technician' && power <= 60) power = modify(power, 1.5);
     if (user.ability === 'reckless' && move.recoil) power = modify(power, 1.2);
     if (user.ability === 'iron-fist' && move.id.includes('punch')) power = modify(power, 1.2);
+    if (user.item && TYPE_BOOSTERS[user.item] === move.type) power = modify(power, 1.2);
+    if (user.item === 'muscle-band' && physical) power = modify(power, 1.1);
+    if (user.item === 'wise-glasses' && !physical) power = modify(power, 1.1);
     if (user.helpingHand) power = modify(power, 1.5);
 
     const atkStat = physical ? 'atk' : 'spa';
@@ -1165,6 +1216,9 @@ export class Battle {
     let attack = Math.floor(user.stats[atkStat] * stageMultiplier(atkStage));
     let defense = Math.max(1, Math.floor(target.stats[defStat] * stageMultiplier(defStage)));
     if (physical && target.ability === 'marvel-scale' && target.status) defense = modify(defense, 1.5);
+    if (!physical && target.item === 'assault-vest') defense = modify(defense, 1.5);
+    // Eviolite: a Pokémon that can still evolve is far harder to wear down.
+    if (target.item === 'eviolite' && target.species.evolution) defense = modify(defense, 1.5);
 
     const pinch = user.hp <= Math.floor(user.maxHp / 3);
     const pinchType: Record<string, TypeName> = { overgrow: 'grass', blaze: 'fire', torrent: 'water', swarm: 'bug' };
@@ -1182,6 +1236,8 @@ export class Battle {
     if (typeEff < 1 && user.ability === 'tinted-lens') final.push(2);
     if (typeEff > 1 && (target.ability === 'filter' || target.ability === 'solid-rock')) final.push(0.75);
     if (target.ability === 'multiscale' && target.hp === target.maxHp) final.push(0.5);
+    if (user.item === 'life-orb') final.push(1.3);
+    if (typeEff > 1 && user.item === 'expert-belt') final.push(1.2);
 
     return calcDamage({
       level: user.creature.level,
@@ -1243,6 +1299,8 @@ export class Battle {
 
   private afterHit(pos: Pos, user: BattleMon, tPos: Pos, target: BattleMon, move: MoveData): void {
     if (!move.contact || !alive(user)) return;
+    if (target.item === 'rocky-helmet') this.indirect(pos, Math.max(1, Math.floor(user.maxHp / 6)), 'recoil', `${user.name} was hurt by the Rocky Helmet!`);
+    if (!alive(user)) return;
     if (target.ability === 'static' && !user.status && this.rng.chance(30)) {
       this.emit({ t: 'ability', pos: tPos, ability: 'static', text: `${target.name}'s Static!` });
       this.setStatus(pos, 'par', false);
@@ -1370,6 +1428,11 @@ export class Battle {
       tox: 'was badly poisoned!', slp: 'fell asleep!', frz: 'was frozen solid!',
     };
     this.emit({ t: 'status', pos, status, text: `${m.name} ${verb[status]}` });
+    if (m.item === 'lum-berry') {
+      m.item = undefined;
+      m.status = undefined;
+      this.emit({ t: 'status', pos, status: null, text: `${m.name}'s Lum Berry cured it!` });
+    }
     return true;
   }
 
@@ -1454,6 +1517,7 @@ export class Battle {
           }
         }
       }
+      if (m.hp > 0 && m.item === 'leftovers' && m.hp < m.maxHp) this.heal(p, Math.max(1, Math.floor(m.maxHp / 16)), `${m.name} restored a little HP using its Leftovers!`);
       if (m.hp > 0 && m.status && m.ability === 'shed-skin' && this.rng.chance(30)) {
         m.status = undefined;
         this.emit({ t: 'status', pos: p, status: null, text: `${m.name} shed its skin and was cured!` });
@@ -1560,4 +1624,15 @@ export class Battle {
       }
     }
   }
+}
+
+/**
+ * How likely a creature is to disobey this turn (DESIGN §3.5): none at or under the team's level
+ * cap (plus any obedience bonus), then 10% + 6% per level over, up to 85%.
+ */
+export function disobeyChance(level: number, team: TeamSetup | undefined): number {
+  if (!team || team.ai || team.levelCap === undefined) return 0;
+  const d = level - (team.levelCap + (team.obedienceBonus ?? 0));
+  if (d <= 0) return 0;
+  return Math.min(d <= 5 ? 0.4 : 0.85, 0.1 + 0.06 * d);
 }

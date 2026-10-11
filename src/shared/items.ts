@@ -18,6 +18,8 @@ export interface ItemInfo {
   food?: FoodValue;
   /** Worn by the trainer: softens hits from charging Pokemon (DESIGN §5.4). */
   armour?: { slot: ArmourSlot; defence: number };
+  /** Given to a Pokémon to hold in battle (the effect lives in the battle engine). */
+  held?: true;
 }
 
 export const ITEM_CATEGORIES: { id: ItemCategory; label: string }[] = [
@@ -147,6 +149,122 @@ export const ITEMS: Record<string, ItemInfo> = {
   'region-map': {
     id: 'region-map', name: 'Sijord Map', category: 'key', icon: '🗺', sprite:'town-map',
     description: 'A hand-drawn map of the Sijord region from Professor Hazel. Fills in as you explore.',
+  },
+  'leftovers': {
+    id: 'leftovers', name: 'Leftovers', category: 'battle', icon: '🍎', sprite: 'leftovers', held: true,
+    description: 'The held Pokémon restores 1/16 of its max HP at the end of every turn.',
+  },
+  'life-orb': {
+    id: 'life-orb', name: 'Life Orb', category: 'battle', icon: '🔮', sprite: 'life-orb', held: true,
+    description: 'Moves hit 30% harder, but every hit costs the holder 1/10 of its max HP.',
+  },
+  'focus-sash': {
+    id: 'focus-sash', name: 'Focus Sash', category: 'battle', icon: '🎗', sprite: 'focus-sash', held: true,
+    description: 'If the holder is at full HP, it survives a hit that would knock it out with 1 HP. Used up.',
+  },
+  'expert-belt': {
+    id: 'expert-belt', name: 'Expert Belt', category: 'battle', icon: '🥋', sprite: 'expert-belt', held: true,
+    description: 'Super-effective moves hit 20% harder.',
+  },
+  'muscle-band': {
+    id: 'muscle-band', name: 'Muscle Band', category: 'battle', icon: '💪', sprite: 'muscle-band', held: true,
+    description: 'Physical moves hit 10% harder.',
+  },
+  'wise-glasses': {
+    id: 'wise-glasses', name: 'Wise Glasses', category: 'battle', icon: '👓', sprite: 'wise-glasses', held: true,
+    description: 'Special moves hit 10% harder.',
+  },
+  'assault-vest': {
+    id: 'assault-vest', name: 'Assault Vest', category: 'battle', icon: '🦺', sprite: 'assault-vest', held: true,
+    description: 'Raises the holder\'s Special Defence by half.',
+  },
+  'lum-berry': {
+    id: 'lum-berry', name: 'Lum Berry', category: 'battle', icon: '🍈', sprite: 'lum-berry', held: true,
+    description: 'Eaten the moment the holder gets a status condition, curing it.',
+  },
+  'sitrus-berry': {
+    id: 'sitrus-berry', name: 'Sitrus Berry', category: 'battle', icon: '🍋', sprite: 'sitrus-berry', held: true,
+    description: 'Eaten when the holder drops below half HP, restoring a quarter of its max HP.',
+  },
+  'rocky-helmet': {
+    id: 'rocky-helmet', name: 'Rocky Helmet', category: 'battle', icon: '⛑', sprite: 'rocky-helmet', held: true,
+    description: 'A Pokémon that makes contact with the holder loses 1/6 of its max HP.',
+  },
+  'eviolite': {
+    id: 'eviolite', name: 'Eviolite', category: 'battle', icon: '💎', sprite: 'eviolite', held: true,
+    description: 'A Pokémon that can still evolve takes far less damage while holding it.',
+  },
+  'charcoal': {
+    id: 'charcoal', name: 'Charcoal', category: 'battle', icon: '✦', sprite: 'charcoal', held: true,
+    description: 'A held item that makes Fire-type moves hit 20% harder.',
+  },
+  'mystic-water': {
+    id: 'mystic-water', name: 'Mystic Water', category: 'battle', icon: '✦', sprite: 'mystic-water', held: true,
+    description: 'A held item that makes Water-type moves hit 20% harder.',
+  },
+  'miracle-seed': {
+    id: 'miracle-seed', name: 'Miracle Seed', category: 'battle', icon: '✦', sprite: 'miracle-seed', held: true,
+    description: 'A held item that makes Grass-type moves hit 20% harder.',
+  },
+  'magnet': {
+    id: 'magnet', name: 'Magnet', category: 'battle', icon: '✦', sprite: 'magnet', held: true,
+    description: 'A held item that makes Electric-type moves hit 20% harder.',
+  },
+  'never-melt-ice': {
+    id: 'never-melt-ice', name: 'Never-Melt Ice', category: 'battle', icon: '✦', sprite: 'never-melt-ice', held: true,
+    description: 'A held item that makes Ice-type moves hit 20% harder.',
+  },
+  'black-belt': {
+    id: 'black-belt', name: 'Black Belt', category: 'battle', icon: '✦', sprite: 'black-belt', held: true,
+    description: 'A held item that makes Fighting-type moves hit 20% harder.',
+  },
+  'poison-barb': {
+    id: 'poison-barb', name: 'Poison Barb', category: 'battle', icon: '✦', sprite: 'poison-barb', held: true,
+    description: 'A held item that makes Poison-type moves hit 20% harder.',
+  },
+  'soft-sand': {
+    id: 'soft-sand', name: 'Soft Sand', category: 'battle', icon: '✦', sprite: 'soft-sand', held: true,
+    description: 'A held item that makes Ground-type moves hit 20% harder.',
+  },
+  'sharp-beak': {
+    id: 'sharp-beak', name: 'Sharp Beak', category: 'battle', icon: '✦', sprite: 'sharp-beak', held: true,
+    description: 'A held item that makes Flying-type moves hit 20% harder.',
+  },
+  'twisted-spoon': {
+    id: 'twisted-spoon', name: 'Twisted Spoon', category: 'battle', icon: '✦', sprite: 'twisted-spoon', held: true,
+    description: 'A held item that makes Psychic-type moves hit 20% harder.',
+  },
+  'silver-powder': {
+    id: 'silver-powder', name: 'Silver Powder', category: 'battle', icon: '✦', sprite: 'silver-powder', held: true,
+    description: 'A held item that makes Bug-type moves hit 20% harder.',
+  },
+  'hard-stone': {
+    id: 'hard-stone', name: 'Hard Stone', category: 'battle', icon: '✦', sprite: 'hard-stone', held: true,
+    description: 'A held item that makes Rock-type moves hit 20% harder.',
+  },
+  'spell-tag': {
+    id: 'spell-tag', name: 'Spell Tag', category: 'battle', icon: '✦', sprite: 'spell-tag', held: true,
+    description: 'A held item that makes Ghost-type moves hit 20% harder.',
+  },
+  'dragon-fang': {
+    id: 'dragon-fang', name: 'Dragon Fang', category: 'battle', icon: '✦', sprite: 'dragon-fang', held: true,
+    description: 'A held item that makes Dragon-type moves hit 20% harder.',
+  },
+  'black-glasses': {
+    id: 'black-glasses', name: 'Black Glasses', category: 'battle', icon: '✦', sprite: 'black-glasses', held: true,
+    description: 'A held item that makes Dark-type moves hit 20% harder.',
+  },
+  'metal-coat': {
+    id: 'metal-coat', name: 'Metal Coat', category: 'battle', icon: '✦', sprite: 'metal-coat', held: true,
+    description: 'A held item that makes Steel-type moves hit 20% harder.',
+  },
+  'silk-scarf': {
+    id: 'silk-scarf', name: 'Silk Scarf', category: 'battle', icon: '✦', sprite: 'silk-scarf', held: true,
+    description: 'A held item that makes Normal-type moves hit 20% harder.',
+  },
+  'fairy-feather': {
+    id: 'fairy-feather', name: 'Fairy Feather', category: 'battle', icon: '✦', held: true,
+    description: 'A held item that makes Fairy-type moves hit 20% harder.',
   },
 };
 
