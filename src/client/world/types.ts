@@ -2,6 +2,7 @@ import type * as THREE from 'three';
 import type { ShopId } from '../../shared/economy';
 import type { ResourceField } from './resources';
 import type { TerrainStreamer } from './stream/streamer';
+import type { SettlementRenderer } from './settlements';
 
 /**
  * Static obstacles on the ground plane. Players are resolved as circles against these.
@@ -72,6 +73,8 @@ export interface World {
   bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
   /** The streamed terrain (heights, chunks, the coarse map of the whole region). */
   streamer?: TerrainStreamer;
+  /** The region's towns and cities (set once the Blender kit has loaded). */
+  settlements?: SettlementRenderer;
   /** Load the ground round a point before the first frame. */
   warmUp?(at: THREE.Vector3, camera: THREE.Vector3): Promise<void>;
   /** The main directional light, so the game can keep its shadow camera centred on the player. */

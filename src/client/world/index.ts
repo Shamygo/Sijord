@@ -10,6 +10,8 @@ import { TerrainStreamer } from './stream/streamer';
 import { GroundWindow } from './stream/window';
 import { OuterVegetation } from './stream/outer-veg';
 import { DynamicColliders, attachDynamic } from '../core/collision';
+import { loadWorldKit } from './world-kit';
+import { SettlementRenderer } from './settlements';
 import { REGION, SETTLEMENTS, inVale } from '../../shared/region';
 import { createLights, createSky, centreSun, createClouds } from './sky';
 import { applyTimeOfDay } from './daynight';
@@ -192,6 +194,14 @@ export function createWorld(): World {
   const outerVeg = new OuterVegetation(streamer, dynamic, resources);
   root.add(outerVeg.group);
 
+  // ---- towns, villages and cities, built from the Blender kit as the player nears them ----
+  let settlements: SettlementRenderer | null = null;
+  const kitReady = loadWorldKit().then((models) => {
+    settlements = new SettlementRenderer(models, dynamic, lamplight, (x, z) => streamer.heightAt(x, z));
+    root.add(settlements.group);
+    world.settlements = settlements;
+  });
+
   // ---- ambient life ----
   const fauna = createFauna();
   root.add(fauna.group);
@@ -231,7 +241,11 @@ export function createWorld(): World {
     halfSize: HALF,
     bounds: { minX: REGION.minX + 60, maxX: REGION.maxX - 60, minZ: REGION.minZ + 60, maxZ: REGION.maxZ - 60 },
     streamer,
-    warmUp: (at: THREE.Vector3, camera: THREE.Vector3) => streamer.warmUp(at, camera),
+    warmUp: async (at: THREE.Vector3, camera: THREE.Vector3) => {
+      await Promise.all([streamer.warmUp(at, camera), kitReady]);
+      // Build whatever settlements are in sight before the first frame.
+      for (let i = 0; i < 6; i++) settlements?.update(at, 1);
+    },
     sun,
     setTimeOfDay(minutes: number) {
       const st = applyTimeOfDay(minutes, sun, hemi);
@@ -239,11 +253,11 @@ export function createWorld(): World {
       return st;
     },
     update(dt: number, elapsed: number, focus: THREE.Vector3, camera?: THREE.Vector3): void {
-      void dt;
       streamer.update(camera ?? focus, focus);
       win.update(focus.x, focus.z);
       water.update(camera ?? focus);
       outerVeg.update(focus);
+      settlements?.update(focus, dt);
       worldUniforms.uTime.value = elapsed;
       worldUniforms.uFocus.value.copy(focus);
       const g = 0.75 + Math.sin(elapsed * 0.23) * 0.25;
@@ -271,6 +285,7 @@ export function createWorld(): World {
       for (const b of veg.batches) b.setLodScale(lod);
       streamer.setLodScale(q === 'low' ? 0.75 : q === 'medium' ? 1 : 1.4);
       outerVeg.setLodScale(lod);
+      settlements?.setLodScale(lod);
       fauna.setCount(q === 'low' ? 10 : q === 'medium' ? 20 : 28, q === 'low' ? 6 : 14);
     },
   };

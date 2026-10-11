@@ -42,7 +42,7 @@ export const VALUE: Record<string, number> = {
   fiber: 16,
 };
 
-export type ShopId = 'field-supplies' | 'apothecary' | 'wayfarer-inn' | 'clothier';
+export type ShopId = 'field-supplies' | 'apothecary' | 'wayfarer-inn' | 'clothier' | 'town-mart' | 'city-mart' | 'market-stall' | 'village-trader' | 'inn-kitchen';
 
 export interface Shop {
   id: ShopId;
@@ -76,7 +76,37 @@ export const SHOPS: Record<ShopId, Shop> = {
     greeting: 'Hot food and clean water for travellers. Eat before you head out.',
     stock: ['mushroom-skewer', 'water-flask'],
   },
+  // Shops in the region's towns and cities (DESIGN §2.3): a general shop in every town, a bigger
+  // one in every city, market stalls, and a trader's stall in the villages.
+  'town-mart': {
+    id: 'town-mart', name: 'Poké Mart', prompt: 'Shop at the Poké Mart',
+    greeting: 'Everything a trainer needs, carted in from the coast. Great Balls are dear, mind.',
+    stock: ['poke-ball', 'great-ball', 'bandage', 'treat', 'canteen', 'lantern', 'woven-cloth'],
+  },
+  'city-mart': {
+    id: 'city-mart', name: 'Poké Mart', prompt: 'Shop at the Poké Mart',
+    greeting: 'The biggest shelves this side of Crownspire. If we don\'t stock it, you don\'t need it.',
+    stock: ['poke-ball', 'great-ball', 'ultra-ball', 'bandage', 'treat', 'canteen', 'lantern', 'cloth-cap', 'cloth-tunic', 'cloth-trousers', 'stone-hatchet', 'stone-pick', 'stone-sickle'],
+  },
+  'market-stall': {
+    id: 'market-stall', name: 'Market stall', prompt: 'Browse the market stall',
+    greeting: 'Fresh this morning! Well. This week.',
+    stock: ['bramble-berry', 'red-apricorn', 'mushroom-skewer', 'water-flask', 'wild-mushroom'],
+  },
+  'village-trader': {
+    id: 'village-trader', name: 'Travelling trader', prompt: 'Trade with the travelling trader',
+    greeting: 'I only stop in each village a day or two. Buy now or walk to town.',
+    stock: ['poke-ball', 'treat', 'bramble-berry', 'water-flask'],
+  },
+  'inn-kitchen': {
+    id: 'inn-kitchen', name: 'Inn kitchen', prompt: 'Order food at the inn',
+    greeting: 'Stew\'s on. Water\'s boiled. Beds are upstairs if you want one.',
+    stock: ['mushroom-skewer', 'hearty-stew', 'water-flask'],
+  },
 };
+
+/** What a night at an inn costs (DESIGN §6.7). */
+export const INN_PRICE = 300;
 
 export function buyPrice(id: string): number | null {
   return VALUE[id] ?? null;

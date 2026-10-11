@@ -32,6 +32,17 @@ export class LampLight {
     this.order = lamps.map((lamp) => ({ lamp, d: 0 }));
   }
 
+  /** Lamps that stream in with a settlement. */
+  addLamps(lamps: readonly LampSpot[]): void {
+    for (const lamp of lamps) this.order.push({ lamp, d: 0 });
+  }
+
+  /** Lamps that stream out with their settlement. */
+  removeLamps(lamps: readonly LampSpot[]): void {
+    const drop = new Set(lamps);
+    for (let i = this.order.length - 1; i >= 0; i--) if (drop.has(this.order[i].lamp)) this.order.splice(i, 1);
+  }
+
   /** 0 by day up to 1 deep in the night. */
   setNight(n: number): void {
     this.night = n;

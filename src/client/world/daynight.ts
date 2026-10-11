@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { SUNRISE, SUNSET } from '../../shared/daynight';
-import { mats } from './shared';
+import { mats, worldUniforms } from './shared';
 import { SKY, SKY_UNIFORMS } from './sky';
 
 /**
@@ -111,6 +111,7 @@ export function applyTimeOfDay(minutes: number, sun: THREE.DirectionalLight, hem
   U.uSunDisc.value = moon ? 0.12 : 1;
   // Lamps and lit windows glow brighter after dark.
   mats.glow.emissiveIntensity = 1.4 + stars * 1.6;
+  worldUniforms.uNight.value = stars;
   state.minutes = minutes;
   state.exposure = num('exposure');
   mix('fog', state.fog);

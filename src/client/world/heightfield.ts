@@ -12,6 +12,7 @@ import {
   BIOME_IDS, BIOME_INDEX, LAVA, VOLCANO, biomeWeights, coastDist, lakeDistRegion, lavaDist, riverDist, roadDist,
   settlementBlendR, settlementsNear, valeWeight, type BiomeId, type Settlement,
 } from '../../shared/region';
+import { settlementGround } from '../../shared/settlement-layout';
 
 const S = 1337;
 
@@ -490,6 +491,13 @@ export function sampleGround(x: number, z: number, h: number, ny: number, out: G
       sand = Math.max(sand, sandB * (1 - rockW));
       const dl = lavaDist(x, z);
       if (dl < 4) lava = smoothstep(4, -0.5, dl);
+      // Streets, plazas and the ground under buildings in settlements.
+      for (const st of settlementsNear(x, z)) {
+        if (Math.hypot(x - st.x, z - st.z) > st.r + 3) continue;
+        const sg = settlementGround(st, x, z);
+        if (sg.dirt > dirt) dirt = sg.dirt;
+        if (sg.built) grassK = 0;
+      }
     }
   }
   const grass = (1 - rockW) * (1 - snowW) * smoothstep(0.45, 0.95, h) * grassK;

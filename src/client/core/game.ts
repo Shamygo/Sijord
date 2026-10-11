@@ -55,7 +55,10 @@ import { Cartographer, TreasureSpot } from '../npc/cartographer';
 import type { ResourceNode } from '../world/resources';
 import { TOWN } from '../world/layout';
 import { waterDistance } from '../world/terrain';
-import { blackoutLoss, buy, formatMoney, sell, SHOPS, STARTING_MONEY, trainerPrize, wildPrize, type Shop } from '../../shared/economy';
+import { PlaceTracker, centerSpot, noticeLines, servicePrompt, serviceShop, travelList } from './towns';
+import type { ServicePoint } from '../world/settlements';
+import { SETTLEMENT_BY_ID } from '../../shared/region';
+import { blackoutLoss, buy, formatMoney, sell, SHOPS, STARTING_MONEY, trainerPrize, wildPrize, type Shop, INN_PRICE } from '../../shared/economy';
 import { canteenRoom, consume, meterState, OPEN_WATER, stepMeters, SURVIVAL, survivalEffects, type Meters } from '../../shared/survival';
 import type { World } from '../world/types';
 import { Input } from './input';
@@ -105,6 +108,10 @@ interface CameraSettingsHooks {
 }
 
 export class Game {
+  /** Banner on arriving in a settlement or a new biome. */
+  private readonly place = new PlaceTracker();
+  /** The inn's kitchen menu is open (the inn door doubles as its shop while it is). */
+  private innShop = false;
   private renderer: THREE.WebGLRenderer;
   private pipeline: RenderPipeline;
   private settings: Settings = loadSettings();
@@ -1544,7 +1551,107 @@ export class Game {
   /** The shop doorway the trainer is standing at, if any. */
   private shopNear(pos: THREE.Vector3): Shop | null {
     const s = this.world.anchors.shops?.find((s) => Math.hypot(pos.x - s.position.x, pos.z - s.position.z) < 1.8 && Math.abs(pos.y - s.position.y) < 1.5);
-    return s ? SHOPS[s.id] : null;
+    if (s) return SHOPS[s.id];
+    const sp = this.world.settlements?.serviceNear(pos.x, pos.z, 2.8);
+    if (sp?.role === 'inn' && this.innShop) return SHOPS['inn-kitchen'];
+    return sp ? serviceShop(sp) : null;
+  }
+
+  /** A town service point at hand that isn't a shop (those open the Shop tab). */
+  private townService(pos: THREE.Vector3): ServicePoint | null {
+    const sp = this.world.settlements?.serviceNear(pos.x, pos.z, 2.8) ?? null;
+    return sp && !serviceShop(sp) ? sp : null;
+  }
+
+  private async useService(sp: ServicePoint): Promise<void> {
+    const s = sp.settlement;
+    const badges = this.save.badges ?? 0;
+    this.cancelAim();
+    this.beginScene();
+    const say = (speaker: string, text: string, choices?: string[]) => ({ speaker, text, choices });
+    try {
+      if (sp.role === 'pokecenter') {
+        const centers = (this.save.centers ??= []);
+        const fresh = !centers.includes(s.id);
+        if (fresh) centers.push(s.id);
+        this.save.respawn = s.id;
+        const others = travelList(centers, sp.x, sp.z).filter((o) => o.id !== s.id);
+        const [pick] = await this.hud.dialogue.play([say('Nurse', `Welcome to the ${s.name} Pokémon Center!${fresh ? ' I\'ve put you on our register: you can travel here from any other Center, and we\'ll look after you here if things go badly out there.' : ''}`, others.length ? ['Heal my team', 'Travel to another Center', 'Just looking'] : ['Heal my team', 'Just looking'])]);
+        if (pick === 0) {
+          await this.hud.fade(true);
+          for (const c of this.party) healCreature(c);
+          this.vitals.restore();
+          this.save.trainerHp = this.vitals.hp;
+          this.onPartyChanged();
+          await sleep(500);
+          await this.hud.fade(false);
+          await this.hud.dialogue.play([say('Nurse', 'Your Pokémon are fighting fit. We hope to see you again!')]);
+        } else if (pick === 1 && others.length) {
+          await this.fastTravel(others);
+        }
+        writeSave(this.save);
+      } else if (sp.role === 'inn') {
+        const money = this.save.money ?? 0;
+        const [pick] = await this.hud.dialogue.play([say('Innkeeper', `A bed for the night is ${formatMoney(INN_PRICE)}, supper included. Or there\'s food at the counter.`, ['Rent a bed', 'Order food', 'Not now'])]);
+        if (pick === 0) {
+          if (money < INN_PRICE) await this.hud.dialogue.play([say('Innkeeper', 'Short on coin? Come back when you\'ve won a battle or two.')]);
+          else {
+            this.save.money = money - INN_PRICE;
+            await this.hud.fade(true);
+            for (const c of this.party) healCreature(c);
+            this.vitals.restore();
+            this.save.trainerHp = this.vitals.hp;
+            Object.assign(this.meters, { hunger: SURVIVAL.max, thirst: SURVIVAL.max, queasy: 0 });
+            this.onPartyChanged();
+            await sleep(700);
+            await this.hud.fade(false);
+            this.hud.showToast('You slept at the inn', `${formatMoney(this.save.money ?? 0)} left · you and your team are rested and fed`, 3);
+          }
+        } else if (pick === 1) {
+          this.endScene();
+          this.innShop = true;
+          this.openMenu('shop');
+          return;
+        }
+      } else if (sp.role === 'board') {
+        await this.hud.dialogue.play(noticeLines(s).map((t) => say(`${s.name} notice board`, t)));
+      } else if (sp.role === 'gym' && s.gym) {
+        await this.hud.dialogue.play([
+          say('Gym guide', `This is the ${s.name} Gym, home of Leader ${s.gym.leader}, the ${s.gym.title.toLowerCase()}. Its trial is called "${s.gym.puzzle}".`),
+          say('Gym guide', 'The doors are a two-person lock: one trainer on each plate in front of them. You\'ll need your partner for every room inside, and for the leader.'),
+        ]);
+      } else if (sp.role === 'tower') {
+        await this.hud.dialogue.play([say('Tower guide', badges >= 5 ? 'Welcome, challenger. The Battle Tower\'s floors open soon.' : `The Battle Tower welcomes trainers with five badges. You have ${badges}.`)]);
+      } else if (sp.role === 'league') {
+        await this.hud.dialogue.play([say('League guard', badges >= 10 ? 'Ten badges. The Elite Four will see you soon.' : `Only trainers with ten badges may climb to the Elite Four. You have ${badges}.`)]);
+      }
+    } finally {
+      if (this.talking) this.endScene();
+    }
+  }
+
+  /** Pick a visited Pokémon Center and go there. */
+  private async fastTravel(options: { id: string; name: string }[]): Promise<void> {
+    for (let page = 0; ; page++) {
+      const shown = options.slice(page * 5, page * 5 + 5);
+      const more = options.length > (page + 1) * 5;
+      const [pick] = await this.hud.dialogue.play([{ speaker: 'Nurse', text: 'Where to? Our flying taxis go to every Center you\'ve visited.', choices: [...shown.map((o) => o.name), ...(more ? ['More...'] : []), 'Stay here'] }]);
+      if (pick === undefined || pick >= shown.length + (more ? 1 : 0)) return;
+      if (more && pick === shown.length) continue;
+      const to = centerSpot(shown[pick].id);
+      if (!to) return;
+      await this.hud.fade(true);
+      const x = to.x + Math.sin(to.yaw) * 1.5, z = to.z + Math.cos(to.yaw) * 1.5;
+      await this.world.warmUp?.(new THREE.Vector3(x, 0, z), new THREE.Vector3(x, 10, z));
+      this.controller.teleport(new THREE.Vector3(x, this.world.heightAt(x, z), z), to.yaw);
+      this.cam.snapBehind(this.controller.position, to.yaw);
+      this.wild.clear();
+      this.refreshFollower();
+      await sleep(300);
+      await this.hud.fade(false);
+      this.hud.showToast(SETTLEMENT_BY_ID[shown[pick].id]?.name ?? 'Arrived', 'You flew to the Pokémon Center', 3);
+      return;
+    }
   }
 
   private buyItem(id: string, n: number): boolean {
@@ -2566,9 +2673,18 @@ export class Game {
     await this.hud.dialogue.play([{ speaker: '', text }]);
     await this.hud.fade(true);
     const a = this.world.anchors;
-    const spot = a.professor.clone().add(new THREE.Vector3(0, 0, 2.4));
-    this.controller.teleport(new THREE.Vector3(spot.x, this.world.heightAt(spot.x, spot.z), spot.z), Math.PI);
-    this.cam.snapBehind(this.controller.position, Math.PI);
+    // Back to the last Pokémon Center you rested at, or to Hazel's lab.
+    const center = this.save.respawn ? centerSpot(this.save.respawn) : null;
+    if (center) {
+      const x = center.x + Math.sin(center.yaw) * 1.5, z = center.z + Math.cos(center.yaw) * 1.5;
+      await this.world.warmUp?.(new THREE.Vector3(x, 0, z), new THREE.Vector3(x, 10, z));
+      this.controller.teleport(new THREE.Vector3(x, this.world.heightAt(x, z), z), center.yaw);
+      this.cam.snapBehind(this.controller.position, center.yaw);
+    } else {
+      const spot = a.professor.clone().add(new THREE.Vector3(0, 0, 2.4));
+      this.controller.teleport(new THREE.Vector3(spot.x, this.world.heightAt(spot.x, spot.z), spot.z), Math.PI);
+      this.cam.snapBehind(this.controller.position, Math.PI);
+    }
     this.wild.clear();
     // Balls still in the air are gone; missed balls stay where they fell.
     this.throws.clear(true);
@@ -2586,9 +2702,12 @@ export class Game {
     this.onPartyChanged();
     await sleep(400);
     await this.hud.fade(false);
-    this.professor.lookAt(this.controller.position);
-    await this.hud.dialogue.play(this.professor.blackoutLines());
-    this.professor.lookAt(null);
+    if (center) await this.hud.dialogue.play([{ speaker: 'Nurse', text: 'You\'re awake! Your Pokémon are resting up. Please be more careful out there.' }]);
+    else {
+      this.professor.lookAt(this.controller.position);
+      await this.hud.dialogue.play(this.professor.blackoutLines());
+      this.professor.lookAt(null);
+    }
     this.endScene();
     writeSave(this.save);
     if (lost) this.hud.showToast(`You dropped ${formatMoney(lost)} in the confusion`, `${formatMoney(this.save.money ?? 0)} left in your purse`, 3);
@@ -2736,9 +2855,11 @@ export class Game {
       const starLit = !!star && this.starLit(star);
       const home = !talkable && !pickup && !find && !star ? this.nearHome(pos) : null;
       const shop = !talkable && !pickup && !find && !star && !home ? this.shopNear(pos) : null;
-      const station = !talkable && !pickup && !find && !star && !home && !shop ? this.stationsNear(pos)[0] ?? null : null;
+      // Pokémon Centers, inns, notice boards and gyms in the region's towns (shops count as `shop`).
+      const service = !talkable && !pickup && !find && !star && !home && !shop ? this.townService(pos) : null;
+      const station = !talkable && !pickup && !find && !star && !home && !shop && !service ? this.stationsNear(pos)[0] ?? null : null;
       const wildMon = !talkable ? this.wild.nearestEngageable(pos) : null;
-      const free = !talkable && !pickup && !find && !star && !home && !shop && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
+      const free = !talkable && !pickup && !find && !star && !home && !shop && !service && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing;
       let gather = free ? this.nearestGather(pos) : null;
       const waterAt = free ? this.nearWater(pos) : null;
       let water = waterAt && this.waterPrompt(waterAt) ? waterAt : null;
@@ -2768,6 +2889,7 @@ export class Game {
       else if (star) starLit ? this.hud.setPrompt(`Pick up the ${star.piece ? 'Star Piece' : 'Stardust'}`) : this.hud.setPrompt('Something glitters in the grass · too dark to find it without a light', '');
       else if (home) this.hud.setPrompt(`Rest at ${home.id === 'p1-house' ? 'home' : 'your friend’s house'}`);
       else if (shop) this.hud.setPrompt(shop.prompt);
+      else if (service) this.hud.setPrompt(servicePrompt(service, this.save.badges ?? 0));
       else if (station) this.hud.setPrompt(station === 'workbench' ? 'Use the workbench' : 'Cook at the campfire');
       else if (wildMon) this.hud.setPrompt(canFight ? `Battle the ${this.wildName(wildMon)} · Lv. ${wildMon.creature.level}` : `${wildMon.alpha ? 'Alpha' : 'Wild'} ${displayName(wildMon.creature)} · you have no Pokemon that can battle`);
       else if (this.gathering) this.hud.setPrompt(`${this.gathering.way.doing}…`, '');
@@ -2796,6 +2918,7 @@ export class Game {
         else if (star && starLit) this.pickStardust(star);
         else if (home) void this.restAtHome();
         else if (shop) this.openMenu('shop');
+        else if (service) void this.useService(service);
         else if (station) this.openMenu('craft');
         else if (wildMon && canFight) void this.startWildBattle(wildMon, false);
         else if (water) this.startWater(water);
@@ -2831,6 +2954,11 @@ export class Game {
     } else if (this.menu.isOpen || inBattle) {
       this.hud.setPrompt(null);
     }
+
+    if (this.innShop && !this.menu.isOpen) this.innShop = false;
+    // Arriving somewhere new: a town's name, or the biome you've walked into.
+    const arrived = this.place.update(this.controller.position.x, this.controller.position.z, dt);
+    if (arrived && !inBattle) this.hud.showToast(arrived.title, arrived.sub, 3.5);
 
     // Leaving town through the gate starts the open world.
     const town = this.world.regions[0];

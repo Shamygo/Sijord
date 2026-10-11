@@ -32,4 +32,11 @@ assert hashlib.sha256(data).hexdigest() == trainer['sha256'] and len(data) == tr
 gltf = json.loads(data[20:20 + struct.unpack_from('<I', data, 12)[0]])
 assert sorted(a['name'] for a in gltf['animations']) == sorted(a['name'] for a in trainer['animations'])
 assert len(gltf['skins'][0]['joints']) == trainer['joints']
+world = json.loads((root / 'src/shared/data/world-assets.json').read_text())
+for name, pack in world['packs'].items():
+    size = (public / pack['file']).stat().st_size
+    assert size == pack['bytes'], f'world pack {name}: {size} bytes, manifest says {pack["bytes"]}'
+for name, asset in world['assets'].items():
+    assert asset['pack'] in world['packs'], f'world asset {name} has no pack'
+print(f'Verified {len(world["packs"])} world packs ({len(world["assets"])} Blender-built models).')
 print(f'Verified {len(models)} models, {clips} Pokémon clips, {len(items)} items, {len(icons)} portraits, and Rei with {len(trainer["animations"])} clips.')
