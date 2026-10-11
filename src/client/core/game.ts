@@ -60,7 +60,7 @@ import { TownFolk, type Resident } from '../npc/townfolk';
 import type { ServicePoint } from '../world/settlements';
 import { SETTLEMENT_BY_ID } from '../../shared/region';
 import { serviceSpot } from '../../shared/settlement-layout';
-import { aceLevel, awardBadge, echoTeam, GYM_BY_ID, gymTrainers, leaderTeam, registerForBoss, scoutLines, type GymDef, type WorldProgress } from '../../shared/gyms';
+import { aceLevel, awardBadge, echoTeam, GYM_BY_ID, GYMS, gymTrainers, leaderTeam, registerForBoss, scoutLines, type GymDef, type WorldProgress } from '../../shared/gyms';
 import { gymInterior, toWorld, type Chamber } from '../../shared/gym-interior';
 import type { TeamSetup } from '../../shared/battle/engine';
 import { GYM_THEMES } from '../world/gym-rooms';
@@ -811,7 +811,20 @@ export class Game {
     ];
     if (starter) quests.push({ id: 'rival', text: 'Beat Sunniva', main: true, done: beat, target: { x: this.rival.homeSpot.x, z: this.rival.homeSpot.z } });
     if (beat) quests.push({ id: 'route1', text: 'Head out onto Route 1', main: true, done: left, target: { x: gate.x, z: gate.z } });
-    if (beat && left) quests.push({ id: 'train', text: `Train your team on the meadow (cap Lv. ${this.levelCap})` });
+    if (beat && left) {
+      // The badge road (DESIGN §3): any order, the nearest unbeaten gym is marked.
+      const earned = this.save.gymBadges ?? [];
+      // Inside a gym you're really at its city, not out over the sea where its rooms are built.
+      const here = this.gymVisit?.gym.city ?? this.controller?.position ?? { x: 0, z: 0 };
+      const next = GYMS.filter((g) => !earned.includes(g.id)).map((g) => ({ g, at: serviceSpot(g.city, 'gym') ?? { x: g.city.x, z: g.city.z } }))
+        .sort((p, q) => Math.hypot(p.at.x - here.x, p.at.z - here.z) - Math.hypot(q.at.x - here.x, q.at.z - here.z))[0];
+      if (next) quests.push({ id: 'badges', text: `Earn gym badges with your partner (${earned.length} of ${GYMS.length}) · nearest: ${next.g.city.name} Gym, ${next.g.type} type`, main: true, target: { x: next.at.x, z: next.at.z } });
+      else {
+        const league = SETTLEMENT_BY_ID.crownspire;
+        if (league) quests.push({ id: 'league', text: 'All ten badges: climb to the Sijord League at Crownspire', main: true, target: { x: league.x, z: league.z } });
+      }
+      quests.push({ id: 'train', text: `Train your team (level cap ${this.levelCap})` });
+    }
     if (beat && left) {
       const n = trainersBeaten(this.save.trainers);
       quests.push({ id: 'trainers', text: `Beat the trainers roaming Hearthmeadow (${n} of ${ROAMING_TRAINERS.length})`, done: n >= ROAMING_TRAINERS.length });
