@@ -4,6 +4,19 @@ Everything a new contributor (human or Claude) needs to pick up this project fro
 
 [POLISH_HANDOFF.md](POLISH_HANDOFF.md) records ChatGPT's 2026-10-05 polish pass (Rei, imported Pokémon models, menus, climbing, movement, both battle modes). Read it before changing those areas. The latest reference images and before/after screenshots are stored in this repo.
 
+## Latest: the open world and its towns (2026-10-11, branch `claude/sijord-region`)
+
+Read this before "Start here". Two commits on `claude/sijord-region`, not yet merged to `main`:
+
+1. **The whole Sijord region** (`src/shared/region.ts`, `src/client/world/heightfield.ts`, `src/client/world/stream/`). The vale is now the south-centre of a 6.4 km island laid out after DESIGN §2: 10 biomes, 12 cities, 16 towns, 27 villages plus Bramblewick, roads, rivers, lakes, fjords, islands, a volcano with lava, frozen tundra lakes. The vale's heights are unchanged (`tests/region.test.ts` pins them). Terrain streams in quadtree patches built in Web Workers (`stream/streamer.ts`), level-0 chunks carry heights and a per-chunk tree/bush/rock scatter (`stream/scatter.ts`, seeded so co-op players match). Grass and water read a ground window that follows the player (`stream/window.ts`); the sea is one sheet at y = 0. Streamed colliders use `DynamicColliders` in `core/collision.ts`. Minimap and map paint the region.
+2. **Towns from a Blender kit** (`scripts/blender/`, run headless with `/Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup --python scripts/blender/build.py`; `preview.py` renders contact sheets). It writes `public/models/world/*.glb` and `src/shared/data/world-assets.json`. `src/shared/settlement-layout.ts` lays out every settlement deterministically; `src/client/world/settlements.ts` builds them near the player in two batched draw calls. `src/client/core/towns.ts` + `useService` in `game.ts`: arrival banners, Pokémon Centers (heal, fast travel between visited Centers, respawn point: `save.centers`, `save.respawn`), Poké Marts, stalls, inns (bed ₽300, kitchen), notice boards, gym / Battle Tower / League doors (explain only).
+
+**Backups:** tag `backup/pre-2026-10-11` = old `main` (d7fc32c). Local copies in `~/Documents/Sijord/backups/` on Simon's Mac.
+
+**Next up, in order:** wild spawns per biome with DESIGN §3.2 level bands (`overworld/wild.ts` ZONES still only know the vale) and more species (DEX_PLAN); NPCs in towns (`layout.npcs` has spots and roles, nothing spawns them yet); gyms (M6: twin plates are anchors `plateA`/`plateB` on gym models, co-op puzzle interiors, boss battles, badges, level caps); skill trees (M7); riding (M9); bases and automation (M8); Mega/Z/Dynamax (M11); story; desktop builds. Art still to improve: mountains read as smooth snow, Mirefen needs more pools and mist, cities have no residents.
+
+**Testing on a Mac without the pane:** headless Chrome via the DevTools protocol worked well (60 fps): launch Chrome with `--headless=new --remote-debugging-port=9333 --user-data-dir=<temp>` and drive it with `Runtime.evaluate` (use `replMode: true` for top-level await).
+
 ## Start here (2026-10-06)
 
 **What you can play today.** Make a trainer (Rei by default) and wake up in Bramblewick. Professor Hazel gives you a starter, a Growlithe, 5 Poke Balls and (on your next visit) 3 Treats, then your rival Sunniva battles you. Outside the north gate, herds of 45 Kanto species roam Hearthmeadow, and both friends in a world meet the same herds. You can:
