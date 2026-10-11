@@ -58,6 +58,11 @@ export interface Settings {
   showControlsHint: boolean;
   /** Solo battles start in this mode; 'ask' shows the mode picker every time. */
   battleMode: 'ask' | 'tactical' | 'action';
+  /**
+   * Gyms are built for two (DESIGN §13). With no friend online, the Echo, a spirit partner, holds
+   * plates and fights beside you (DESIGN open question 1, option b). Off by default.
+   */
+  echoPartner: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -69,6 +74,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showFps: false,
   showControlsHint: true,
   battleMode: 'ask',
+  echoPartner: false,
 };
 
 const KEY = 'sijord.settings.v1';

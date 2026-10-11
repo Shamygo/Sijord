@@ -48,6 +48,13 @@ export interface BattleStart {
   balls?: Record<string, number>;
   /** The trainer class's catch-rate lean. */
   catchMult?: number;
+  /**
+   * A gym's trainers or leader (DESIGN §4.1): a co-op boss battle. Each player brings three; the
+   * friend online must join, or the Echo fights beside a player who is alone.
+   */
+  boss?: { gym: string; stage: 'trainers' | 'leader'; ace: number; echo?: TeamSetup };
+  /** Two trainers fighting as a tag team (one slot each); otherwise `foes` under `foeName`. */
+  foeTeams?: { name: string; creatures: Creature[]; ai: AiKind }[];
 }
 
 export interface BattleOutcome {
@@ -161,7 +168,9 @@ export class BattleDirector {
       kind: start.kind,
       sides: [
         { teams: [{ owner: PLAYER_ID, name: start.playerName, creatures: start.party, levelCap: start.levelCap, xpMult: start.xpMult, catchMult: start.catchMult }], slots: [PLAYER_ID, PLAYER_ID] },
-        { teams: [{ owner: FOE_ID, name: start.foeName, creatures: start.foes, ai: start.foeAi }], slots: [FOE_ID, FOE_ID] },
+        start.foeTeams?.length === 2
+          ? { teams: start.foeTeams.map((t, i) => ({ owner: i ? `${FOE_ID}2` : FOE_ID, name: t.name, creatures: t.creatures, ai: t.ai })), slots: [FOE_ID, `${FOE_ID}2`] }
+          : { teams: [{ owner: FOE_ID, name: start.foeName, creatures: start.foes, ai: start.foeAi }], slots: [FOE_ID, FOE_ID] },
       ],
     });
     if (start.kind === 'trainer') deps.placeFoeTrainer?.(this.stage.foeTrainerSpot, start.facing + Math.PI);
@@ -177,7 +186,23 @@ export class BattleDirector {
     this.ui.show();
     // With a friend online the picker doubles as the lobby they can join; solo it can be skipped.
     this.mode = !this.deps.connected && this.deps.soloMode ? this.deps.soloMode : await this.ui.lobby(!!this.deps.connected);
+    const boss = this.start.boss;
+    if (boss && this.deps.connected && !this.guest) {
+      // Boss battles are fought together: give the friend a moment to join.
+      this.captionText = 'Waiting for your partner to join…';
+      this.ui.caption(this.captionText);
+      for (let t = 0; t < 12 && !this.guest; t += 0.1) await this.wait(0.1);
+    }
     this.lobby = false; this.ui.setMode(this.mode);
+    if (boss && !this.guest) {
+      if (boss.echo) {
+        this.battle.invitePartner({ ...boss.echo, owner: 'echo' });
+        this.ui.caption('The Echo fights beside you.');
+      } else {
+        this.readyResult = true;
+        return { winner: null, escaped: true, fainted: this.fainted, pendingMoves: new Map(), caught: [], ballsUsed: {}, partnerCaught: [] };
+      }
+    }
     if (this.mode === 'action') this.stage.setActionMode();
     if (this.start.intro) await this.say(this.start.intro, 1.4);
     await this.play(this.battle.start());
@@ -243,6 +268,11 @@ export class BattleDirector {
     };
   }
 
+  /** A gym battle: the friend who joins brings their three registered creatures. */
+  get isBoss(): boolean {
+    return !!this.start.boss;
+  }
+
   acceptPartner(id: string, team: TeamSetup, balls: Record<string, number> = {}): boolean {
     if (!this.lobby || this.guest) return false;
     const ok = this.battle.invitePartner({...team, owner: 'partner'});
@@ -270,7 +300,7 @@ export class BattleDirector {
 
   snapshot(): BattleFrame {
     return { id: this.id, center: this.stage.center.toArray() as [number,number,number], yaw: this.start.facing,
-      progressionFlag:this.start.progressionFlag, trainer:this.start.trainer, kind:this.start.kind, mode: this.mode, lobby: this.lobby, joinable: this.lobby && !this.guest, guest: this.guest, turn: this.battle.turn,
+      progressionFlag:this.start.progressionFlag, trainer:this.start.trainer, kind:this.start.kind, gym: this.start.boss ? { id: this.start.boss.gym, stage: this.start.boss.stage, ace: this.start.boss.ace } : undefined, mode: this.mode, lobby: this.lobby, joinable: this.lobby && !this.guest, guest: this.guest, turn: this.battle.turn,
       winner:this.battle.winner, escaped:this.battle.escaped, windup: this.windup, ended: this.readyResult, caption: this.captionText,
       slots: [...this.displayed.values()].map(s => ({...s,position:this.stage.snapshotPosition(s.pos)})),
       events: this.recentEvents, prompt: this.remotePrompt ? {...this.remotePrompt, move:this.remotePrompt.move ? {...this.remotePrompt.move,portrait:undefined,bench:this.remotePrompt.move.bench.map(b => ({...b,portrait:undefined}))} : undefined, bench:this.remotePrompt.bench?.map(b => ({...b,portrait:undefined}))} : undefined,
@@ -377,7 +407,7 @@ export class BattleDirector {
           }
           this.ui.setPlate(k, {
             name: e.name, level: e.level, hp: e.hp, maxHp: e.maxHp, status: e.status, mine,
-            tag: mine ? '' : this.start.kind === 'wild' ? (e.alpha ? 'Alpha' : 'Wild') : this.start.foeName,
+            tag: mine ? '' : this.start.kind === 'wild' ? (e.alpha ? 'Alpha' : 'Wild') : this.battle.teamSetup(e.owner)?.name ?? this.start.foeName,
             portrait: mine ? this.deps.portraits.get(e.species) : undefined,
           });
           await this.say(e.text, Math.max(dur, 0.9));

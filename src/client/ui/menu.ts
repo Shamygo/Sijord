@@ -714,6 +714,7 @@ export class GameMenu {
           ),
           h('span'),
         ),
+        toggle('Echo partner in gyms when playing alone', s.echoPartner, (v) => (s.echoPartner = v)),
         toggle('Show controls hint', s.showControlsHint, (v) => (s.showControlsHint = v)),
       ),
       h(

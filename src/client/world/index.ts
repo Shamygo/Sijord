@@ -27,6 +27,7 @@ import { buildCliffs, type CliffResult } from './cliffs';
 import { createFauna } from './fauna';
 import { ResourceField } from './resources';
 import { collidersNear, colliderContains, colliderTop } from '../core/collision';
+import { GymRooms } from './gym-rooms';
 import type { Region } from './types';
 
 export { applyAtmosphere } from './sky';
@@ -192,6 +193,10 @@ export function createWorld(): World {
   const dynamic = new DynamicColliders();
   attachDynamic(colliders, dynamic);
   const outerVeg = new OuterVegetation(streamer, dynamic, resources);
+  // ---- gym interiors, out over the northern sea; drawn only for a player inside ----
+  const gymRooms = new GymRooms(dynamic);
+  root.add(gymRooms.group);
+  walkables.push(gymRooms.walk);
   root.add(outerVeg.group);
 
   // ---- towns, villages and cities, built from the Blender kit as the player nears them ----
@@ -241,6 +246,7 @@ export function createWorld(): World {
     halfSize: HALF,
     bounds: { minX: REGION.minX + 60, maxX: REGION.maxX - 60, minZ: REGION.minZ + 60, maxZ: REGION.maxZ - 60 },
     streamer,
+    gymRooms,
     warmUp: async (at: THREE.Vector3, camera: THREE.Vector3) => {
       await Promise.all([streamer.warmUp(at, camera), kitReady]);
       // Build whatever settlements are in sight before the first frame.

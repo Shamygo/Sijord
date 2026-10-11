@@ -73,6 +73,8 @@ export interface World {
   bounds?: { minX: number; maxX: number; minZ: number; maxZ: number };
   /** The streamed terrain (heights, chunks, the coarse map of the whole region). */
   streamer?: TerrainStreamer;
+  /** The gyms' interiors (DESIGN §13). */
+  gymRooms?: import('./gym-rooms').GymRooms;
   /** The region's towns and cities (set once the Blender kit has loaded). */
   settlements?: SettlementRenderer;
   /** Load the ground round a point before the first frame. */

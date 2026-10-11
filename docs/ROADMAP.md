@@ -123,6 +123,8 @@ Every milestone ends in a **playable build** that two people can open in a brows
 
 **Exit criterion:** two players solve the gym together (it provably can't be soloed), beat a leader that uses held items and makes smart targeting choices, earn the badge, and see the cap rise and the second gym's team re-scale. A playtest rates the leader as "hard but fair".
 
+**Status (2026-10-11):** all ten gyms built with the framework (twin-plate door, three co-op chamber kinds per gym, checkpoints, tag-team gym trainers, co-op leader battle, badges, cap rise with banked XP, disobedience, held items, AI t2-t4, adaptive scaling across four bands, an optional Echo partner for solo play). Verified with two players in two browsers. Left: the bespoke §13.2 puzzle mechanics, the ping wheel, the plan-phase timer and planning pings, and the play-test.
+
 ---
 
 ## M7: Player levels, classes and quests

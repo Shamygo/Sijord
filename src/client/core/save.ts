@@ -65,6 +65,12 @@ export interface SaveData {
   respawn?: string;
   /** Edvin the cartographer: his pages you've checked and corrected, and his treasure. */
   cartographer?: { taken: boolean; seen: string[]; fixed: string[]; dug: boolean };
+  /** Gyms beaten (gym ids, in order). `badges` is their count. */
+  gymBadges?: string[];
+  /** The strongest gym ace beaten so far: no unbeaten gym scales below it plus six (DESIGN §3.3). */
+  levelRecord?: number;
+  /** Chambers solved and trainers beaten in each gym, kept between visits. */
+  gymProgress?: Record<string, { solved: number[]; trainers?: boolean }>;
 }
 
 export function loadSave(): SaveData | null {

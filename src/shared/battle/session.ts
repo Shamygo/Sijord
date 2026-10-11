@@ -9,6 +9,8 @@ export interface BattleFrame {
   progressionFlag?: 'beat-rival';
   /** A roaming trainer's id (trainer battles against one). */
   trainer?: string;
+  /** A gym's trainers or leader: a co-op boss battle (the friend who joins earns the badge too). */
+  gym?: { id: string; stage: 'trainers' | 'leader'; ace: number };
   center: [number, number, number];
   yaw: number;
   mode: 'tactical' | 'action';
