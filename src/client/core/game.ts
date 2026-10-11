@@ -56,6 +56,7 @@ import type { ResourceNode } from '../world/resources';
 import { TOWN } from '../world/layout';
 import { waterDistance } from '../world/terrain';
 import { PlaceTracker, centerSpot, noticeLines, servicePrompt, serviceShop, travelList } from './towns';
+import { TownFolk, type Resident } from '../npc/townfolk';
 import type { ServicePoint } from '../world/settlements';
 import { SETTLEMENT_BY_ID } from '../../shared/region';
 import { blackoutLoss, buy, formatMoney, sell, SHOPS, STARTING_MONEY, trainerPrize, wildPrize, type Shop, INN_PRICE } from '../../shared/economy';
@@ -110,6 +111,8 @@ interface CameraSettingsHooks {
 export class Game {
   /** Banner on arriving in a settlement or a new biome. */
   private readonly place = new PlaceTracker();
+  /** The people of the region's towns. */
+  private townFolk!: TownFolk;
   /** The inn's kitchen menu is open (the inn door doubles as its shop while it is). */
   private innShop = false;
   private renderer: THREE.WebGLRenderer;
@@ -312,6 +315,8 @@ export class Game {
     this.wild.onAlphaTaken = (key) => this.rememberAlpha(key);
     this.wild.applyTaken(currentAlphaKeys(save.alphas ?? [], alphaDay(Date.now())));
     this.scene.add(this.wild.root);
+    this.townFolk = new TownFolk(this.world);
+    this.scene.add(this.townFolk.root);
     this.throws = new OverworldThrows({
       world: this.world,
       targets: () => this.wild.creatures.filter((m) => m.state !== 'battle' && m.state !== 'ball' && m.state !== 'gone' && !m.remoteBusy),
@@ -1554,7 +1559,11 @@ export class Game {
     if (s) return SHOPS[s.id];
     const sp = this.world.settlements?.serviceNear(pos.x, pos.z, 2.8);
     if (sp?.role === 'inn' && this.innShop) return SHOPS['inn-kitchen'];
-    return sp ? serviceShop(sp) : null;
+    if (sp && serviceShop(sp)) return serviceShop(sp);
+    // Talking to a shop's clerk out front opens its shelves too.
+    const clerk = this.townFolk?.nearest(pos, TALK_RADIUS + 0.5);
+    if (clerk?.person.role === 'clerk') return SHOPS[clerk.settlement.tier === 'large' ? 'city-mart' : 'town-mart'];
+    return null;
   }
 
   /** A town service point at hand that isn't a shop (those open the Shop tab). */
@@ -1628,6 +1637,27 @@ export class Game {
     } finally {
       if (this.talking) this.endScene();
     }
+  }
+
+  /** A resident of a town: the nurse, clerk and innkeeper see to you as their building would. */
+  private async talkToFolk(r: Resident): Promise<void> {
+    const service = r.person.role === 'nurse' ? 'pokecenter' : r.person.role === 'clerk' ? 'mart' : r.person.role === 'innkeeper' ? 'inn' : null;
+    if (service) {
+      const sp = [...(this.world.settlements?.services() ?? [])].find((x) => x.settlement === r.settlement && x.role === service);
+      if (sp) {
+        if (service === 'mart') {
+          this.openMenu('shop');
+          return;
+        }
+        await this.useService(sp);
+        return;
+      }
+    }
+    this.beginScene();
+    r.villager.lookAt(this.controller.position);
+    await this.hud.dialogue.play(r.person.lines.map((text) => ({ speaker: r.person.name, text })));
+    r.villager.lookAt(null);
+    this.endScene();
   }
 
   /** Pick a visited Pokémon Center and go there. */
@@ -2846,8 +2876,9 @@ export class Game {
       const nearGudrun = !nearProf && !nearRival && !nearTrainer && !nearBale && pos.distanceTo(this.picnicker.position) < TALK_RADIUS + 0.6;
       const nearVillager = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun ? this.villagers.find((v) => v.visible && pos.distanceTo(v.position) < TALK_RADIUS) ?? null : null;
       const nearEdvin = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !nearVillager && pos.distanceTo(this.cartographer.person.position) < TALK_RADIUS;
+      const nearFolk = !nearProf && !nearRival && !nearTrainer && !nearBale && !nearGudrun && !nearVillager && !nearEdvin ? this.townFolk.nearest(pos, TALK_RADIUS) : null;
       // Someone to talk to beats everything else at hand.
-      const talkable = nearProf || nearRival || !!nearTrainer || nearBale || nearGudrun || !!nearVillager || nearEdvin;
+      const talkable = nearProf || nearRival || !!nearTrainer || nearBale || nearGudrun || !!nearVillager || nearEdvin || !!nearFolk;
       const dig = !talkable && !this.gathering && this.treasureHere(pos);
       const pickup = !talkable && !dig && !this.aiming ? this.throws.nearestPickup(pos) : null;
       const find = !talkable && !pickup && !this.aiming ? this.discoveries.nearest(pos) : null;
@@ -2881,6 +2912,7 @@ export class Game {
       else if (nearTrainer) this.hud.setPrompt(`Talk to ${nearTrainer.name}`);
       else if (nearGudrun) this.hud.setPrompt(`Talk to ${PICNICKER.name}`);
       else if (nearVillager) this.hud.setPrompt(`Talk to ${nearVillager.name}`);
+      else if (nearFolk) this.hud.setPrompt(`Talk to ${nearFolk.person.name}`);
       else if (nearEdvin) this.hud.setPrompt(`Talk to ${CARTOGRAPHER.giver}`);
       else if (dig) this.hud.setPrompt(dig === 'dig' ? 'Dig where the map says' : 'Something is buried here · you need a Stone Pick to dig', dig === 'dig' ? undefined : '');
       else if (nearBale) this.hud.setPrompt(this.flags.has('met-sten') ? `Talk to ${DEFECTOR.name}` : `Look at the ${BALE_NAME.toLowerCase()}`);
@@ -2911,6 +2943,7 @@ export class Game {
         else if (nearBale) void this.talkToDefector();
         else if (nearGudrun) void this.talkToPicnicker();
         else if (nearVillager) void this.talkToVillager(nearVillager);
+        else if (nearFolk) void this.talkToFolk(nearFolk);
         else if (nearEdvin) void this.talkToCartographer();
         else if (dig === 'dig') this.startDig();
         else if (pickup) this.pickupBall(pickup.id);
@@ -2977,6 +3010,7 @@ export class Game {
     this.updatePicnicker(dt);
     this.updateVillagers(dt);
     this.updateCartographer(dt);
+    this.townFolk.update(dt, this.controller.position);
     const friends = [...this.partnerWild.values()];
     this.wild.setRemoteBusy(new Set(friends.flatMap((f) => f.busy)));
     this.wild.setFriendCells(friends.flatMap((f) => f.cells));
