@@ -30,6 +30,10 @@ export const VALUE: Record<string, number> = {
   'cloth-cap': 500,
   'cloth-trousers': 800,
   'cloth-tunic': 1100,
+  'leather-hood': 2400,
+  'leather-leggings': 3600,
+  'leather-vest': 4800,
+  hide: 360,
   'stone-sickle': 280,
   'stone-hatchet': 300,
   'stone-pick': 320,
@@ -68,8 +72,8 @@ export const SHOPS: Record<ShopId, Shop> = {
   },
   clothier: {
     id: 'clothier', name: 'The Clothier', prompt: 'Visit The Clothier',
-    greeting: 'Padded cloth, stitched to last. It won\'t stop a charging Pokemon, but it\'ll soften the blow.',
-    stock: ['cloth-cap', 'cloth-trousers', 'cloth-tunic', 'woven-cloth'],
+    greeting: 'Padded cloth, stitched to last, and leather for those who can pay. Nights are cold out past the fence.',
+    stock: ['cloth-cap', 'cloth-trousers', 'cloth-tunic', 'leather-hood', 'leather-leggings', 'leather-vest', 'woven-cloth'],
   },
   'wayfarer-inn': {
     id: 'wayfarer-inn', name: 'Wayfarer Inn', prompt: 'Order food at the Wayfarer Inn',

@@ -103,6 +103,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .vitals .badge { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 22px; border: 3px solid #fff; }
 .vitals .info { display: flex; flex-direction: column; gap: 5px; min-width: 170px; }
 .vitals .name { font-weight: 900; font-size: 14px; }
+.vitals .name-row { display: flex; align-items: center; gap: 6px; }
 .bar { height: 7px; background: rgba(0,0,0,.4); border-radius: 4px; overflow: hidden; }
 .bar > i { display: block; height: 100%; background: var(--good); border-radius: 4px; transition: width .12s linear; }
 .bar.stamina > i { background: var(--stamina); }
@@ -583,6 +584,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .vitals.hit { animation:vitals-hit 420ms ease-out; }
 .hurt-flash { position:absolute; inset:0; pointer-events:none; opacity:0; background:radial-gradient(ellipse at center, transparent 45%, #b0201a88 100%); transition:opacity 500ms ease-out; }
 .hurt-flash.show { opacity:1; transition:none; }
+/* Frost creeping in from the screen's edges as the trainer gets cold; a hot glow as they overheat. */
+.frost, .heat-haze { position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity 1.2s ease; }
+.frost { background: radial-gradient(ellipse 80% 75% at center, transparent 58%, rgba(214,236,255,.22) 78%, rgba(238,248,255,.62) 100%); box-shadow: inset 0 0 110px 22px rgba(190,224,255,.5); }
+.heat-haze { background: radial-gradient(ellipse 80% 75% at center, transparent 58%, rgba(255,150,60,.18) 80%, rgba(255,110,40,.42) 100%); }
+.hud.in-battle .frost, .hud.in-battle .heat-haze { display:none; }
 @keyframes vitals-hit { 0% { transform:translateX(0); } 20% { transform:translateX(-6px); } 45% { transform:translateX(5px); } 70% { transform:translateX(-3px); } 100% { transform:none; } }
 .hud.in-battle .aim-hud, .hud.in-battle .hurt-flash { display:none; }
 /* Region Pokédex and PC box */
@@ -657,6 +663,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .vitals .meter.empty .bar { box-shadow: 0 0 0 1px var(--danger) inset; }
 .vitals .queasy { display: none; font-size: 10px; font-weight: 900; color: #c7f08a; background: rgba(90,130,40,.45); border-radius: 6px; padding: 1px 6px; }
 .vitals .queasy.show { display: inline-block; }
+.bar.heat { position: relative; }
+.bar.heat::after { content: ''; position: absolute; left: calc(50% - 1px); top: 0; bottom: 0; width: 2px; background: rgba(255,255,255,.55); }
+.bar.heat > i { position: absolute; top: 0; bottom: 0; border-radius: 0; background: #ffa24a; transition: width .3s linear, left .3s linear; }
+.vitals .meter.heat.cold .bar > i { background: #8fd0ff; }
+.vitals .meter.heat.cold.low .bar > i, .vitals .meter.heat.cold.empty .bar > i { background: #c9e9ff; }
+.vitals .heat-chip { display: none; font-size: 10px; font-weight: 900; border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+.vitals .heat-chip.show { display: inline-block; }
+.vitals .heat-chip.cold { color: #e0f1ff; background: rgba(60,125,200,.55); }
+.vitals .heat-chip.hot { color: #ffe6c8; background: rgba(200,95,30,.55); }
 @keyframes meter-pulse { 50% { transform: scale(1.35); filter: drop-shadow(0 0 4px #ff6a4a); } }
 .food-info { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .food-info p { margin: 0; }

@@ -54,7 +54,7 @@ export const AGGRO_BASE: Record<Temperament, number> = { skittish: 0.05, docile:
 
 /**
  * Chance that a failed throw makes the creature turn on the trainer. Stronger creatures (`levelDiff`
- * above the trainer's reference level) anger more easily; `calm` is armour/class calm (none yet).
+ * above the trainer's reference level) anger more easily; `calm` is the Calm of the armour worn.
  */
 export function aggroChance(t: Temperament, levelDiff: number, calm = 0): number {
   return Math.max(0, Math.min(0.95, AGGRO_BASE[t] + 0.04 * Math.max(0, levelDiff) - calm));
@@ -64,13 +64,16 @@ export function aggroChance(t: Temperament, levelDiff: number, calm = 0): number
  * The reaction to a failed overworld catch (DESIGN §5.3). Skittish creatures flee and docile ones
  * back off warily, unless the aggro roll (`roll` in 0..1) comes up, in which case they turn and
  * fight. Territorial creatures always force a battle; aggressive ones charge the trainer
- * directly. A trainer with no Pokemon able to battle gets charged instead of challenged.
+ * directly. A trainer with no Pokemon able to battle gets charged instead of challenged. Calm
+ * armour (`calm`) makes the docile less likely to fight, and now and then talks a territorial or
+ * aggressive one down: it backs off warily instead.
  */
-export function failedCatchReaction(t: Temperament, levelDiff: number, roll: number, canBattle: boolean): CatchReaction {
+export function failedCatchReaction(t: Temperament, levelDiff: number, roll: number, canBattle: boolean, calm = 0): CatchReaction {
   let r: CatchReaction;
-  if (t === 'aggressive') r = 'charge';
+  if ((t === 'aggressive' || t === 'territorial') && roll < 2 * Math.max(0, calm)) r = 'startle';
+  else if (t === 'aggressive') r = 'charge';
   else if (t === 'territorial') r = 'battle';
-  else if (roll < aggroChance(t, levelDiff)) r = 'battle';
+  else if (roll < aggroChance(t, levelDiff, calm)) r = 'battle';
   else r = t === 'skittish' ? 'flee' : 'startle';
   return r === 'battle' && !canBattle ? 'charge' : r;
 }

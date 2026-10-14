@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ALPHA, ALPHA_LAIRS, alphaCreature, alphaDay, alphaKey, type AlphaLair } from '../../shared/alpha';
+import { calmReach } from '../../shared/armour';
 import { createCreature, newUid } from '../../shared/battle/creature';
 import { Rng } from '../../shared/battle/rng';
 import { clockAt, isNight } from '../../shared/daynight';
@@ -332,6 +333,8 @@ export const ENGAGE_RADIUS = 4.2;
 
 export class WildManager {
   readonly root = new THREE.Group();
+  /** The Calm of the trainer's armour (DESIGN §5.3), set each frame. */
+  calm = 0;
   private herds: Herd[] = [];
   private rng: Rng;
   private nextId = 1;
@@ -438,17 +441,19 @@ export class WildManager {
 
     // A creature reacting to a throw ignores its usual reflexes until it's done.
     const reacting = m.state === 'startle' || m.state === 'attack';
+    // Calm armour lets the trainer come closer before it squares up (an Alpha less so).
+    const reach = calmReach(this.calm);
     if (m.alpha) {
-      if (!paused && !reacting && m.state !== 'eat') this.guardLair(m, dt, dist);
+      if (!paused && !reacting && m.state !== 'eat') this.guardLair(m, dt, dist / ((1 + reach) / 2));
     } else if (!paused && !reacting) {
       if (temperament === 'skittish' && sprinting && dist < 12 && m.state !== 'flee') {
         m.state = 'flee';
         m.timer = 2.5 + this.rng.next() * 1.5;
-      } else if ((temperament === 'territorial' || temperament === 'aggressive') && dist < 9 && m.calm <= 0 && m.state !== 'charge' && m.state !== 'eat') {
+      } else if ((temperament === 'territorial' || temperament === 'aggressive') && dist < 9 * reach && m.calm <= 0 && m.state !== 'charge' && m.state !== 'eat') {
         m.state = 'watch';
         m.tension += dt * (temperament === 'aggressive' ? 2 : 1);
-        if (m.tension > 2.2 && dist < 6.5) m.state = 'charge';
-      } else if (m.state === 'watch' && dist >= 11) {
+        if (m.tension > 2.2 && dist < 6.5 * reach) m.state = 'charge';
+      } else if (m.state === 'watch' && dist >= 11 * reach) {
         m.state = 'graze';
         m.tension = 0;
       }

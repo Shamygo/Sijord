@@ -58,7 +58,7 @@ import { waterDistance } from '../world/terrain';
 import { PlaceTracker, centerSpot, noticeLines, servicePrompt, serviceShop, travelList } from './towns';
 import { TownFolk, type Resident } from '../npc/townfolk';
 import type { ServicePoint } from '../world/settlements';
-import { SETTLEMENT_BY_ID } from '../../shared/region';
+import { SETTLEMENT_BY_ID, settlementAt } from '../../shared/region';
 import { serviceSpot } from '../../shared/settlement-layout';
 import { aceLevel, awardBadge, echoTeam, GYM_BY_ID, GYMS, gymTrainers, leaderTeam, registerForBoss, scoutLines, type GymDef, type WorldProgress } from '../../shared/gyms';
 import { gymInterior, toWorld, type Chamber } from '../../shared/gym-interior';
@@ -67,6 +67,8 @@ import { GYM_THEMES } from '../world/gym-rooms';
 import { GymVisit } from './gym-visit';
 import { blackoutLoss, buy, formatMoney, sell, SHOPS, STARTING_MONEY, trainerPrize, wildPrize, type Shop, INN_PRICE } from '../../shared/economy';
 import { canteenRoom, consume, meterState, OPEN_WATER, stepMeters, SURVIVAL, survivalEffects, type Meters } from '../../shared/survival';
+import { airTemp, regionHeat, feltTemp, heatEffects, heatState, stepHeat, TEMPERATURE, type HeatState } from '../../shared/temperature';
+import { armourStats, HIDE, resistTo, rollHide, type ArmourStats } from '../../shared/armour';
 import type { World } from '../world/types';
 import { Input } from './input';
 import { RenderPipeline } from './render';
@@ -246,9 +248,18 @@ export class Game {
   /** The wild side of the friend's battle we joined: levels seen, who fainted (prize money) and the Alphas' names. */
   private remoteFoes: { id: string; levels: Map<string, number>; species: Map<string, string>; fainted: Set<string>; alphas: Map<string, string> } | null = null;
   private guestPrize = 0;
+  private guestNote = '';
   /** Hunger, thirst and queasiness (DESIGN §6.1); the same object as `save.meters`. */
   private meters: Meters;
   private metersSaveT = 0;
+  /** Soaked from wading, 1, drying off to 0 (body temperature). */
+  private wet = 0;
+  /** The worst body temperature reached since you were last comfortable. */
+  private heatWorst: HeatState = 'ok';
+  /** How warm it feels right now (°C), for the HUD and the text dump. */
+  private felt = 15;
+  /** Sprinting or climbing this frame: hard work keeps you warm. */
+  private exerting = false;
   private regrowCheck = 0;
   /** Dev only: force overworld catch outcomes in scripted tests. */
   debugCatch: { caught?: boolean; reaction?: CatchReaction } | null = null;
@@ -393,7 +404,8 @@ export class Game {
       learn: (id) => this.learnRecipe(id),
       equipped: () => this.save.equipped ?? {},
       wear: (id, on) => this.wear(id, on),
-      defence: () => this.defence,
+      armour: () => this.armour,
+      temperature: () => ({ heat: this.meters.heat ?? 0, felt: this.felt }),
       meters: () => this.meters,
       money: () => this.save.money ?? 0,
       shop: () => this.shopNear(this.controller.position),
@@ -690,12 +702,14 @@ export class Game {
       // A won wild battle pays the friend who joined it too, for the Pokemon that fainted.
       const foes = this.remoteFoes;
       if (frame.winner === 0 && frame.kind === 'wild' && foes?.id === frame.id) {
-        const beaten = [...foes.fainted].filter((uid) => !foes.alphas.has(uid)).map((uid) => foes.levels.get(uid) ?? 1);
+        const fainted = [...foes.fainted].filter((uid) => !foes.alphas.has(uid));
+        const beaten = fainted.map((uid) => foes.levels.get(uid) ?? 1);
         this.questDefeats([...foes.fainted].map((uid) => foes.species.get(uid) ?? ''));
         if (beaten.length) {
           this.gainXp(beaten.length * TRAINER_XP.wildWin);
-          // Shown as the battle closes, in place of "Back to exploring".
+          // Shown as the battle closes, in place of "Back to exploring". Each friend finds their own hide.
           this.guestPrize = wildPrize(beaten);
+          this.guestNote = this.collectHide(fainted.map((uid) => foes.species.get(uid) ?? ''));
           this.earn(this.guestPrize, 'Prize money', false);
         }
         // Both friends who brought down an Alpha get its reward.
@@ -716,11 +730,12 @@ export class Game {
     this.onPartyChanged();
     this.remoteBattle?.dispose(); this.remoteBattle = null; this.remoteBattleHost = null; this.remoteFrame = undefined;
     this.battleControl = undefined; this.hud.setBattleMode(false); this.refreshFollower();
-    if (this.guestPrize) this.prizeToast(this.guestPrize, 'Prize money');
+    if (this.guestPrize) this.prizeToast(this.guestPrize, 'Prize money', this.guestNote);
     else if (!this.alphaToast) this.hud.showToast('Back to exploring');
     if (this.alphaToast) this.hud.showToast(...this.alphaToast);
     this.alphaToast = null;
     this.guestPrize = 0;
+    this.guestNote = '';
     const gymLoss = this.guestGymLoss;
     this.guestGymLoss = null;
     if (this.guestProgression) {const outcome = this.guestProgression; this.guestProgression = null; void (async()=>{await this.afterBattle(outcome);if(gymLoss && this.gymVisit)await this.gymLost(gymLoss);else if(!this.party.some(isUsable))await this.blackout();})();}
@@ -917,7 +932,7 @@ export class Game {
     this.vitals.restore();
     this.save.trainerHp = this.vitals.hp;
     // A meal and a drink at home.
-    Object.assign(this.meters, { hunger: SURVIVAL.max, thirst: SURVIVAL.max, queasy: 0 });
+    Object.assign(this.meters, { hunger: SURVIVAL.max, thirst: SURVIVAL.max, queasy: 0, heat: 0 });
     this.onPartyChanged();
     await sleep(700);
     await this.hud.fade(false);
@@ -1279,7 +1294,7 @@ export class Game {
     const ref = Math.min(Math.max(1, ...this.party.map((x) => x.level)), this.levelCap);
     const canBattle = this.party.some(isUsable);
     // An Alpha never runs or backs off: it comes for you.
-    let reaction: CatchReaction = m.alpha ? 'charge' : failedCatchReaction(species(c.species).temperament, c.level - ref, this.catchRng.next(), canBattle);
+    let reaction: CatchReaction = m.alpha ? 'charge' : failedCatchReaction(species(c.species).temperament, c.level - ref, this.catchRng.next(), canBattle, this.armour.calm);
     if (this.debugCatch?.reaction) reaction = this.debugCatch.reaction === 'battle' && !canBattle ? 'charge' : this.debugCatch.reaction;
     if (this.lastCatch) Object.assign(this.lastCatch, { caught: false, reaction });
     this.wild.breakOut(m, reaction);
@@ -1365,7 +1380,9 @@ export class Game {
     if (this.battle || this.remoteBattleHost || this.talking || this.scripted) return;
     // A well-timed dodge lets the lunge pass straight through.
     if (this.controller.invulnerable) return;
-    const dmg = chargeDamage(m.creature.level, m.alpha ? ALPHA.chargePower : undefined, this.defence);
+    const armour = this.armour, type = species(m.creature.species).types[0];
+    const resisted = resistTo(armour, type);
+    const dmg = chargeDamage(m.creature.level, m.alpha ? ALPHA.chargePower : undefined, armour.defence, resisted);
     const r = this.vitals.hit(dmg);
     if (r === 'ignored') return;
     this.cancelAim();
@@ -1380,7 +1397,7 @@ export class Game {
     if (r === 'out') {
       this.knockedOut = true;
       this.hud.showToast('You were knocked out!', `The ${this.wildName(m)} was too much`, 2);
-    } else this.hud.showToast(`The ${this.wildName(m)} slammed into you!`, `-${dmg} HP`, 1.8);
+    } else this.hud.showToast(`The ${this.wildName(m)} slammed into you!`, `-${dmg} HP${resisted > 0 ? ' · your leather took some of the sting out' : ''}`, 1.8);
     this.save.trainerHp = this.vitals.hp;
   }
 
@@ -1497,9 +1514,9 @@ export class Game {
     return true;
   }
 
-  /** Total Defence of the armour worn. */
-  private get defence(): number {
-    return Object.values(this.save.equipped ?? {}).reduce((n, id) => n + (id && this.save.bag?.[id] ? ITEMS[id]?.armour?.defence ?? 0 : 0), 0);
+  /** What the armour worn adds up to: Defence, Warmth, Calm and resistances. */
+  private get armour(): ArmourStats {
+    return armourStats(this.save.equipped, this.save.bag);
   }
 
   /** Put on a piece of armour (swapping out whatever was in its slot), or take it off. */
@@ -2123,16 +2140,25 @@ export class Game {
     return got;
   }
 
-  /** Prize money in hand, with a toast once the battle's own messages are done. */
-  private earn(amount: number, why: string, toast = true): void {
+  /** Prize money in hand, with a toast once the battle's own messages are done. `note` follows the purse. */
+  private earn(amount: number, why: string, toast = true, note = ''): void {
     if (amount <= 0) return;
     this.save.money = (this.save.money ?? 0) + amount;
     writeSave(this.save);
-    if (toast) this.prizeToast(amount, why);
+    if (toast) this.prizeToast(amount, why, note);
   }
 
-  private prizeToast(amount: number, why: string): void {
-    this.hud.showToast(`${why}: ${formatMoney(amount)}`, `${formatMoney(this.save.money ?? 0)} in your purse`, 2.5);
+  private prizeToast(amount: number, why: string, note = ''): void {
+    this.hud.showToast(`${why}: ${formatMoney(amount)}`, `${formatMoney(this.save.money ?? 0)} in your purse${note}`, 2.5);
+  }
+
+  /** Hide left behind by the wild Pokemon beaten (species ids), into the bag; a note for the prize toast. */
+  private collectHide(beaten: readonly string[]): string {
+    const n = rollHide(beaten.map((id) => SPECIES[id]?.types ?? []), Math.random);
+    if (!n) return '';
+    const bag = (this.save.bag ??= {});
+    bag[HIDE.item] = (bag[HIDE.item] ?? 0) + n;
+    return ` · ${n === 1 ? 'a scrap' : `${n} scraps`} of Hide left behind`;
   }
 
   // ---- Hunger and thirst (DESIGN §6.1) -----------------------------------------------------------
@@ -2143,29 +2169,98 @@ export class Game {
    */
   private updateSurvival(dt: number, inBattle: boolean): boolean {
     const m = this.meters;
+    m.heat = Number.isFinite(m.heat) ? m.heat : 0;
     // Dialogue and cutscenes don't cost anything.
     if (!this.talking && !(this.scripted && !inBattle)) {
       const p = this.controller.position;
-      const inTown = Math.hypot(p.x - TOWN.x, p.z - TOWN.z) < TOWN.fenceR;
+      const inTown = Math.hypot(p.x - TOWN.x, p.z - TOWN.z) < TOWN.fenceR || !!settlementAt(p.x, p.z);
       const drain = classInfo(this.save.profile.playerClass).modifiers.survivalDrain;
-      const { hpLoss, changed } = stepMeters(m, dt, { drain, inTown });
+      const before = heatState(m.heat!);
+      const fire = this.updateBodyHeat(dt, inTown);
+      const after = heatState(m.heat!);
+      if (after !== before) this.warnHeat(after, before, fire);
+      const hot = heatEffects(m.heat!);
+      const { hpLoss, changed } = stepMeters(m, dt, { drain, inTown, thirst: hot.thirst });
       for (const k of changed) this.warnMeter(k);
       // Battles hold it off: you won't pass out mid-fight from an empty stomach.
-      if (hpLoss && !inBattle && !this.vitals.knockedDown && !this.knockedOut && this.vitals.drain(hpLoss)) {
+      if ((hpLoss || hot.hpLoss) && !inBattle && !this.vitals.knockedDown && !this.knockedOut && this.vitals.drain(hpLoss + hot.hpLoss * dt)) {
         this.knockedOut = true;
         this.hud.hurt();
-        this.hud.showToast('You collapsed!', m.thirst <= 0 ? 'You went too long without water' : 'You went too long without food', 2.5);
+        const why = hot.hpLoss ? (after === 'freezing' ? 'The cold got to you' : 'The heat got to you') : m.thirst <= 0 ? 'You went too long without water' : 'You went too long without food';
+        this.hud.showToast('You collapsed!', why, 2.5);
       }
       if ((this.metersSaveT -= dt) <= 0) {
         this.metersSaveT = 20;
         writeSave(this.save);
       }
     }
-    const fx = survivalEffects(m);
-    this.controller.staminaRegenScale = fx.staminaRegen;
+    const fx = survivalEffects(m), hot = heatEffects(m.heat!);
+    this.controller.staminaRegenScale = fx.staminaRegen * hot.staminaRegen;
     this.controller.staminaCap = fx.staminaCap;
     this.hud.setMeters(m.hunger, m.thirst, m.queasy > 0, fx.staminaCap);
-    return fx.heals;
+    this.hud.setTemperature(m.heat!, this.felt);
+    return fx.heals && hot.heals;
+  }
+
+  // ---- Body temperature (DESIGN §6.1) ------------------------------------------------------------
+
+  /**
+   * Work out how warm it feels where the trainer stands and move body heat towards it. Returns
+   * whether they're warming themselves at a campfire.
+   */
+  private updateBodyHeat(dt: number, inTown: boolean): boolean {
+    const T = TEMPERATURE, p = this.controller.position, w = this.world;
+    // Knee-deep in a river, lake or pond soaks you; out of it you dry off, quickly by a fire.
+    const wading = p.y < w.waterLevel && w.heightAt(p.x, p.z) < w.waterLevel - 0.3;
+    const fire = (w.anchors.stations ?? []).some((s) => s.kind === 'campfire' && Math.hypot(p.x - s.position.x, p.z - s.position.z) < T.fireReach);
+    this.wet = wading ? 1 : Math.max(0, this.wet - (dt / T.drySeconds) * (fire ? 3 : 1));
+    this.felt = feltTemp({
+      air: airTemp(this.gameMinutes, p.y) + regionHeat(p.x, p.z),
+      warmth: this.armour.warmth,
+      wet: this.wet,
+      exertion: this.exerting,
+      fire,
+      town: inTown,
+      partner: this.partnerHeat(p),
+    });
+    this.meters.heat = stepHeat(this.meters.heat ?? 0, this.felt, dt, fire);
+    return fire;
+  }
+
+  /** A Fire-type Pokemon out beside you warms you, yours or your friend's; an Ice type cools you. */
+  private partnerHeat(p: THREE.Vector3): number {
+    const near = [];
+    const lead = this.party.find(isUsable);
+    if (lead && this.follower.active && this.follower.species === lead.species && this.follower.mover.pos.distanceTo(p) < TEMPERATURE.fireReach) near.push(lead.species);
+    for (const pf of this.partnerFollowers.values()) if (pf.lead && pf.follower.active && pf.follower.mover.pos.distanceTo(p) < TEMPERATURE.fireReach) near.push(pf.lead);
+    const types = near.flatMap((id) => SPECIES[id]?.types ?? []);
+    return types.includes('fire') ? TEMPERATURE.partner : types.includes('ice') ? -TEMPERATURE.partner : 0;
+  }
+
+  /** Body temperature crossed into a new state: say so when it gets worse, and once you've warmed up. */
+  private warnHeat(now: HeatState, was: HeatState, fire: boolean): void {
+    const rank: Record<HeatState, number> = { freezing: 3, cold: 2, chilly: 1, ok: 0, warm: 1, hot: 2, overheating: 3 };
+    if (now === 'ok') {
+      // Only worth saying after a real chill (or a real sweat), not a brush with chilly.
+      if (rank[this.heatWorst] >= 2) this.hud.showToast(this.heatWorst === 'freezing' || this.heatWorst === 'cold' ? 'You\'ve warmed up' : 'You\'ve cooled off', fire ? 'Nothing like a campfire' : '', 2);
+      this.heatWorst = 'ok';
+      return;
+    }
+    if (rank[now] > rank[this.heatWorst] || (now !== this.heatWorst && rank[now] === rank[this.heatWorst])) this.heatWorst = now;
+    if (rank[now] <= rank[was]) return;
+    const fireType = this.party.some((c) => isUsable(c) && species(c.species).types.includes('fire'));
+    const warmUp = ['sit by a campfire', 'head back to town', 'wear something warmer'];
+    if (fireType && !this.follower.active) warmUp.push('let a Fire-type Pokémon out beside you');
+    const lines: Partial<Record<HeatState, [string, string]>> = {
+      chilly: ['You\'re getting chilly', this.wet > 0 ? 'Get out of the water and dry off' : `To warm up: ${warmUp.join(', ')}`],
+      cold: ['You\'re cold', 'You\'re shivering: stamina comes back slowly'],
+      freezing: ['You\'re freezing!', 'You\'re losing HP and won\'t heal until you warm up'],
+      warm: ['You\'re getting warm', 'You\'ll get thirsty faster'],
+      hot: ['You\'re hot', 'Take off something warm, drink, or head for cooler ground'],
+      overheating: ['You\'re overheating!', 'You\'re losing HP until you cool down'],
+    };
+    const l = lines[now];
+    if (l) this.hud.showToast(l[0], l[1], 3);
   }
 
   /** A meter just dropped to low or empty (rising ones say nothing). */
@@ -3046,7 +3141,7 @@ export class Game {
       this.questDefeats(start.foes.filter((f) => outcome.fainted.has(f.uid)).map((f) => f.species));
       if (beaten.length) {
         this.gainXp(beaten.length * TRAINER_XP.wildWin);
-        this.earn(wildPrize(beaten.map((f) => f.level)), 'Prize money');
+        this.earn(wildPrize(beaten.map((f) => f.level)), 'Prize money', true, this.collectHide(beaten.map((f) => f.species)));
       }
       for (const f of start.foes) if (f.alpha && outcome.fainted.has(f.uid)) this.alphaBeaten(f.level, displayName(f));
       if (this.alphaToast) this.hud.showToast(...this.alphaToast);
@@ -3148,6 +3243,8 @@ export class Game {
     this.meters.hunger = Math.max(this.meters.hunger, 50);
     this.meters.thirst = Math.max(this.meters.thirst, 50);
     this.meters.queasy = 0;
+    this.meters.heat = 0;
+    this.wet = 0;
     for (const c of this.party) healCreature(c);
     this.onPartyChanged();
     await sleep(400);
@@ -3178,6 +3275,8 @@ export class Game {
       trainerHp: { hp: Math.round(this.vitals.hp * 10) / 10, max: this.vitals.max, down: this.vitals.knockedDown },
       money: this.save.money ?? 0,
       meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },
+      temperature: { air: Math.round((airTemp(this.gameMinutes, this.controller.position.y) + regionHeat(this.controller.position.x, this.controller.position.z)) * 10) / 10, felt: Math.round(this.felt * 10) / 10, heat: Math.round((this.meters.heat ?? 0) * 10) / 10, state: heatState(this.meters.heat ?? 0), wet: Math.round(this.wet * 100) / 100 },
+      armour: this.armour,
       throwing: { aiming: this.aiming, ball: this.aimBall, balls: Object.fromEntries(this.throwKinds().map((b) => [b, this.save.bag?.[b] ?? 0])), treats: this.wild.treats.length, intercept: this.intercept ? displayName(this.intercept.m.creature) : null, inFlight: this.throws.busy, dropped: this.throws.droppedCount, lastCatch: this.lastCatch },
       trainers: this.trainers.filter((t) => t.visible).map((t) => ({ id: t.def.id, position: [t.position.x, t.position.z].map((v) => Math.round(v * 10) / 10), patrolling: t.patrolling, standing: trainerStanding(this.save.trainers, t.def.id, trainerDay(Date.now())) })), trainerEngaged: this.trainerEngaged?.def.id ?? null, defector: { met: this.flags.has('met-sten'), ...defectorState(this.save.defector) }, picnicker: { met: this.flags.has('met-gudrun'), ...picnickerState(this.save.picnicker) }, sideQuests: this.save.sideQuests ?? {}, cartographer: { met: this.flags.has('met-edvin'), mark: this.cartographer.person.markShown, ...cartographerState(this.save.cartographer) }, villagers: this.villagers.filter((v) => v.visible).map((v) => ({ id: v.def.id, mark: v.markShown })), cookoff: this.hud.cookoff.active ? this.hud.cookoff.debugState() : null, destination: this.destination,
       wildCreatures: this.wild.creatures.map((m) => ({ species: m.creature.species, level: m.creature.level, alpha: m.alpha ? true : undefined, state: m.state, alert: Math.round(m.alert), attack: m.attack?.phase, position: [m.mover.pos.x, m.mover.pos.z].map((v) => Math.round(v * 10) / 10) })) });
@@ -3259,6 +3358,7 @@ export class Game {
     if (gathering && gathering.t >= gathering.way.seconds) this.finishGather(gathering);
     this.hud.setGather(this.gathering ? this.gathering.t / this.gathering.way.seconds : null);
     this.updateRegrowth(dt);
+    this.exerting = this.controller.climbing || (move.sprint && snap.speed > 5);
     const heals = this.updateSurvival(dt, inBattle);
     this.vitals.update(dt, inBattle || this.wild.attacking, heals);
     this.save.trainerHp = this.vitals.hp;
@@ -3439,6 +3539,7 @@ export class Game {
     const friends = [...this.partnerWild.values()];
     this.wild.setRemoteBusy(new Set(friends.flatMap((f) => f.busy)));
     this.wild.setFriendCells(friends.flatMap((f) => f.cells));
+    this.wild.calm = this.armour.calm;
     if (!this.gymVisit) this.wild.update(dt, this.controller.position, snap.speed, move.sprint && snap.speed > 5, busy);
     this.updateGym(dt);
     const partnerWork = this.gathering?.helper ? this.gathering.node : null;

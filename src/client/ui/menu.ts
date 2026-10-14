@@ -14,6 +14,8 @@ import { ITEMS, ITEM_CATEGORIES, type ArmourSlot, type ItemCategory } from '../.
 import { canLearn, craftBlock, RECIPES, STATION_LABEL, type Recipe, type Station } from '../../shared/crafting';
 import { TOOL_USES, type ToolId } from '../../shared/gathering';
 import { CANTEEN_DRINKS, type Meters } from '../../shared/survival';
+import type { ArmourStats } from '../../shared/armour';
+import { heatState, type HeatState } from '../../shared/temperature';
 import { buyPrice, formatMoney, SELL_RATE, sellPrice, type Shop } from '../../shared/economy';
 import { TYPE_COLORS } from '../battle/fx';
 import { STATUS_LABEL } from '../battle/ui';
@@ -69,8 +71,10 @@ export interface MenuDeps {
   equipped(): Partial<Record<ArmourSlot, string>>;
   /** Put a piece of armour on or take it off. */
   wear(id: string, on: boolean): boolean;
-  /** Total Defence of the armour worn. */
-  defence(): number;
+  /** What the armour worn adds up to. */
+  armour(): ArmourStats;
+  /** Body heat (-100 frozen to 100 overheated) and how warm it feels where you stand (°C). */
+  temperature(): { heat: number; felt: number };
   /** Hunger, thirst and queasiness right now. */
   meters(): Meters;
   /** Pokedollars in hand. */
@@ -306,13 +310,23 @@ export class GameMenu {
     );
   }
 
-  /** Defence, the slot, and the button to put it on or take it off. */
+  /** What a piece does, what everything worn adds up to, how warm you are, and the button to put it on or take it off. */
   private gearPanel(id: string): HTMLElement {
-    const a = ITEMS[id].armour!, worn = this.deps.equipped()[a.slot] === id;
+    const a = ITEMS[id].armour!, worn = this.deps.equipped()[a.slot] === id, all = this.deps.armour();
     const SLOT: Record<ArmourSlot, string> = { head: 'head', body: 'body', legs: 'legs' };
+    const resists = (r: Partial<Record<string, number>> | undefined) => Object.entries(r ?? {}).filter(([, v]) => v).map(([t, v]) => `${t[0].toUpperCase()}${t.slice(1)} −${Math.round(v! * 100)}%`).join(', ');
+    const stats = (s: { defence: number; warmth?: number; calm?: number; resist?: Partial<Record<string, number>> }) => [
+      `Defence ${s.defence}`,
+      s.warmth ? `Warmth +${s.warmth}°C` : '',
+      s.calm ? `Calm ${Math.round(s.calm * 100)}` : '',
+      resists(s.resist),
+    ].filter(Boolean).join(' · ');
+    const t = this.deps.temperature();
+    const FEEL: Record<HeatState, string> = { freezing: 'you\'re freezing', cold: 'you\'re cold', chilly: 'you\'re chilly', ok: 'you\'re comfortable', warm: 'you\'re warm', hot: 'you\'re hot', overheating: 'you\'re overheating' };
     return h('div.food-info', {},
-      h('p.food-gives', {}, `Defence ${a.defence} · worn on your ${SLOT[a.slot]}${worn ? ' · wearing it' : ''}`),
-      h('p.food-now', {}, `Your Defence: ${this.deps.defence()} (hits from charging Pokémon do ${Math.round(100 - 10000 / (100 + this.deps.defence()))}% less)`),
+      h('p.food-gives', {}, `${stats(a)} · worn on your ${SLOT[a.slot]}${worn ? ' · wearing it' : ''}`),
+      h('p.food-now', {}, `All you\'re wearing: ${stats(all)}. Charging Pokémon hit ${Math.round(100 - 10000 / (100 + all.defence))}% softer${all.calm ? ', and wild ones let you come closer' : ''}.`),
+      h('p.food-now', {}, `It feels like ${Math.round(t.felt)}°C here, and ${FEEL[heatState(t.heat)]}.`),
       h('button.btn', { onclick: () => { this.deps.wear(id, !worn); this.render(); } }, worn ? 'Take off' : 'Wear'),
     );
   }
