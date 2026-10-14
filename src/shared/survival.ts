@@ -29,6 +29,8 @@ export interface Meters {
   thirst: number;
   /** Seconds of queasiness left. */
   queasy: number;
+  /** Body heat, -100 frozen to 100 overheated (`temperature.ts`). Missing in older saves: 0. */
+  heat?: number;
 }
 
 /** What eating or drinking an item does for the trainer. `queasy` is the chance it upsets you. */
@@ -45,14 +47,15 @@ export function meterState(v: number): MeterState {
 }
 
 /**
- * Advance the meters by `dt` seconds. `drain` is the class lean (1 = normal). Returns the HP an
- * empty meter costs over this step and the meters whose state changed (for warnings).
+ * Advance the meters by `dt` seconds. `drain` is the class lean (1 = normal); `thirst` speeds up
+ * thirst on its own (being too hot). Returns the HP an empty meter costs over this step and the
+ * meters whose state changed (for warnings).
  */
-export function stepMeters(m: Meters, dt: number, opts: { drain: number; inTown: boolean }): { hpLoss: number; changed: ('hunger' | 'thirst')[] } {
+export function stepMeters(m: Meters, dt: number, opts: { drain: number; inTown: boolean; thirst?: number }): { hpLoss: number; changed: ('hunger' | 'thirst')[] } {
   const k = dt * opts.drain * (opts.inTown ? SURVIVAL.inTown : 1);
   const before = { hunger: meterState(m.hunger), thirst: meterState(m.thirst) };
   m.hunger = Math.max(0, m.hunger - SURVIVAL.hungerRate * k);
-  m.thirst = Math.max(0, m.thirst - SURVIVAL.thirstRate * k);
+  m.thirst = Math.max(0, m.thirst - SURVIVAL.thirstRate * k * (opts.thirst ?? 1));
   m.queasy = Math.max(0, m.queasy - dt);
   let hpLoss = 0;
   if (m.hunger <= 0) hpLoss += dt / SURVIVAL.starveEvery;

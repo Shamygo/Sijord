@@ -2,6 +2,7 @@ import type { MajorStatus } from '../../shared/battle/types';
 import { PLAYER_CLASSES } from '../../shared/classes';
 import type { PlayerProfile } from '../../shared/types';
 import { SURVIVAL } from '../../shared/survival';
+import { heatState, TEMPERATURE, type HeatState } from '../../shared/temperature';
 import type { World } from '../world/types';
 import { keyLabel, type Action, type Settings } from '../core/settings';
 import { AimHud } from './aim-hud';
@@ -62,6 +63,14 @@ export class Hud {
   private hungerMeter = h('div.meter', { title: 'Hunger' }, h('span', {}, '🍖'), h('div.bar.hunger', {}, this.hungerFill));
   private thirstMeter = h('div.meter', { title: 'Thirst' }, h('span', {}, '💧'), h('div.bar.thirst', {}, this.thirstFill));
   private queasyChip = h('span.queasy', { title: 'Queasy: stamina comes back slowly' }, 'Queasy');
+  /** Body temperature: a bar out from the middle, blue for cold and orange for hot. */
+  private heatFill = h('i');
+  private heatMeter = h('div.meter.heat', { title: 'Body temperature' }, h('span', {}, '🌡️'), h('div.bar.heat', {}, this.heatFill));
+  private heatChip = h('span.heat-chip');
+  private lastHeat = '';
+  /** Frost creeping in at the screen's edges as you get cold, a hot glow as you overheat. */
+  private frost = h('div.frost');
+  private haze = h('div.heat-haze');
   private lastMeters = '';
   private hpFill = h('i');
   private hpBar = h('div.bar', {}, this.hpFill);
@@ -109,17 +118,19 @@ export class Hud {
         h(
           'div.info',
           {},
-          this.nameEl,
+          h('div.name-row', {}, this.nameEl, this.queasyChip, this.heatChip),
           h('div.trainer-xp', { title: 'Trainer experience' }, this.xpFill),
           // The trainer's own HP only shows once something has hurt them.
           h('div.trainer-hp', { title: 'Your HP' }, this.hpBar, this.hpText),
           this.staminaBar,
-          h('div.meters', {}, this.hungerMeter, this.thirstMeter, this.queasyChip),
+          h('div.meters', {}, this.hungerMeter, this.thirstMeter, this.heatMeter),
         ),
       )),
       this.hotbar,
       this.help,
       this.fps,
+      this.frost,
+      this.haze,
       this.hurtFlash,
       this.aim.el,
       this.prompt,
@@ -237,6 +248,27 @@ export class Hud {
     this.thirstMeter.title = `Thirst ${Math.ceil(thirst)}/100`;
     this.queasyChip.classList.toggle('show', queasy);
     this.staminaLock.style.width = `${Math.round((1 - staminaCap) * 100)}%`;
+  }
+
+  /** Body heat (-100 frozen to 100 overheated) and how warm it feels (°C), for the meter and the screen edges. */
+  setTemperature(heat: number, felt: number): void {
+    const v = Math.max(-100, Math.min(100, heat));
+    const state = heatState(v);
+    const key = `${Math.round(v)}/${Math.round(felt)}/${state}`;
+    if (key === this.lastHeat) return;
+    this.lastHeat = key;
+    this.heatFill.style.left = `${50 + Math.min(0, v) / 2}%`;
+    this.heatFill.style.width = `${Math.abs(v) / 2}%`;
+    this.heatMeter.classList.toggle('cold', v < 0);
+    this.heatMeter.classList.toggle('low', state === 'cold' || state === 'hot');
+    this.heatMeter.classList.toggle('empty', state === 'freezing' || state === 'overheating');
+    const LABEL: Record<HeatState, string> = { freezing: 'Freezing', cold: 'Cold', chilly: 'Chilly', ok: 'Comfortable', warm: 'Warm', hot: 'Hot', overheating: 'Overheating' };
+    this.heatMeter.title = `Body temperature: ${LABEL[state]} · it feels like ${Math.round(felt)}°C`;
+    this.heatChip.textContent = LABEL[state];
+    this.heatChip.className = `heat-chip ${state === 'ok' ? '' : `show ${v < 0 ? 'cold' : 'hot'}`}`;
+    const k = (x: number) => Math.max(0, Math.min(1, (x - TEMPERATURE.chilly) / (TEMPERATURE.freezing - TEMPERATURE.chilly)));
+    this.frost.style.opacity = k(-v).toFixed(3);
+    this.haze.style.opacity = k(v).toFixed(3);
   }
 
   /** A hit landed on the trainer: red edge flash and a shake of the vitals panel. */

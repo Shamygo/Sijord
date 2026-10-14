@@ -1,7 +1,7 @@
 /**
  * Crafting (DESIGN §6.4), tiers T0 and T1. Tools and cloth are made by hand anywhere; food is
- * cooked and water boiled at a campfire; Poke Balls, Potions, canteens and cloth armour need the
- * workbench in Bramblewick and trainer level 3. Newer recipes are learned with Technology Points.
+ * cooked and water boiled at a campfire; Poke Balls, Potions, canteens and armour need the
+ * workbench in Bramblewick and trainer level 3 (leather, sewn from hide, level 5 and 6). Newer recipes are learned with Technology Points.
  * Costs are deliberately steep: crafting is how supplies come in, but it takes a trip out.
  */
 export type Station = 'hand' | 'campfire' | 'workbench';
@@ -41,6 +41,9 @@ export const RECIPES: Recipe[] = [
   { id: 'cloth-cap', out: 'cloth-cap', count: 1, cost: { 'woven-cloth': 2, fiber: 1 }, station: 'workbench', level: 3, seconds: 3, tp: 1 },
   { id: 'cloth-trousers', out: 'cloth-trousers', count: 1, cost: { 'woven-cloth': 3, fiber: 2 }, station: 'workbench', level: 3, seconds: 3.5, tp: 1 },
   { id: 'cloth-tunic', out: 'cloth-tunic', count: 1, cost: { 'woven-cloth': 4, fiber: 2 }, station: 'workbench', level: 4, seconds: 4, tp: 1 },
+  { id: 'leather-hood', out: 'leather-hood', count: 1, cost: { hide: 2, 'woven-cloth': 1, fiber: 1 }, station: 'workbench', level: 5, seconds: 4, tp: 1 },
+  { id: 'leather-leggings', out: 'leather-leggings', count: 1, cost: { hide: 3, 'woven-cloth': 1, fiber: 2 }, station: 'workbench', level: 6, seconds: 5, tp: 1 },
+  { id: 'leather-vest', out: 'leather-vest', count: 1, cost: { hide: 4, 'woven-cloth': 2, fiber: 2 }, station: 'workbench', level: 6, seconds: 6, tp: 1 },
 ];
 
 export function recipeById(id: string): Recipe | undefined {

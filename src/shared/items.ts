@@ -1,3 +1,4 @@
+import type { TypeName } from './battle/types';
 import type { FoodValue } from './survival';
 
 export type ItemCategory = 'items' | 'food' | 'balls' | 'battle' | 'materials' | 'tools' | 'gear' | 'key';
@@ -16,8 +17,12 @@ export interface ItemInfo {
   heal?: number;
   /** Eaten or drunk by the trainer (hunger and thirst, DESIGN §6.1). */
   food?: FoodValue;
-  /** Worn by the trainer: softens hits from charging Pokemon (DESIGN §5.4). */
-  armour?: { slot: ArmourSlot; defence: number };
+  /**
+   * Worn by the trainer (DESIGN §5.4): Defence softens hits from charging Pokemon, `resist` takes
+   * a share off hits of a type, Calm makes wild Pokemon slower to turn on you, and Warmth (°C)
+   * keeps out the cold. Added up in `armour.ts`.
+   */
+  armour?: { slot: ArmourSlot; defence: number; warmth?: number; calm?: number; resist?: Partial<Record<TypeName, number>> };
   /** Given to a Pokémon to hold in battle (the effect lives in the battle engine). */
   held?: true;
 }
@@ -115,16 +120,32 @@ export const ITEMS: Record<string, ItemInfo> = {
     description: 'A curved flake of stone on a short handle. Cuts 2-3 Plant Fiber from a bush instead of 1-2, and quicker. Wears out after 30 uses.',
   },
   'cloth-cap': {
-    id: 'cloth-cap', name: 'Cloth Cap', category: 'gear', icon: '🧢', armour: { slot: 'head', defence: 3 },
-    description: 'A padded cloth cap. Takes a little of the sting out of a charging Pokémon. Defence 3.',
+    id: 'cloth-cap', name: 'Cloth Cap', category: 'gear', icon: '🧢', armour: { slot: 'head', defence: 3, warmth: 1 },
+    description: 'A padded cloth cap. Takes a little of the sting out of a charging Pokémon, and a little of the chill out of the night.',
   },
   'cloth-tunic': {
-    id: 'cloth-tunic', name: 'Cloth Tunic', category: 'gear', icon: '👕', armour: { slot: 'body', defence: 7 },
-    description: 'A quilted tunic of woven cloth, worn under your jacket. Defence 7.',
+    id: 'cloth-tunic', name: 'Cloth Tunic', category: 'gear', icon: '👕', armour: { slot: 'body', defence: 7, warmth: 2 },
+    description: 'A quilted tunic of woven cloth, worn under your jacket. Warm enough for a mild night.',
   },
   'cloth-trousers': {
-    id: 'cloth-trousers', name: 'Cloth Trousers', category: 'gear', icon: '👖', armour: { slot: 'legs', defence: 5 },
-    description: 'Hard-wearing trousers with padded knees. Defence 5.',
+    id: 'cloth-trousers', name: 'Cloth Trousers', category: 'gear', icon: '👖', armour: { slot: 'legs', defence: 5, warmth: 1 },
+    description: 'Hard-wearing trousers with padded knees.',
+  },
+  'leather-hood': {
+    id: 'leather-hood', name: 'Leather Hood', category: 'gear', icon: '🪖', armour: { slot: 'head', defence: 6, warmth: 2, calm: 0.03, resist: { poison: 0.1, bug: 0.1 } },
+    description: 'A lined hood of hide leather. It smells of the wild, so wild Pokémon are slower to take you for a threat, and fangs and stings struggle to get through.',
+  },
+  'leather-vest': {
+    id: 'leather-vest', name: 'Leather Vest', category: 'gear', icon: '🦺', armour: { slot: 'body', defence: 12, warmth: 4, calm: 0.05, resist: { poison: 0.2, bug: 0.2 } },
+    description: 'A thick vest of stitched hide, fleece side in. Keeps out the night cold, Zubat fangs and Weedle stings alike.',
+  },
+  'leather-leggings': {
+    id: 'leather-leggings', name: 'Leather Leggings', category: 'gear', icon: '🥾', armour: { slot: 'legs', defence: 9, warmth: 3, calm: 0.04, resist: { poison: 0.1, bug: 0.1 } },
+    description: 'Hide leggings over your trousers, laced at the side, with boots to match. Snakes and stingers aim low.',
+  },
+  'hide': {
+    id: 'hide', name: 'Hide', category: 'materials', icon: '🟫',
+    description: 'A tough scrap of shed hide. Furred and scaly wild Pokémon sometimes leave one behind when you beat them in battle. Sewn into leather at the workbench.',
   },
   'canteen': {
     id: 'canteen', name: 'Canteen', category: 'tools', icon: '🍶',

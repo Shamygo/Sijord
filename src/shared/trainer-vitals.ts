@@ -29,9 +29,13 @@ export function trainerMaxHp(level = 1, classMod = 1): number {
   return Math.max(1, Math.round((TRAINER_HP.base + TRAINER_HP.perLevel * Math.max(0, level - 1)) * classMod));
 }
 
-/** DESIGN §5.4: level x power/40, softened by armour defence (none yet). */
-export function chargeDamage(level: number, power = TRAINER_HP.chargePower, defence = 0): number {
-  return Math.max(TRAINER_HP.minDamage, Math.round(((level * power) / 40) * (100 / (100 + Math.max(0, defence)))));
+/**
+ * DESIGN §5.4: level x power/40, softened by armour Defence, then by the armour's resistance to
+ * the attacker's type (`resist`, the share taken off).
+ */
+export function chargeDamage(level: number, power = TRAINER_HP.chargePower, defence = 0, resist = 0): number {
+  const r = 1 - Math.min(0.9, Math.max(0, resist));
+  return Math.max(TRAINER_HP.minDamage, Math.round(((level * power) / 40) * (100 / (100 + Math.max(0, defence))) * r));
 }
 
 /**
