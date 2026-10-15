@@ -21,6 +21,11 @@ export const RIDE_TUNING = {
   groundSnap: 0.7,
   /** A water mount needs at least this much water under it. */
   swimDepth: 0.5,
+  /** A flyer leaps this fast into the air as the rider climbs on, and lands below this height. */
+  takeoff: 7,
+  landAt: 0.35,
+  /** How quickly a flyer's climb or dive eases in (1/s). */
+  liftRate: 4,
   maxStep: 1 / 60,
 };
 
@@ -47,6 +52,11 @@ export class RideController {
   vy = 0;
   grounded = true;
   galloping = false;
+  /** Flyers: in the air, and set once it has touched down (the rider gets off). */
+  flying = false;
+  landed = false;
+  /** Height over the ground or water below. */
+  altitude = 0;
   /** Stamina as a share of the full bar, how long it's been resting, and whether it's blown. */
   readonly stamina = { value: 1, rest: 0, blown: false };
   private prevJump = false;
@@ -69,6 +79,8 @@ export class RideController {
     this.yaw = yaw;
     this.speed = this.vy = 0;
     this.grounded = true;
+    // A flyer takes off with its rider.
+    if (this.stats.mode === 'air') { this.flying = true; this.grounded = false; this.vy = RIDE_TUNING.takeoff; this.landed = false; }
   }
 
   update(dtIn: number, input: MoveInput, cameraYaw: number, world: World): void {
@@ -81,6 +93,7 @@ export class RideController {
   }
 
   private step(dt: number, input: MoveInput, cameraYaw: number, world: World, jump: boolean): void {
+    if (this.flying) { this.fly(dt, input, cameraYaw, world); return; }
     const T = RIDE_TUNING, S = this.stats, h = S.handling;
     const k = clamp((h - 0.5) / 0.7, 0, 1);
     // Camera-relative wish, as on foot.
@@ -137,6 +150,55 @@ export class RideController {
       if (y - gy > T.groundSnap) { this.grounded = false; this.vy = 0; pos.y = y; } else pos.y = gy;
     } else if (y <= gy) { pos.y = gy; this.vy = 0; this.grounded = true; }
     else pos.y = y;
+  }
+
+  /**
+   * Flight: steer and speed as on the ground (cruising, or flat out with sprint), Space climbs and
+   * the climb key dives, stamina drains all the while and comes back only on the ground. Spent, the
+   * flyer can only glide down. It clears trees and buildings it's above, rides up over rising
+   * ground, and lands when it comes down to the ground slowly.
+   */
+  private fly(dt: number, input: MoveInput, cameraYaw: number, world: World): void {
+    const T = RIDE_TUNING, S = this.stats, R = RIDING;
+    const k = clamp((S.handling - 0.5) / 0.7, 0, 1);
+    const fx = Math.sin(cameraYaw), fz = Math.cos(cameraYaw);
+    let wx = fx * clamp(input.forward, -1, 1) - fz * clamp(input.right, -1, 1);
+    let wz = fz * clamp(input.forward, -1, 1) + fx * clamp(input.right, -1, 1);
+    const mag = Math.min(1, Math.hypot(wx, wz)), has = mag > 0.05;
+    if (has) { const l = Math.hypot(wx, wz); wx /= l; wz /= l; }
+    const top = this.topSpeed;
+    if (has) {
+      const diff = wrapAngle(Math.atan2(wx, wz) - this.yaw);
+      const rate = (T.turnRate[0] + (T.turnRate[1] - T.turnRate[0]) * k) * (1 - T.turnAtSpeed * clamp(this.speed / top, 0, 1));
+      this.yaw = wrapAngle(this.yaw + clamp(diff, -rate * dt, rate * dt));
+    }
+    const facing = has ? Math.max(0, Math.cos(wrapAngle(Math.atan2(wx, wz) - this.yaw))) : 0;
+    const spent = this.stamina.blown;
+    this.galloping = has && input.sprint && !spent && mag > 0.5;
+    // In the air it never rests: no stamina back until it lands.
+    if (!spent) stepMountStamina(this.stamina, true, dt, S, this.galloping ? R.flySprintDrain : R.flyDrain);
+    const want = spent ? top * R.flyCruise : has ? top * (this.galloping ? 1 : R.flyCruise) * mag * facing : 0;
+    const accel = T.accel[0] + (T.accel[1] - T.accel[0]) * k;
+    this.speed = this.speed < want ? Math.min(want, this.speed + accel * dt) : Math.max(want, this.speed - accel * 0.6 * dt);
+    const lift = spent ? -R.glideSink : input.ascend ? R.climbRate : input.climb ? -R.diveRate : 0;
+    this.vy += (lift - this.vy) * Math.min(1, T.liftRate * dt);
+
+    const pos = this.position, ox = pos.x, oz = pos.z;
+    let nx = ox + Math.sin(this.yaw) * this.speed * dt, nz = oz + Math.cos(this.yaw) * this.speed * dt;
+    let y = pos.y + this.vy * dt;
+    const r = resolveCircle(nx, nz, this.radius, world.colliders, y);
+    nx = r.x; nz = r.z;
+    const b = world.bounds;
+    if (b) { nx = clamp(nx, b.minX + this.radius, b.maxX - this.radius); nz = clamp(nz, b.minZ + this.radius, b.maxZ - this.radius); }
+    // The ground below, or the water's surface.
+    const floor = Math.max(this.groundAt(world, nx, nz, y), world.waterLevel);
+    if (y > floor + R.ceiling) { y = floor + R.ceiling; this.vy = Math.min(0, this.vy); }
+    if (y < floor) y = floor;
+    this.altitude = y - floor;
+    pos.set(nx, y, nz);
+    // Down on dry ground and not climbing: it lands. Over water it skims the surface instead.
+    const dry = this.groundAt(world, nx, nz, y) >= world.waterLevel;
+    if (this.altitude < T.landAt && this.vy <= 0.5 && dry && !input.ascend) { this.flying = false; this.landed = true; this.grounded = true; this.speed *= 0.4; }
   }
 
   /** Whether the mount can move from (ox, oz) to (nx, nz): water depth and steepness. */

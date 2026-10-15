@@ -9,6 +9,8 @@ export interface MoveInput {
   right: number;
   sprint: boolean;
   jump: boolean;
+  /** Jump held: a flying mount climbs. */
+  ascend?: boolean;
   /** Hold to ascend a nearby ladder or a steep rock slope. */
   climb?: boolean;
   /** Pressed this frame: hop out of the way. */

@@ -7,9 +7,11 @@ import { SPECIES } from './data/species';
  * different and a fast one is worth the effort of raising.
  *
  * Land mounts carry you across the region's roads and fields and can ford shallow water; water
- * mounts swim the lakes, fjords and the sea between the islands. Flying comes later.
+ * mounts swim the lakes, fjords and the sea between the islands; flyers take off as you climb on
+ * and fly on stamina, gliding down when it runs out, and you get off where they land (§10.4: flying
+ * isn't a skip button).
  */
-export type MountMode = 'land' | 'water';
+export type MountMode = 'land' | 'water' | 'air';
 
 /** How a body moves, and its base speed in m/s before Speed and skills (DESIGN §8.2). */
 export const BODY_BASE = {
@@ -29,6 +31,12 @@ export const BODY_BASE = {
   paddler: 7,
   /** Fish that dart. */
   darter: 11,
+  /** Big-bodied flyers: dragons that carry a rider easily but aren't quick. */
+  heavyFlyer: 10,
+  /** Great soaring birds. */
+  soarer: 11,
+  /** Lean, fierce flyers built for speed. */
+  raptorFlyer: 13,
 } as const;
 export type BodyPlan = keyof typeof BODY_BASE;
 
@@ -46,6 +54,8 @@ export interface RideProfile {
   twoSeat?: true;
   /** Water mounts: the share of the model's height that rides below the surface. */
   draft?: number;
+  /** Flyers: how far (radians) the body tips forward in flight, from its standing pose. */
+  pitch?: number;
 }
 
 /** Every Pokémon in Sijord that can be ridden (DESIGN §8.1: big enough, and shaped for it). */
@@ -61,6 +71,12 @@ export const RIDE_PROFILES: Record<string, RideProfile> = {
   dewgong: { mode: 'water', body: 'paddler', weight: 120, seat: [0.45, 0.1], draft: 0.3 },
   seaking: { mode: 'water', body: 'darter', weight: 39, seat: [0.6, 0], draft: 0.45 },
   lapras: { mode: 'water', body: 'ferry', weight: 220, seat: [0.42, -0.15], twoSeat: true, draft: 0.3 },
+  // Air. Seats are on the standing model (up, and forward: negative is behind the spine) before
+  // it tips forward into flight.
+  forgelynx: { mode: 'air', body: 'heavyFlyer', weight: 90, seat: [0.52, -0.35], pitch: 0.85 },
+  dragonite: { mode: 'air', body: 'heavyFlyer', weight: 210, seat: [0.52, -0.35], pitch: 0.85 },
+  skjaldhawk: { mode: 'air', body: 'soarer', weight: 40, seat: [0.6, -0.15], pitch: 0.7 },
+  aerodactyl: { mode: 'air', body: 'raptorFlyer', weight: 59, seat: [0.55, -0.05], pitch: 0.35 },
 };
 
 export type MountTier = 'D' | 'C' | 'B' | 'A' | 'S';
@@ -80,6 +96,16 @@ export const RIDING = {
   regenDelay: 1,
   /** Blown: no gallop until it's this far back. */
   recoverTo: 0.3,
+  /** Flying: cruising share of top speed (sprint flies flat out), stamina spent per second of
+   * flight cruising and flat out (as a share of a gallop's), climb and dive rates (m/s), the
+   * sink rate gliding with no stamina left, and how high over the ground a flyer can go. */
+  flyCruise: 0.7,
+  flyDrain: 0.5,
+  flySprintDrain: 1,
+  climbRate: 4,
+  diveRate: 7,
+  glideSink: 2.5,
+  ceiling: 90,
   /** Over the level cap a mount drags its feet (DESIGN §3.5), and well over it won't be ridden. */
   overCapSpeed: 0.7,
   refuseOver: 15,
@@ -157,11 +183,12 @@ export function riddenSpeed(stats: MountStats, level: number, cap: number): numb
 
 /**
  * One step of a mount's stamina: galloping spends it, resting brings it back after a moment.
- * Values are shares of the full bar (0..1); `rest` is seconds since it last galloped.
+ * Values are shares of the full bar (0..1); `rest` is seconds since it last galloped. `drain`
+ * scales the spend (flying cruises at half a gallop's).
  */
-export function stepMountStamina(st: { value: number; rest: number; blown: boolean }, galloping: boolean, dt: number, stats: MountStats): void {
+export function stepMountStamina(st: { value: number; rest: number; blown: boolean }, galloping: boolean, dt: number, stats: MountStats, drain = 1): void {
   if (galloping && !st.blown) {
-    st.value = Math.max(0, st.value - dt / stats.stamina);
+    st.value = Math.max(0, st.value - (dt * drain) / stats.stamina);
     st.rest = 0;
     if (st.value <= 0) st.blown = true;
   } else {

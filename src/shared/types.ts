@@ -38,6 +38,8 @@ export interface PlayerSnapshot {
   /** The Pokémon this player is riding (x, y, z are then its feet), and whether it's an Alpha. */
   ride?: string;
   rideAlpha?: boolean;
+  /** Their mount is in the air. */
+  rideFly?: boolean;
   /** Species of the lead creature walking beside the player, if one is out. */
   lead?: string;
   /** The lead is an Alpha (bigger, glowing eyes). */

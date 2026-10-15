@@ -934,11 +934,11 @@ export class Game {
     const p = this.controller.position;
     // Facing deep water at its edge: a swimmer, if one's ready, carries you out.
     const water = this.waterSpotNear(p, 5);
-    // A swimmer at the water's edge, else the lead if it can carry you, else any land mount.
-    const order = [...this.party].sort((a, b) => (a === this.party[0] ? -1 : 0) - (b === this.party[0] ? -1 : 0));
+    // The first Pokémon in the party that can carry you here: a swimmer only facing deep water.
+    // Order the party to choose (a flyer first to fly, a horse first to ride).
+    const order = [...this.party];
     const ready = order.filter((c) => rideBlock(c, bag, cap) === null);
-    const pick = (water ? ready.find((c) => RIDE_PROFILES[c.species].mode === 'water') : undefined)
-      ?? ready.find((c) => RIDE_PROFILES[c.species].mode === 'land');
+    const pick = ready.find((c) => RIDE_PROFILES[c.species].mode !== 'water' || !!water);
     if (!pick) { this.explainNoRide(order, water, cap); return; }
     const stats = mountStats(pick.species)!;
     this.mountView.set(pick.species, !!pick.alpha);
@@ -953,7 +953,8 @@ export class Game {
     this.refreshFollower();
     const name = displayName(pick);
     if (pick.level > cap) this.hud.showToast(`${name} is over your level cap`, 'It won\'t give its best for you yet: it drags its feet.', 3);
-    else this.hud.showToast(`Riding ${name}`, stats.mode === 'water' ? `${stats.tier}-rank swimmer · hold sprint to swim hard · R to get down at the shore` : `${stats.tier}-rank mount · hold sprint to gallop · R to get down`, 2.5);
+    else this.hud.showToast(`Riding ${name}`, stats.mode === 'water' ? `${stats.tier}-rank swimmer · hold sprint to swim hard · R to get down at the shore`
+      : stats.mode === 'air' ? `${stats.tier}-rank flyer · Space climbs, C dives, sprint flies flat out · it tires in the air` : `${stats.tier}-rank mount · hold sprint to gallop · R to get down`, 2.5);
   }
 
   /** Why nobody can carry you right now, in the most useful words. */
@@ -976,6 +977,7 @@ export class Game {
     if (!r) return;
     const at = r.ctl.position, yaw = r.ctl.yaw;
     let spot: THREE.Vector3 | null;
+    if (r.ctl.flying && r.ctl.altitude > 1.5 && !forced) { this.hud.showToast('Land first', 'Hold C to dive down to the ground.', 2); return; }
     if (r.ctl.swimming) {
       spot = this.shoreNear(at, 6);
       if (!spot && !forced) { this.hud.showToast('No shore here', 'Swim closer to land to get down.', 2); return; }
@@ -1025,7 +1027,9 @@ export class Game {
     // Anything that moved the trainer (a fast travel, a respawn) took them off the mount first.
     if (this.controller.position.distanceTo(c.position) > 3) { this.getDown(true); return this.controller.snapshot(); }
     c.update(dt, move, this.cam.yaw, this.world);
-    r.view.update(dt, c.position.x, c.position.y, c.position.z, c.yaw, c.speed);
+    // A flyer that's touched down lets its rider off.
+    if (c.landed) { this.getDown(true); return this.controller.snapshot(); }
+    r.view.update(dt, c.position.x, c.position.y, c.position.z, c.yaw, c.speed, c.flying);
     // The controller stands in for the mount: position, facing and speed for the camera, the
     // wild Pokémon and the friend's screen.
     this.controller.position.copy(c.position);
@@ -1034,8 +1038,9 @@ export class Game {
     const seat = r.view.seatWorld(new THREE.Vector3()), hip = (this.avatar.root.userData.hipHeight as number | undefined) ?? 0.95;
     this.avatar.root.position.set(seat.x, seat.y - hip, seat.z);
     this.avatar.root.rotation.y = c.yaw;
+    this.avatar.root.rotation.x = r.view.lean;
     this.rideFocus.set(c.position.x, seat.y - 0.6, c.position.z);
-    return { x: c.position.x, y: c.position.y, z: c.position.z, yaw: c.yaw, speed: c.speed, anim: 'ride', ride: r.creature.species, rideAlpha: r.creature.alpha || undefined };
+    return { x: c.position.x, y: c.position.y, z: c.position.z, yaw: c.yaw, speed: c.speed, anim: 'ride', ride: r.creature.species, rideAlpha: r.creature.alpha || undefined, rideFly: c.flying || undefined };
   }
 
   private healParty(): void {
@@ -1504,6 +1509,8 @@ export class Game {
   /** A charging creature connected: knocked down, HP lost, maybe knocked out. */
   private onTrainerHit(m: WildCreature): void {
     if (this.battle || this.remoteBattleHost || this.talking || this.scripted) return;
+    // Out of reach up in the air.
+    if (this.ride?.ctl.flying && this.ride.ctl.altitude > 2.5) return;
     // A well-timed dodge lets the lunge pass straight through.
     if (this.controller.invulnerable) return;
     const armour = this.armour, type = species(m.creature.species).types[0];
@@ -3400,7 +3407,7 @@ export class Game {
   debugAdvance(ms: number): void { for (let t = 0; t < ms; t += 1000 / 60) this.frame(1 / 60); }
 
   debugText(): string {
-    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', time: clockText(this.gameMinutes), lantern: { lit: this.lantern.lit, oil: Math.round(lanternOil(this.save.bag ?? {}, this.save.toolWear ?? {})), partner: this.partnerLit.size > 0 }, stardust: { night: this.stardust.night, out: this.stardust.root.visible, left: this.stardust.spots.filter((p) => !p.taken).length }, player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, ride: this.ride ? { species: this.ride.creature.species, mode: this.ride.ctl.stats.mode, tier: this.ride.ctl.stats.tier, top: Math.round(this.ride.ctl.topSpeed * 10) / 10, speed: Math.round(this.ride.ctl.speed * 10) / 10, galloping: this.ride.ctl.galloping, stamina: Math.round(this.ride.ctl.stamina.value * 100) / 100 } : null, found:this.save.found?.length ?? 0, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
+    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', time: clockText(this.gameMinutes), lantern: { lit: this.lantern.lit, oil: Math.round(lanternOil(this.save.bag ?? {}, this.save.toolWear ?? {})), partner: this.partnerLit.size > 0 }, stardust: { night: this.stardust.night, out: this.stardust.root.visible, left: this.stardust.spots.filter((p) => !p.taken).length }, player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, ride: this.ride ? { species: this.ride.creature.species, mode: this.ride.ctl.stats.mode, flying: this.ride.ctl.flying, altitude: Math.round(this.ride.ctl.altitude * 10) / 10, tier: this.ride.ctl.stats.tier, top: Math.round(this.ride.ctl.topSpeed * 10) / 10, speed: Math.round(this.ride.ctl.speed * 10) / 10, galloping: this.ride.ctl.galloping, stamina: Math.round(this.ride.ctl.stamina.value * 100) / 100 } : null, found:this.save.found?.length ?? 0, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
       trainerHp: { hp: Math.round(this.vitals.hp * 10) / 10, max: this.vitals.max, down: this.vitals.knockedDown },
       money: this.save.money ?? 0,
       meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },
@@ -3466,7 +3473,7 @@ export class Game {
     // Aiming roots the trainer (they turn with the camera); a knockdown takes control away.
     if (this.talking || this.menu.isOpen || (this.scripted && !inBattle) || actionMode || knocked || this.aiming || this.gathering) {
       move.forward = move.right = 0;
-      move.jump = move.sprint = move.climb = move.dodge = false;
+      move.jump = move.ascend = move.sprint = move.climb = move.dodge = false;
     }
     let snap: PlayerSnapshot;
     if (this.ride) snap = this.updateRide(dt, move);
@@ -3479,7 +3486,7 @@ export class Game {
     // Knockdown: tip over backwards, lie there, get up (the landing clip plays as they rise).
     const downT = this.vitals.downTime;
     const down = knockdownTilt(downT);
-    this.avatar.root.rotation.x = -down * KNOCKDOWN_ANGLE;
+    this.avatar.root.rotation.x = this.ride ? this.mountView.lean : -down * KNOCKDOWN_ANGLE;
     if (knocked && downT < TRAINER_HP.knockdown - 0.7) snap.anim = 'fall';
     const gathering = this.gathering;
     if (gathering) {

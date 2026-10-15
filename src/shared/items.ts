@@ -293,17 +293,20 @@ export const ITEMS: Record<string, ItemInfo> = {
  * Saddles (DESIGN §8.1): one per species that can be ridden, made at the workbench (riding.ts has
  * the recipes). Keep this list in step with RIDE_PROFILES.
  */
-const SADDLES: [string, string, 'land' | 'water'][] = [
+const SADDLES: [string, string, 'land' | 'water' | 'air'][] = [
   ['shepherion', 'Shepherion', 'land'], ['rapidash', 'Rapidash', 'land'], ['tauros', 'Tauros', 'land'], ['rhyhorn', 'Rhyhorn', 'land'], ['dodrio', 'Dodrio', 'land'],
   ['dewgong', 'Dewgong', 'water'], ['seaking', 'Seaking', 'water'], ['lapras', 'Lapras', 'water'],
+  ['forgelynx', 'Forgelynx', 'air'], ['dragonite', 'Dragonite', 'air'], ['skjaldhawk', 'Skjaldhawk', 'air'], ['aerodactyl', 'Aerodactyl', 'air'],
 ];
 for (const [species, name, mode] of SADDLES) {
   const id = `saddle-${species}`;
   ITEMS[id] = {
-    id, name: `${name} Saddle`, category: 'tools', icon: mode === 'water' ? '🛶' : '🐎',
+    id, name: `${name} Saddle`, category: 'tools', icon: mode === 'water' ? '🛶' : mode === 'air' ? '🪽' : '🐎',
     description: mode === 'water'
-      ? `A harness of oiled hide shaped to a ${name}'s back. With it, your ${name} carries you across water. Press R beside the water to ride.`
-      : `A hide saddle shaped to a ${name}'s back. With it, your ${name} carries you: hold sprint to gallop. Press R to ride.`,
+      ? `A harness of oiled hide shaped to a ${name}'s back. With it, your ${name} carries you across water. Press R facing the water to ride.`
+      : mode === 'air'
+        ? `A strapped flying saddle shaped to a ${name}'s back. With it, your ${name} takes off with you: Space climbs, C dives, sprint flies flat out. It tires in the air and glides down when spent.`
+        : `A hide saddle shaped to a ${name}'s back. With it, your ${name} carries you: hold sprint to gallop. Press R to ride.`,
   };
 }
 
