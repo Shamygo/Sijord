@@ -611,8 +611,38 @@ export class GameMenu {
             h('button.btn.secondary', { disabled: i === 0, onclick: () => swap(i, i - 1) }, '▲ Move up'),
             h('button.btn.secondary', { disabled: i === party.length - 1, onclick: () => swap(i, i + 1) }, '▼ Move down'),
             h('button.btn.secondary', { disabled: !this.canDeposit(i), onclick: () => this.deposit(i) }, 'Send to PC'),
+            ...this.holdControls(c),
           ),
     );
+  }
+
+  /** Give a held item from the bag, or take one back (DESIGN §6.5). */
+  private holdControls(c: Creature): HTMLElement[] {
+    const bag = this.deps.bag();
+    const held = Object.keys(bag).filter((id) => bag[id] > 0 && ITEMS[id]?.held).sort((a, b) => ITEMS[a].name.localeCompare(ITEMS[b].name));
+    const out: HTMLElement[] = [];
+    if (c.item) {
+      out.push(h('button.btn.secondary', { onclick: () => {
+        bag[c.item!] = (bag[c.item!] ?? 0) + 1;
+        c.item = undefined;
+        this.deps.onPartyChanged();
+        this.render();
+      } }, `Take the ${ITEMS[c.item]?.name ?? 'item'}`));
+    }
+    if (held.length) {
+      const pick = h('select.map-place', { 'aria-label': 'Item to hold' }, ...held.map((id) => h('option', { value: id }, `${ITEMS[id].name} (${bag[id]})`))) as HTMLSelectElement;
+      out.push(pick, h('button.btn.secondary', { onclick: () => {
+        const id = pick.value;
+        if (!(bag[id] > 0)) return;
+        if (c.item) bag[c.item] = (bag[c.item] ?? 0) + 1;
+        bag[id] -= 1;
+        if (!bag[id]) delete bag[id];
+        c.item = id;
+        this.deps.onPartyChanged();
+        this.render();
+      } }, c.item ? 'Swap held item' : 'Give to hold'));
+    }
+    return out;
   }
 
   private boxIcon(id: string): HTMLElement {

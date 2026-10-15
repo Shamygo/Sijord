@@ -28,7 +28,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 | M8 | Base building and automation | Base cores, building, work aptitudes, a Poke Ball assembly line, money automation | XL |
 | M9 | Riding and traversal | Land, water and air mounts with derived stats, saddles, glider, grapple | L · in progress (land, water and flying mounts with derived stats and saddles, and two-seat riding, are in) |
 | M10 | Content expansion I | All 11 biomes, all 12 cities, 5 gyms, Act I-II story, about 250 species | XXL |
-| M11 | Battle depth and gimmicks | AI T3-T4, Mega / Z / Dynamax, full items, spreads tools, Battle Tower | L |
+| M11 | Battle depth and gimmicks | AI T3-T4, Mega / Z / Dynamax, full items, spreads tools, Battle Tower | L · Battle Tower done (2026-10-15) |
 | M12 | Content expansion II | All 10 gyms, Act III-IV, the Elite Four, legendaries, about 500 species | XXL |
 | M13 | Substance pass and dynamic events | Event Director, density targets met, quirky NPCs, festivals | L |
 | M14 | Desktop packaging and polish | Electron or Tauri builds for Windows and Mac, embedded server, saves, settings | M |
@@ -186,7 +186,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 - Boss AI T3-T4 (switch prediction, 2-ply expectimax, item logic).
 - Z-Moves (Trial Shrines), Dynamax and Gigantamax (Power Spots, Max Raid dens).
 - The full held-item pool, Mints, Ability Capsules and Patches, Bottle Caps, Training Grounds, TM Press, Move Tutors.
-- The Battle Tower at Tornhavn (unlocks at 5 badges), with BP shop.
+- The Battle Tower at Tornhavn (unlocks at 5 badges), with BP shop. Done 2026-10-15 (solo and co-op, Level 50 and Open, Tycoon Freya).
 - The Scholar's battle-intel skills.
 
 **Exit criterion:** experienced competitive players rate the T4 AI as a credible opponent that wins at least 40% against a reasonable player team. Every gimmick works in co-op and solo.

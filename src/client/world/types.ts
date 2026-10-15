@@ -75,6 +75,7 @@ export interface World {
   streamer?: TerrainStreamer;
   /** The gyms' interiors (DESIGN §13). */
   gymRooms?: import('./gym-rooms').GymRooms;
+  hallRooms?: import('./hall-rooms').HallRooms;
   /** The region's towns and cities (set once the Blender kit has loaded). */
   settlements?: SettlementRenderer;
   /** Load the ground round a point before the first frame. */
