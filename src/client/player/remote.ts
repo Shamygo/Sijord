@@ -3,6 +3,7 @@ import type { Appearance, MoveAnim, PlayerProfile, PlayerSnapshot } from '../../
 import { createAvatar } from './avatar';
 import type { Avatar, GroundFn } from './types';
 import { KNOCKDOWN_ANGLE } from '../../shared/trainer-vitals';
+import { MountView } from '../overworld/mount-view';
 
 /** Interpolation tunables for remote players. */
 export const REMOTE_TUNING = {
@@ -95,6 +96,10 @@ export class RemotePlayer {
   /** Tool in the partner's hand while they chop or mine. */
   private tool: string | null = null;
   private readonly tmp = new THREE.Vector3();
+  /** The Pokémon they're riding, drawn under them (snapshots then give its feet). */
+  readonly mount = new MountView();
+  private ride: string | null = null;
+  private rideAlpha = false;
 
   constructor(profile: PlayerProfile | { name: string; appearance: Appearance }) {
     this.name = profile.name;
@@ -103,6 +108,7 @@ export class RemotePlayer {
     this.nameTag = makeNameTag(this.name);
     this.nameTag.position.y = REMOTE_TUNING.nameTagHeight;
     this.root.add(this.nameTag);
+    this.root.add(this.mount.root);
     this.root.visible = false;
     // Yaw first, then tip over around the trainer's own left-right axis when knocked down.
     this.avatar.root.rotation.order = 'YXZ';
@@ -195,6 +201,10 @@ export class RemotePlayer {
       }
     }
 
+    const cur = !b || renderT <= a.t ? a.s : renderT <= b.t ? ((renderT - a.t) / (b.t - a.t) < 0.5 ? a.s : b.s) : b.s;
+    this.ride = cur.ride ?? null;
+    this.rideAlpha = !!cur.rideAlpha;
+
     if (this.displayPos.distanceTo(target) > T.snapDistance) {
       this.displayPos.copy(target);
       this.displayYaw = yaw;
@@ -204,6 +214,17 @@ export class RemotePlayer {
       this.displayYaw = lerpAngle(this.displayYaw, yaw, 1 - Math.exp(-T.yawSmooth * dt));
     }
     this.apply();
+    // Riding: the mount stands at the snapshot's position and the trainer sits on its back.
+    this.mount.set(this.ride, this.rideAlpha);
+    let seatUp = 0;
+    if (this.ride) {
+      this.mount.update(dt, 0, 0, 0, this.displayYaw, this.speed);
+      const seat = this.mount.seat(), hip = (this.avatar.root.userData.hipHeight as number | undefined) ?? 0.95;
+      seatUp = seat.up;
+      this.avatar.root.position.set(Math.sin(this.displayYaw) * seat.forward, seat.up - hip, Math.cos(this.displayYaw) * seat.forward);
+      this.anim = 'ride';
+    } else this.avatar.root.position.set(0, 0, 0);
+    this.nameTag.position.y = REMOTE_TUNING.nameTagHeight + seatUp;
     this.avatar.hold?.(this.anim === 'chop' ? this.tool : null);
     // World position + yaw let the avatar plant its feet, lean into turns and detect jumps.
     this.avatar.animate(dt, {
@@ -229,6 +250,7 @@ export class RemotePlayer {
   }
 
   dispose(): void {
+    this.mount.dispose();
     this.avatar.dispose();
     disposeSprite(this.nameTag);
     this.root.clear();

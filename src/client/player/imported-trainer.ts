@@ -152,6 +152,9 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
         solo('idle', 0);
         for (const a of actions.values()) a.timeScale = 1;
       }
+      // How high the hips sit over the feet: riding puts them on the saddle.
+      const waist = visual.scene.getObjectByName('waist');
+      if (waist) root.userData.hipHeight = root.worldToLocal(waist.getWorldPosition(new THREE.Vector3())).y;
       const source = (name: string, parent?: string) => (parent ? procedural.getObjectByName(parent)! : procedural).getObjectByName(name)!;
       const mapping: [string, THREE.Object3D, number?][] = [
         ['Hips', pelvis], ['Spine0', source('spine')], ['Spine1', source('chest')], ['Neck', source('neck')], ['Head', source('head')],
@@ -234,6 +237,39 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
     held.quaternion.setFromAxisAngle(X_AXIS, (90 - pitch) * Math.PI / 180);
     root.userData.toolPitch = pitch;
   };
+  /**
+   * Astride a mount: thighs swung forward and out round its back, shins hanging, a slight lean
+   * into the ride with the hands forward on the reins. Edits turn bones about the trainer's own
+   * axes (+Z ahead, +X to Rei's left), thighs before shins, over whatever the clip posed.
+   */
+  const SIT: [string, 'x' | 'y' | 'z', number][] = [
+    ['spine_02', 'x', 9], ['neck', 'x', -6],
+    ['left_leg_01', 'z', 24], ['left_leg_01', 'x', -78], ['left_leg_02', 'x', 84], ['left_foot', 'x', -12],
+    ['right_leg_01', 'z', -24], ['right_leg_01', 'x', -78], ['right_leg_02', 'x', 84], ['right_foot', 'x', -12],
+    ['left_arm_01', 'z', -12], ['left_arm_01', 'x', -32], ['left_arm_02', 'x', -48],
+    ['right_arm_01', 'z', 12], ['right_arm_01', 'x', -32], ['right_arm_02', 'x', -48],
+  ];
+  const AXES = { x: new THREE.Vector3(1, 0, 0), y: new THREE.Vector3(0, 1, 0), z: new THREE.Vector3(0, 0, 1) };
+  const rootQ = new THREE.Quaternion(), hingeQ = new THREE.Quaternion(), axis = new THREE.Vector3();
+  const sit = (speed: number) => {
+    if (!visual) return;
+    root.updateMatrixWorld(true);
+    root.getWorldQuaternion(rootQ);
+    // Rise and settle in the saddle with the mount's stride.
+    const bounce = Math.min(1, speed / 8) * Math.sin(performance.now() / 1000 * (4 + speed * 0.6)) * 4;
+    // Only bones the idle clip poses every frame: edits on any other would pile up.
+    const idleClip = clips.find((c) => c.name === 'idle');
+    for (const [name, ax, deg] of SIT) {
+      const bone = visual.scene.getObjectByName(name);
+      if (!bone?.parent || !idleClip?.tracks.some((t) => t.name === `${name}.quaternion`)) continue;
+      bone.parent.getWorldQuaternion(parentQ);
+      axis.copy(AXES[ax]).applyQuaternion(rootQ).applyQuaternion(parentQ.clone().invert());
+      const extra = name === 'spine_02' ? bounce : 0;
+      hingeQ.setFromAxisAngle(axis, (deg + extra) * Math.PI / 180);
+      bone.quaternion.premultiply(hingeQ);
+      bone.updateMatrixWorld(true);
+    }
+  };
   const pose = () => {
     if (!motion || mixer) return;
     motion.position.y = pelvis.position.y - 0.875;
@@ -270,6 +306,8 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
       if (a) a.timeScale = Math.max(0, snapshot.speed) / CLIMB_STRIDE;
       return { climb: 1 };
     }
+    // Riding: the idle clip under the seated pose `sit` lays over it.
+    if (anim === 'ride') return { idle: 1 };
     if (anim === 'jump') {
       if (entering) start('jump');
       return { jump: 1 };
@@ -339,6 +377,7 @@ export function withTrainerAsset(driver: Avatar, appearance: Appearance): Avatar
       root.userData.animationRate = lead && (GAITS as readonly string[]).includes(top) ? phaseRate * lead.getClip().duration : lead?.timeScale;
       mixer.update(dt);
       if (motion) motion.position.set(0, 0, 0);
+      if (snapshot.anim === 'ride') sit(snapshot.speed);
       scarf?.step(dt);
       aimTool();
       previousAnim = snapshot.anim;
