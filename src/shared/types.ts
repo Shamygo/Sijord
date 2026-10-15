@@ -40,6 +40,8 @@ export interface PlayerSnapshot {
   rideAlpha?: boolean;
   /** Their mount is in the air. */
   rideFly?: boolean;
+  /** Riding behind their partner on the partner's two-seat mount (x, y, z: where they sit). */
+  pillion?: boolean;
   /** Species of the lead creature walking beside the player, if one is out. */
   lead?: string;
   /** The lead is an Alpha (bigger, glowing eyes). */

@@ -80,10 +80,23 @@ export class MountView {
     return this.tilt * 0.3;
   }
 
-  /** Where the rider's hips go, in world space. */
-  seatWorld(out: THREE.Vector3): THREE.Vector3 {
-    const s = this.seat(), yaw = this.root.rotation.y;
-    return out.set(this.root.position.x + Math.sin(yaw) * s.forward, this.root.position.y + s.up, this.root.position.z + Math.cos(yaw) * s.forward);
+  /** Where the rider's hips go, in world space; `back` metres further back is the second seat. */
+  seatWorld(out: THREE.Vector3, back = 0): THREE.Vector3 {
+    const s = this.seat(), yaw = this.yaw;
+    this.root.updateWorldMatrix(true, false);
+    this.root.getWorldPosition(out);
+    const f = s.forward - back * Math.cos(this.tilt);
+    return out.set(out.x + Math.sin(yaw) * f, out.y + s.up + back * Math.sin(this.tilt), out.z + Math.cos(yaw) * f);
+  }
+
+  /** The way it faces. */
+  get yaw(): number {
+    return this.root.rotation.y;
+  }
+
+  /** Room for a passenger behind the rider (DESIGN §8.3). */
+  get twoSeat(): boolean {
+    return !!this.species && !!RIDE_PROFILES[this.species]?.twoSeat;
   }
 
   dispose(): void {

@@ -50,7 +50,7 @@ export interface RideProfile {
    * (forward of its middle).
    */
   seat: [number, number];
-  /** Room for a second rider. */
+  /** Room for a second rider: a co-op partner can climb on behind (DESIGN §8.3). */
   twoSeat?: true;
   /** Water mounts: the share of the model's height that rides below the surface. */
   draft?: number;
@@ -62,7 +62,7 @@ export interface RideProfile {
 export const RIDE_PROFILES: Record<string, RideProfile> = {
   // Land. (The vale's starter lines wear Bulbasaur's, Charmander's and Squirtle's models, and a
   // flower or an upright walker makes no saddle; Charizard and Pidgeot come with flying.)
-  shepherion: { mode: 'land', body: 'runner', weight: 110, seat: [0.55, 0.15] },
+  shepherion: { mode: 'land', body: 'runner', weight: 110, seat: [0.55, 0.15], twoSeat: true },
   rapidash: { mode: 'land', body: 'runner', weight: 95, seat: [0.52, 0.1] },
   tauros: { mode: 'land', body: 'charger', weight: 88, seat: [0.62, 0.3] },
   rhyhorn: { mode: 'land', body: 'charger', weight: 115, seat: [0.62, 0.1] },
@@ -74,7 +74,7 @@ export const RIDE_PROFILES: Record<string, RideProfile> = {
   // Air. Seats are on the standing model (up, and forward: negative is behind the spine) before
   // it tips forward into flight.
   forgelynx: { mode: 'air', body: 'heavyFlyer', weight: 90, seat: [0.52, -0.35], pitch: 0.85 },
-  dragonite: { mode: 'air', body: 'heavyFlyer', weight: 210, seat: [0.52, -0.35], pitch: 0.85 },
+  dragonite: { mode: 'air', body: 'heavyFlyer', weight: 210, seat: [0.52, -0.35], pitch: 0.85, twoSeat: true },
   skjaldhawk: { mode: 'air', body: 'soarer', weight: 40, seat: [0.6, -0.15], pitch: 0.7 },
   aerodactyl: { mode: 'air', body: 'raptorFlyer', weight: 59, seat: [0.55, -0.05], pitch: 0.35 },
 };

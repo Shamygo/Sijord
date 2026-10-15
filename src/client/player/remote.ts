@@ -101,6 +101,9 @@ export class RemotePlayer {
   private ride: string | null = null;
   private rideAlpha = false;
   private rideFly = false;
+  /** Their snapshots say they're riding behind someone. */
+  pillion = false;
+  private readonly seatAt = new THREE.Vector3();
 
   constructor(profile: PlayerProfile | { name: string; appearance: Appearance }) {
     this.name = profile.name;
@@ -206,6 +209,7 @@ export class RemotePlayer {
     this.ride = cur.ride ?? null;
     this.rideAlpha = !!cur.rideAlpha;
     this.rideFly = !!cur.rideFly;
+    this.pillion = !!cur.pillion;
 
     if (this.displayPos.distanceTo(target) > T.snapDistance) {
       this.displayPos.copy(target);
@@ -242,6 +246,19 @@ export class RemotePlayer {
     });
   }
 
+  /**
+   * They're riding behind us: sit them on our own mount's second seat, where we see it this
+   * frame, rather than where their (older) snapshots put them. Call after update().
+   */
+  sitBehind(mount: MountView): void {
+    const seat = mount.seatWorld(this.seatAt, PILLION_BACK), hip = (this.avatar.root.userData.hipHeight as number | undefined) ?? 0.95;
+    this.root.position.set(seat.x, seat.y - hip, seat.z);
+    this.displayPos.copy(this.root.position);
+    this.avatar.root.position.set(0, 0, 0);
+    this.avatar.root.rotation.y = this.displayYaw = mount.yaw;
+    this.avatar.root.rotation.x = mount.lean;
+  }
+
   /** Terrain height function so the partner's feet sit exactly on slopes. Optional. */
   setGround(fn: GroundFn | null): void {
     this.avatar.setGround(fn);
@@ -260,6 +277,9 @@ export class RemotePlayer {
     this.root.clear();
   }
 }
+
+/** How far behind the rider a passenger sits (metres). */
+export const PILLION_BACK = 0.55;
 
 /** Snapshots may carry the controller's optional `tired` animation hint. */
 function isTired(s: PlayerSnapshot): boolean {
