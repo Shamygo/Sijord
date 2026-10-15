@@ -24,7 +24,7 @@ export interface PlayerProfile {
 }
 
 /** Locomotion state a remote avatar needs to animate itself. */
-export type MoveAnim = 'idle' | 'walk' | 'run' | 'jump' | 'fall' | 'climb' | 'roll' | 'mantle' | 'vault' | 'gather' | 'pick' | 'chop';
+export type MoveAnim = 'idle' | 'walk' | 'run' | 'jump' | 'fall' | 'climb' | 'roll' | 'mantle' | 'vault' | 'gather' | 'pick' | 'chop' | 'ride';
 
 export interface PlayerSnapshot {
   x: number;
@@ -35,6 +35,9 @@ export interface PlayerSnapshot {
   /** Locomotion speed in metres per second: horizontal on ground, vertical while climbing. */
   speed: number;
   anim: MoveAnim;
+  /** The Pokémon this player is riding (x, y, z are then its feet), and whether it's an Alpha. */
+  ride?: string;
+  rideAlpha?: boolean;
   /** Species of the lead creature walking beside the player, if one is out. */
   lead?: string;
   /** The lead is an Alpha (bigger, glowing eyes). */

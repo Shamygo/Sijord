@@ -1,3 +1,5 @@
+import { RIDE_PROFILES, SADDLE_TIERS, mountStats, saddleId } from './riding';
+
 /**
  * Crafting (DESIGN §6.4), tiers T0 and T1. Tools and cloth are made by hand anywhere; food is
  * cooked and water boiled at a campfire; Poke Balls, Potions, canteens and armour need the
@@ -45,6 +47,14 @@ export const RECIPES: Recipe[] = [
   { id: 'leather-leggings', out: 'leather-leggings', count: 1, cost: { hide: 3, 'woven-cloth': 1, fiber: 2 }, station: 'workbench', level: 6, seconds: 5, tp: 1 },
   { id: 'leather-vest', out: 'leather-vest', count: 1, cost: { hide: 4, 'woven-cloth': 2, fiber: 2 }, station: 'workbench', level: 6, seconds: 6, tp: 1 },
 ];
+
+// Saddles (DESIGN §8.1): one per rideable species, its cost set by the mount's tier.
+for (const id of Object.keys(RIDE_PROFILES)) {
+  const m = mountStats(id);
+  if (!m) continue;
+  const t = SADDLE_TIERS[m.tier];
+  RECIPES.push({ id: saddleId(id), out: saddleId(id), count: 1, cost: { ...t.cost }, station: 'workbench', level: t.level, seconds: t.seconds, tp: t.tp });
+}
 
 export function recipeById(id: string): Recipe | undefined {
   return RECIPES.find((r) => r.id === id);

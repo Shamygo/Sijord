@@ -26,7 +26,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 | M6 | First gym slice | Two-player puzzle gym, co-op boss battle, competitive AI T1-T2, badges and level caps | XL |
 | M7 | Player levels, classes and quests | XP, skill trees for all 5 classes, quest system, first side quests | L |
 | M8 | Base building and automation | Base cores, building, work aptitudes, a Poke Ball assembly line, money automation | XL |
-| M9 | Riding and traversal | Land, water and air mounts with derived stats, saddles, glider, grapple | L |
+| M9 | Riding and traversal | Land, water and air mounts with derived stats, saddles, glider, grapple | L · in progress (land and water mounts with derived stats and saddles are in) |
 | M10 | Content expansion I | All 11 biomes, all 12 cities, 5 gyms, Act I-II story, about 250 species | XXL |
 | M11 | Battle depth and gimmicks | AI T3-T4, Mega / Z / Dynamax, full items, spreads tools, Battle Tower | L |
 | M12 | Content expansion II | All 10 gyms, Act III-IV, the Elite Four, legendaries, about 500 species | XXL |
@@ -160,6 +160,8 @@ Every milestone ends in a **playable build** that two people can open in a brows
 - Saddle crafting. Two-seat mounts. Glider and grapple tools.
 - 10 rideable species spread across tiers D-S.
 - Swimming for players (climbing landed early, 2026-10-06).
+
+**Status 2026-10-14:** part 1 is in: 8 rideable species (5 land, 3 water) with speed, tier, stamina and handling derived per §8.2, a saddle per species crafted at the workbench by tier, galloping on stamina, fording and slopes for land mounts, swimming for water mounts, over-cap mounts dragging their feet, and co-op partners seeing each other ride. Still to do: flying and gliding, two-seat mounts, diving, the glider and grapple, swimming on foot, more rideable species.
 
 **Exit criterion:** a "race across the map" test. A player on an S-tier land mount clearly outpaces a D-tier one, water and air travel open the Fjordlands and the archipelago, and both players can share a two-seat mount.
 

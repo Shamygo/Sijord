@@ -7,6 +7,7 @@ import { hashString, type BaseInit, type Clip } from './core';
 import { quadClips } from './clips';
 import { Kit, cloneTemplate, remap } from './kit';
 import { IMPORTED_HEIGHTS, SPECIES, fallbackSpecies, type Built, type SpeciesDef } from './species';
+import { SPECIES as DEX } from '../../shared/data/species';
 
 /**
  * Procedural creature models for Sijord's species, built in code on shared body plans
@@ -165,11 +166,24 @@ function enlarged(m: CreatureModel, k: number): CreatureModel {
   };
 }
 
+/**
+ * How tall an imported model stands. The vale's species have hand-set heights; the rest of the
+ * region's go by their Pokédex height, small ones scaled up so they read at third-person distance
+ * (as IMPORTED_HEIGHTS does) and giants held to a size the battle ring can frame.
+ */
+function importedHeight(id: string): number {
+  const set = IMPORTED_HEIGHTS[id] ?? SPECIES[id]?.height;
+  if (set) return set;
+  const dex = DEX[id]?.height;
+  if (!dex) return fallbackSpecies().height;
+  return dex < 1 ? 0.45 + 0.55 * dex : Math.min(dex, 3.2);
+}
+
 function buildCreatureModel(id: string, opts: CreatureModelOptions): CreatureModel {
   const visual = POKEMON_VISUALS[id];
   const asset = visual && loadedAsset(pokemonUrl(visual.dex));
   if (asset) {
-    const model = importedCreature(asset, IMPORTED_HEIGHTS[id] ?? (SPECIES[id] ?? fallbackSpecies()).height, { glowEyes: opts.alpha });
+    const model = importedCreature(asset, importedHeight(id), { glowEyes: opts.alpha });
     model.root.name = `creature:${id}`;
     return model;
   }

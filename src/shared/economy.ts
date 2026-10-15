@@ -1,3 +1,5 @@
+import { RIDE_PROFILES, SADDLE_TIERS, mountStats, saddleId } from './riding';
+
 /**
  * Money and shops (DESIGN §6.7). Prices sit at two to three times the mainline games and shops
  * buy back at a quarter of an item's value, so supplies never come easily: a Poke Ball costs
@@ -45,6 +47,11 @@ export const VALUE: Record<string, number> = {
   stone: 20,
   fiber: 16,
 };
+// Saddles by their mount's tier (never stocked: they're made, not bought).
+for (const id of Object.keys(RIDE_PROFILES)) {
+  const m = mountStats(id);
+  if (m) VALUE[saddleId(id)] = SADDLE_TIERS[m.tier].value;
+}
 
 export type ShopId = 'field-supplies' | 'apothecary' | 'wayfarer-inn' | 'clothier' | 'town-mart' | 'city-mart' | 'market-stall' | 'village-trader' | 'inn-kitchen';
 
