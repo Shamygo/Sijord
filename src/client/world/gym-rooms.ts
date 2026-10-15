@@ -44,7 +44,7 @@ const DOOR_H = 3.4;
 const COLLIDER_GROUP = 9_000_000;
 
 /** A white floor pattern, tinted by the material's colour. */
-function tileTexture(pattern: GymTheme['pattern']): THREE.Texture | null {
+export function tileTexture(pattern: GymTheme['pattern']): THREE.Texture | null {
   if (typeof document === 'undefined') return null;
   const c = document.createElement('canvas');
   const S = 256;

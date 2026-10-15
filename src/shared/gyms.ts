@@ -193,7 +193,7 @@ export function bossMoves(speciesId: string, level: number): string[] {
 }
 
 /** A boss creature's spread for its band: IVs, EVs and a nature that suits its better attack. */
-function spread(speciesId: string, band: number, ace: boolean): { ivs: StatTable; evs: StatTable; nature: string } {
+export function spread(speciesId: string, band: number, ace: boolean): { ivs: StatTable; evs: StatTable; nature: string } {
   const base = species(speciesId).baseStats;
   const physical = base.atk >= base.spa;
   const iv = band === 0 ? 15 : band === 1 ? 20 : 31;

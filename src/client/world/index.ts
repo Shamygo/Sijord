@@ -27,6 +27,7 @@ import { buildCliffs, type CliffResult } from './cliffs';
 import { createFauna } from './fauna';
 import { ResourceField } from './resources';
 import { collidersNear, colliderContains, colliderTop } from '../core/collision';
+import { HallRooms } from './hall-rooms';
 import { GymRooms } from './gym-rooms';
 import type { Region } from './types';
 
@@ -197,6 +198,10 @@ export function createWorld(): World {
   const gymRooms = new GymRooms(dynamic);
   root.add(gymRooms.group);
   walkables.push(gymRooms.walk);
+  // ---- the Battle Tower's and the League's halls, likewise ----
+  const hallRooms = new HallRooms(dynamic);
+  root.add(hallRooms.group);
+  walkables.push(hallRooms.walk);
   root.add(outerVeg.group);
 
   // ---- towns, villages and cities, built from the Blender kit as the player nears them ----
@@ -247,6 +252,7 @@ export function createWorld(): World {
     bounds: { minX: REGION.minX + 60, maxX: REGION.maxX - 60, minZ: REGION.minZ + 60, maxZ: REGION.maxZ - 60 },
     streamer,
     gymRooms,
+    hallRooms,
     warmUp: async (at: THREE.Vector3, camera: THREE.Vector3) => {
       await Promise.all([streamer.warmUp(at, camera), kitReady]);
       // Build whatever settlements are in sight before the first frame.
