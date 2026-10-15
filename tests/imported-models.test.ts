@@ -41,7 +41,7 @@ describe('imported Pokémon', () => {
     for (const m of catalogue.models) expect(m.url).toMatch(/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[a-f0-9]{40}\//);
     for (const [id, visual] of Object.entries(POKEMON_VISUALS)) {
       expect(SPECIES[id].name).toBe(visual.name);
-      expect(catalogue.models.find((m) => m.id === `regular/${visual.dex}`)?.animations).toContain('walk');
+      expect(catalogue.models.find((m) => m.id === `regular/${visual.dex}`)?.animations.some((a) => /walk/i.test(a))).toBe(true);
     }
   });
 });

@@ -122,7 +122,11 @@ export class HallRooms {
       for (let z = rm.z0 + 3; z < rm.z1; z += 6) box({ x0: -W, x1: W, z0: z - 0.18, z1: z + 0.18 }, y0 + WALL_H - 0.35, 0.35, trimMat);
       const panel = std('#ffffff', { emissive: '#fff4dc', emissiveIntensity: 0.9 });
       for (let z = rm.z0 + 6; z < rm.z1; z += 12) box({ x0: -4, x1: 4, z0: z - 1, z1: z + 1 }, y0 + WALL_H - 0.08, 0.06, panel);
-      for (let z = rm.z0 + 6; z < rm.z1; z += 14) {
+      // A lamp every 14 m; the League's many rooms get one each, to keep the light count down.
+      const lamps: number[] = [];
+      if (h.rooms.length > 3 && len <= 26) lamps.push(rm.z0 + len / 2);
+      else for (let z = rm.z0 + 6; z < rm.z1; z += 14) lamps.push(z);
+      for (const z of lamps) {
         const lamp = new THREE.PointLight('#fff1d6', 50, 40, 1.3);
         lamp.position.set(0, y0 + WALL_H - 1.2, z);
         root.add(lamp);

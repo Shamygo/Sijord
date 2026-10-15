@@ -654,4 +654,40 @@ export const REGION_SPECIES: Entry[] = [
     description: 'It circles the whole island in a single day, and ships lost in fog have been guided home by its wingbeats.',
     learnset: learn([1, 'wrap'], [1, 'leer'], [1, 'twister'], [1, 'thunder-wave'], [1, 'dragon-tail'], [1, 'agility'], [1, 'slam'], [1, 'roost'], [1, 'fire-punch'], [55, 'wing-attack'], [58, 'dragon-claw'], [62, 'dragon-dance'], [66, 'hurricane'], [70, 'outrage'], [75, 'extreme-speed']),
   },
+  // ---- From beyond Kanto, for the League's teams (2026-10-15). Each one's catalogue model walks. ----
+  {
+    id: 'greninja', types: ['water', 'dark'], baseStats: stats(72, 95, 67, 103, 71, 122),
+    abilities: ['torrent'], growth: 'medium-slow', baseExp: 239, evYield: { spe: 3 },
+    catchRate: 45, temperament: 'aggressive', height: 1.5,
+    description: 'It folds water into blades as thin as paper and is gone from the fjord before the ripples settle.',
+    learnset: learn([1, 'night-slash'], [1, 'pound'], [1, 'growl'], [1, 'water-gun'], [1, 'quick-attack'], [10, 'lick'], [14, 'water-pulse'], [19, 'smokescreen'], [23, 'shadow-sneak'], [33, 'aerial-ace'], [49, 'extrasensory'], [56, 'double-team'], [70, 'hydro-pump']),
+  },
+  {
+    id: 'kingambit', types: ['dark', 'steel'], baseStats: stats(100, 135, 120, 60, 85, 50),
+    abilities: ['defiant'], growth: 'medium-fast', baseExp: 275, evYield: { atk: 3 },
+    catchRate: 25, temperament: 'territorial', height: 2.0,
+    description: 'It leads from the back of the pack and never raises its blade until the fight is already won.',
+    learnset: learn([1, 'scratch'], [1, 'leer'], [1, 'metal-claw'], [15, 'slash'], [20, 'retaliate'], [25, 'iron-defense'], [30, 'night-slash'], [35, 'iron-head'], [45, 'swords-dance']),
+  },
+  {
+    id: 'annihilape', types: ['fighting', 'ghost'], baseStats: stats(110, 115, 80, 50, 90, 90),
+    abilities: ['vital-spirit', 'inner-focus'], hiddenAbility: 'defiant', growth: 'medium-fast', baseExp: 268, evYield: { atk: 2 },
+    catchRate: 45, temperament: 'aggressive', height: 1.2,
+    description: 'Its anger outlived its body. It no longer tires, and it no longer forgets who wronged it.',
+    learnset: learn([1, 'shadow-punch'], [1, 'scratch'], [1, 'leer'], [1, 'focus-energy'], [5, 'fury-swipes'], [8, 'karate-chop'], [12, 'seismic-toss'], [15, 'swagger'], [22, 'cross-chop'], [26, 'assurance'], [30, 'thrash'], [39, 'close-combat'], [44, 'screech'], [48, 'stomping-tantrum'], [53, 'outrage']),
+  },
+  {
+    id: 'flygon', types: ['ground', 'dragon'], baseStats: stats(80, 100, 80, 80, 80, 100),
+    abilities: ['levitate'], growth: 'medium-slow', baseExp: 260, evYield: { atk: 1, spe: 2 },
+    catchRate: 45, temperament: 'territorial', height: 2.0,
+    description: 'The beat of its wings sings like wind over dunes, and sandstorms follow wherever it settles.',
+    learnset: learn([1, 'dragon-breath'], [1, 'sand-attack'], [1, 'astonish'], [1, 'mud-slap'], [1, 'bite'], [8, 'bulldoze'], [20, 'rock-slide'], [24, 'crunch'], [33, 'dragon-tail'], [39, 'earth-power'], [45, 'dragon-claw'], [47, 'earthquake'], [55, 'dragon-rush']),
+  },
+  {
+    id: 'archaludon', types: ['steel', 'dragon'], baseStats: stats(90, 105, 130, 125, 65, 85),
+    abilities: ['sturdy'], growth: 'medium-fast', baseExp: 300, evYield: { def: 3 },
+    catchRate: 10, temperament: 'territorial', height: 2.0,
+    description: 'It stands like a bridge in a storm and draws the lightning into its own steel to keep its herd safe.',
+    learnset: learn([1, 'dragon-pulse'], [1, 'metal-claw'], [1, 'leer'], [6, 'rock-smash'], [30, 'dragon-tail'], [36, 'iron-defense'], [48, 'dragon-claw'], [54, 'flash-cannon']),
+  },
 ];

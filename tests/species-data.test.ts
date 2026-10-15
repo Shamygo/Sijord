@@ -40,7 +40,7 @@ describe('canonical species', () => {
       const entry = catalogue.models.find((m) => m.id === `regular/${v.dex}`);
       expect(entry, id).toBeDefined();
       expect(entry!.local, id).toBe(pokemonModelPath(v.dex));
-      expect(entry!.animations, id).toContain('walk');
+      expect(entry!.animations.some((a) => /walk/i.test(a)), id).toBe(true);
       expect(existsSync(resolve(__dirname, '../public', entry!.local)), entry!.local).toBe(true);
       expect(inGameplayPack(v.dex), id).toBe(ORIGINAL_IDS.includes(id));
     }

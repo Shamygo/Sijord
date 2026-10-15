@@ -1,3 +1,4 @@
+import type { LeagueRecord } from '../../shared/league';
 import type { TowerRecord } from '../../shared/battle-tower';
 import { normalizeCreature } from '../../shared/battle/creature';
 import type { Creature } from '../../shared/battle/types';
@@ -74,6 +75,8 @@ export interface SaveData {
   gymProgress?: Record<string, { solved: number[]; trainers?: boolean }>;
   /** The Battle Tower: BP, streaks under way and the best ones, the Tycoon's prints. */
   tower?: TowerRecord;
+  /** League progress and the Hall of Fame. */
+  league?: LeagueRecord;
 }
 
 export function loadSave(): SaveData | null {
