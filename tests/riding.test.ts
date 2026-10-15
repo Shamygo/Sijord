@@ -93,3 +93,11 @@ describe('flyers', () => {
     expect(reach).toBeLessThan(900);
   });
 });
+
+describe('two-seat mounts', () => {
+  it('carry a co-op partner behind the rider on land, water and in the air (DESIGN §8.3)', () => {
+    const two = Object.keys(RIDE_PROFILES).filter((id) => mountStats(id)!.twoSeat);
+    expect(new Set(two.map((id) => mountStats(id)!.mode))).toEqual(new Set(['land', 'water', 'air']));
+    expect(two).toContain('lapras');
+  });
+});

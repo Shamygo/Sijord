@@ -29,7 +29,7 @@ import { THROW_CLIP } from '../player/imported-trainer';
 import { createAvatar } from '../player/avatar';
 import { PLAYER_TUNING, PlayerController } from '../player/controller';
 import { CAMERA_TUNING, ThirdPersonCamera } from '../player/camera';
-import { RemotePlayer } from '../player/remote';
+import { PILLION_BACK, RemotePlayer } from '../player/remote';
 import { Hud, type Quest } from '../ui/hud';
 import { GameMenu, type MenuTab } from '../ui/menu';
 import { Portraits } from '../ui/portraits';
@@ -150,6 +150,8 @@ export class Game {
   private followerOut = true;
   /** Riding (DESIGN §8): the Pokémon carrying the trainer, its physics and its model. */
   private ride: { creature: Creature; ctl: RideController; view: MountView } | null = null;
+  /** Riding behind a co-op partner on their two-seat mount (DESIGN §8.3): which partner. */
+  private pillion: { id: string } | null = null;
   private readonly rideFocus = new THREE.Vector3();
   private wild: WildManager;
   private battle: ActiveBattle | null = null;
@@ -918,7 +920,8 @@ export class Game {
     this.follower.setSpecies(lead ? lead.species : null, !!lead?.alpha);
     // A battle (or the mount fainting in it) takes the trainer off their mount.
     if (this.ride && (this.battle || this.remoteBattleHost || !isUsable(this.ride.creature) || !this.party.includes(this.ride.creature))) this.getDown(true);
-    this.follower.setVisible(this.followerOut && !this.battle && !this.remoteBattleHost && !this.ride);
+    if (this.pillion && (this.battle || this.remoteBattleHost)) this.getDown(true);
+    this.follower.setVisible(this.followerOut && !this.battle && !this.remoteBattleHost && !this.ride && !this.pillion);
   }
 
   // ---- Riding (DESIGN §8) ------------------------------------------------------------------------
@@ -927,7 +930,17 @@ export class Game {
 
   /** R: get on the best Pokémon for here (the lead if it can carry you), or get down. */
   private toggleRide(): void {
-    if (this.ride) { this.getDown(); return; }
+    if (this.ride || this.pillion) { this.getDown(); return; }
+    // Beside a partner's two-seat mount: climb on behind them.
+    const lift = this.twoSeatNear();
+    if (lift) {
+      this.pillion = { id: lift.id };
+      this.cancelAim();
+      this.gathering = null;
+      this.refreshFollower();
+      this.hud.showToast(`Riding behind ${lift.name}`, 'You can throw balls from back here · R to get down', 2.5);
+      return;
+    }
     if (this.gymVisit) { this.hud.showToast('No riding in here', 'Gyms are walked on foot.', 2); return; }
     if (!this.controller.grounded || this.controller.climbing) return;
     const cap = this.levelCap, bag = this.save.bag ?? {};
@@ -973,6 +986,19 @@ export class Game {
 
   /** Get down beside the mount (or onto the nearest shore from a swimmer). `forced`: thrown off or called away. */
   private getDown(forced = false): void {
+    if (this.pillion) {
+      // Slide off to the side of the partner's mount.
+      const p = this.controller.position, yaw = this.controller.yaw;
+      const x = p.x + Math.cos(yaw) * 1.4, z = p.z - Math.sin(yaw) * 1.4;
+      let y = this.world.heightAt(x, z);
+      const spot = y > this.world.waterLevel - 0.5 ? new THREE.Vector3(x, y, z) : this.shoreNear(p, 8);
+      if (!spot && !forced) { this.hud.showToast('Not here', 'Wait until you\'re over land to get down.', 2); return; }
+      y = spot?.y ?? y;
+      this.pillion = null;
+      this.controller.teleport(spot ?? new THREE.Vector3(x, Math.max(y, this.world.waterLevel), z), yaw);
+      this.refreshFollower();
+      return;
+    }
     const r = this.ride;
     if (!r) return;
     const at = r.ctl.position, yaw = r.ctl.yaw;
@@ -1019,6 +1045,31 @@ export class Game {
       }
     }
     return null;
+  }
+
+  /** A partner's two-seat mount within reach, with nobody behind them yet. */
+  private twoSeatNear(): { id: string; name: string } | null {
+    const p = this.controller.position;
+    for (const [id, f] of this.partners) {
+      const m = f.remote.mount;
+      if (!m.twoSeat || !f.remote.root.visible || f.remote.pillion) continue;
+      if (m.root.getWorldPosition(new THREE.Vector3()).distanceTo(p) < (m.model?.radius ?? 1) + 2.5) return { id, name: f.profile.name };
+    }
+    return null;
+  }
+
+  /** One frame behind a partner: sit on their mount's second seat, where we see it. */
+  private updatePillion(): PlayerSnapshot {
+    const f = this.partners.get(this.pillion!.id), m = f?.remote.mount;
+    if (!f || !m?.twoSeat || !f.remote.root.visible) { this.getDown(true); return this.controller.snapshot(); }
+    const seat = m.seatWorld(new THREE.Vector3(), PILLION_BACK), hip = (this.avatar.root.userData.hipHeight as number | undefined) ?? 0.95;
+    this.avatar.root.position.set(seat.x, seat.y - hip, seat.z);
+    this.avatar.root.rotation.y = m.yaw;
+    this.controller.position.copy(this.avatar.root.position);
+    this.controller.velocity.set(0, 0, 0);
+    this.controller.yaw = m.yaw;
+    this.rideFocus.set(seat.x, seat.y - 0.6, seat.z);
+    return { x: seat.x, y: seat.y - hip, z: seat.z, yaw: m.yaw, speed: 0, anim: 'ride', pillion: true };
   }
 
   /** One frame of riding: step the mount, then sit the trainer on it. Returns the snapshot to send. */
@@ -1520,7 +1571,7 @@ export class Game {
     if (r === 'ignored') return;
     this.cancelAim();
     // Knocked out of the saddle.
-    if (this.ride) this.getDown(true);
+    if (this.ride || this.pillion) this.getDown(true);
     const p = this.controller.position;
     // Spun round to face what hit you, and shoved back along its lunge.
     this.controller.yaw = Math.atan2(m.mover.pos.x - p.x, m.mover.pos.z - p.z);
@@ -3407,7 +3458,7 @@ export class Game {
   debugAdvance(ms: number): void { for (let t = 0; t < ms; t += 1000 / 60) this.frame(1 / 60); }
 
   debugText(): string {
-    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', time: clockText(this.gameMinutes), lantern: { lit: this.lantern.lit, oil: Math.round(lanternOil(this.save.bag ?? {}, this.save.toolWear ?? {})), partner: this.partnerLit.size > 0 }, stardust: { night: this.stardust.night, out: this.stardust.root.visible, left: this.stardust.spots.filter((p) => !p.taken).length }, player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, ride: this.ride ? { species: this.ride.creature.species, mode: this.ride.ctl.stats.mode, flying: this.ride.ctl.flying, altitude: Math.round(this.ride.ctl.altitude * 10) / 10, tier: this.ride.ctl.stats.tier, top: Math.round(this.ride.ctl.topSpeed * 10) / 10, speed: Math.round(this.ride.ctl.speed * 10) / 10, galloping: this.ride.ctl.galloping, stamina: Math.round(this.ride.ctl.stamina.value * 100) / 100 } : null, found:this.save.found?.length ?? 0, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
+    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', time: clockText(this.gameMinutes), lantern: { lit: this.lantern.lit, oil: Math.round(lanternOil(this.save.bag ?? {}, this.save.toolWear ?? {})), partner: this.partnerLit.size > 0 }, stardust: { night: this.stardust.night, out: this.stardust.root.visible, left: this.stardust.spots.filter((p) => !p.taken).length }, player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, pillion: this.pillion ? this.partners.get(this.pillion.id)?.profile.name ?? true : false, ride: this.ride ? { species: this.ride.creature.species, mode: this.ride.ctl.stats.mode, flying: this.ride.ctl.flying, altitude: Math.round(this.ride.ctl.altitude * 10) / 10, tier: this.ride.ctl.stats.tier, top: Math.round(this.ride.ctl.topSpeed * 10) / 10, speed: Math.round(this.ride.ctl.speed * 10) / 10, galloping: this.ride.ctl.galloping, stamina: Math.round(this.ride.ctl.stamina.value * 100) / 100 } : null, found:this.save.found?.length ?? 0, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
       trainerHp: { hp: Math.round(this.vitals.hp * 10) / 10, max: this.vitals.max, down: this.vitals.knockedDown },
       money: this.save.money ?? 0,
       meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },
@@ -3477,6 +3528,7 @@ export class Game {
     }
     let snap: PlayerSnapshot;
     if (this.ride) snap = this.updateRide(dt, move);
+    else if (this.pillion) snap = this.updatePillion();
     else {
       this.controller.update(dt, move, this.cam.yaw, this.world);
       snap = this.controller.snapshot();
@@ -3486,7 +3538,7 @@ export class Game {
     // Knockdown: tip over backwards, lie there, get up (the landing clip plays as they rise).
     const downT = this.vitals.downTime;
     const down = knockdownTilt(downT);
-    this.avatar.root.rotation.x = this.ride ? this.mountView.lean : -down * KNOCKDOWN_ANGLE;
+    this.avatar.root.rotation.x = this.ride ? this.mountView.lean : this.pillion ? this.partners.get(this.pillion.id)?.remote.mount.lean ?? 0 : -down * KNOCKDOWN_ANGLE;
     if (knocked && downT < TRAINER_HP.knockdown - 0.7) snap.anim = 'fall';
     const gathering = this.gathering;
     if (gathering) {
@@ -3499,7 +3551,7 @@ export class Game {
     if (gathering && gathering.t >= gathering.way.seconds) this.finishGather(gathering);
     this.hud.setGather(this.gathering ? this.gathering.t / this.gathering.way.seconds : null);
     this.updateRegrowth(dt);
-    this.exerting = !this.ride && (this.controller.climbing || (move.sprint && snap.speed > 5));
+    this.exerting = !this.ride && !this.pillion && (this.controller.climbing || (move.sprint && snap.speed > 5));
     const heals = this.updateSurvival(dt, inBattle);
     this.vitals.update(dt, inBattle || this.wild.attacking, heals);
     this.save.trainerHp = this.vitals.hp;
@@ -3523,7 +3575,7 @@ export class Game {
     }
     this.remoteBattle?.update(dt);
     const ring = battle && battle.closing === null ? battle.director.stage.center : this.remoteBattle?.stage.center;
-    const focus = actionMode ? battle?.director.stage.spot({side:0,slot:0}) ?? this.remoteBattle?.focus ?? this.controller.position : ring ? this.battleFocus(ring) : this.ride ? this.rideFocus : this.controller.position;
+    const focus = actionMode ? battle?.director.stage.spot({side:0,slot:0}) ?? this.remoteBattle?.focus ?? this.controller.position : ring ? this.battleFocus(ring) : this.ride || this.pillion ? this.rideFocus : this.controller.position;
     this.cam.update(dt, focus, this.world, move.sprint && snap.speed > 5);
     this.updateAimView();
 
@@ -3553,7 +3605,7 @@ export class Game {
       const gymHere = this.gymSpot(pos);
       const gymDoor = !this.gymVisit ? this.updateGymDoor(dt, pos) : null;
       const wildMon = !talkable && !this.gymVisit ? this.wild.nearestEngageable(pos) : null;
-      const free = !talkable && !pickup && !find && !star && !home && !shop && !service && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing && !this.ride;
+      const free = !talkable && !pickup && !find && !star && !home && !shop && !service && !station && !wildMon && !this.aiming && !this.gathering && this.controller.grounded && !this.controller.climbing && !this.ride && !this.pillion;
       let gather = free ? this.nearestGather(pos) : null;
       const waterAt = free ? this.nearWater(pos) : null;
       let water = waterAt && this.waterPrompt(waterAt) ? waterAt : null;
@@ -3688,6 +3740,8 @@ export class Game {
     this.follower.update(dt, this.controller.position, this.controller.yaw, snap.speed, this.world);
     for (const [id, p] of this.partners) {
       p.remote.update(dt, now);
+      // Riding behind us: on our mount's second seat, as we see it now.
+      if (p.remote.pillion && this.ride && this.mountView.twoSeat && p.remote.root.position.distanceTo(this.ride.ctl.position) < 8) p.remote.sitBehind(this.mountView);
       const pf = this.partnerFollowers.get(id);
       if (!pf) continue;
       const rp = p.remote.root.position;
