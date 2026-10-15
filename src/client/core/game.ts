@@ -69,7 +69,8 @@ import type { TeamSetup } from '../../shared/battle/engine';
 import { GYM_THEMES } from '../world/gym-rooms';
 import { GymVisit } from './gym-visit';
 import { BP_SHOP, BRACKET_NAME, buyWithBp, emptyTowerRecord, isTycoon, MODE_NAME, TOWER, TOWER_BATTLE_ID, towerBlock, towerEntrants, towerKey, towerLoss, towerOpponents, towerWin, TYCOON, type TowerBracket, type TowerMode, type TowerRecord, type TowerTeam } from '../../shared/battle-tower';
-import { hallAt, hallInterior, hallWorld, type HallId, type HallInterior } from '../../shared/halls';
+import { hallAt, hallInterior, hallRoomAt, hallWorld, type HallId, type HallInterior } from '../../shared/halls';
+import { LEAGUE, LEAGUE_MEMBERS, leagueEcho, leagueTeam, memberByAce, type LeagueRecord } from '../../shared/league';
 import type { Appearance } from '../../shared/types';
 import { blackoutLoss, buy, formatMoney, sell, SHOPS, STARTING_MONEY, trainerPrize, wildPrize, type Shop, INN_PRICE } from '../../shared/economy';
 import { canteenRoom, consume, meterState, OPEN_WATER, stepMeters, SURVIVAL, survivalEffects, type Meters } from '../../shared/survival';
@@ -88,6 +89,8 @@ const TOWER_STAFF: Appearance[] = [
   { trainerModel: 'custom', skinTone: '#e8b48a', hairColor: '#2b1d14', hairStyle: 1, jacketColor: '#1e2a52', pantsColor: '#2f2f36', build: 0 },
   { trainerModel: 'custom', skinTone: '#c68c62', hairColor: '#c9a26a', hairStyle: 2, jacketColor: '#1e2a52', pantsColor: '#2f2f36', build: 1 },
 ];
+/** The guard at the League's door. */
+const LEAGUE_GUARD: Appearance = { trainerModel: 'custom', skinTone: '#d8a47a', hairColor: '#3a2a1a', hairStyle: 0, jacketColor: '#3a3a4a', pantsColor: '#22222a', build: 1 };
 const ECHO_LOOK = { trainerModel: 'custom', skinTone: '#cfe6ff', hairColor: '#f4fbff', hairStyle: 3, jacketColor: '#6fd0ff', pantsColor: '#3d6f9a', build: 0 } as const;
 /** A charging wild Pokemon this close can be cut off by the partner (DESIGN §5.3). */
 const INTERCEPT_RANGE = 14;
@@ -175,6 +178,8 @@ export class Game {
   private gymFalling = false;
   /** A gym battle a friend hosted was lost: back to the checkpoint once it closes. */
   private guestGymLoss: 'trainers' | 'leader' | null = null;
+  /** A friend's League battle this player joined: the member's index and whether it was won, settled once the battle closes. */
+  private guestLeague: { k: number; won: boolean } | null = null;
   /** What each friend last told us of their badges and the gym they're in. */
   private partnerInfo = new Map<string, { badges: number; gym?: { id: string; solved: number[]; trainers: boolean } }>();
   private partnerBattles = new Map<string, BattleFrame>();
@@ -683,7 +688,8 @@ export class Game {
     // The Tower enters copies at its bracket's level (the frame's `ace`); everything else brings the party.
     const tower = frame.gym?.id === TOWER_BATTLE_ID;
     const party = tower ? towerEntrants(this.party, 'coop', frame.gym!.ace >= 100 ? 'open' : 'level50') : structuredClone(this.party);
-    this.battleControl = {id:frame.id, join:{party,levelCap:tower ? frame.gym!.ace : this.levelCap,balls,catchMult:classInfo(this.save.profile.playerClass).modifiers.catchRate}};
+    const cap = tower ? frame.gym!.ace : frame.gym?.id === LEAGUE.battleId ? LEAGUE.cap : this.levelCap;
+    this.battleControl = {id:frame.id, join:{party,levelCap:cap,balls,catchMult:classInfo(this.save.profile.playerClass).modifiers.catchRate}};
     this.releaseMouse(); this.hud.setBattleMode(true); this.refreshFollower();
     this.hud.showToast('Joining your friend’s battle');
   }
@@ -714,7 +720,11 @@ export class Game {
       this.appliedBattleResults.add(frame.id);
       if(frame.winner === 0 && frame.progressionFlag) {this.setFlag(frame.progressionFlag);this.updateNpcState();}
       if (frame.winner === 0 && frame.gym && this.gymVisit?.gym.id === frame.gym.id) this.gymWon(frame.gym.stage, Math.min(100, Math.max(1, frame.gym.ace)));
-      if (frame.winner === 1 && frame.gym && frame.gym.id !== TOWER_BATTLE_ID) this.guestGymLoss = frame.gym.stage;
+      if (frame.winner === 1 && frame.gym && frame.gym.id !== TOWER_BATTLE_ID && frame.gym.id !== LEAGUE.battleId) this.guestGymLoss = frame.gym.stage;
+      if (frame.gym?.id === LEAGUE.battleId && frame.winner !== null) {
+        const k = LEAGUE_MEMBERS.findIndex((m) => m === memberByAce(frame.gym!.ace));
+        if (k >= 0) this.guestLeague = { k, won: frame.winner === 0 };
+      }
       if (frame.gym?.id === TOWER_BATTLE_ID) this.towerGuestResult(frame.winner, Math.min(100, Math.max(1, frame.gym.ace)));
       for (const updated of frame.result.party) {const c = this.party.find(c => c.uid === updated.uid); if(c) Object.assign(c,updated);}
       // Balls this trainer threw come out of their own bag; their catches join their own party.
@@ -761,7 +771,9 @@ export class Game {
     this.guestNote = '';
     const gymLoss = this.guestGymLoss;
     this.guestGymLoss = null;
-    if (this.guestProgression) {const outcome = this.guestProgression; this.guestProgression = null; void (async()=>{await this.afterBattle(outcome);if(gymLoss && this.gymVisit)await this.gymLost(gymLoss);else if(!this.party.some(isUsable))await this.blackout();})();}
+    const league = this.guestLeague;
+    this.guestLeague = null;
+    if (this.guestProgression) {const outcome = this.guestProgression; this.guestProgression = null; void (async()=>{await this.afterBattle(outcome);if(gymLoss && this.gymVisit)await this.gymLost(gymLoss);else if(league)await this.leagueGuestResult(league.k,league.won);else if(!this.party.some(isUsable))await this.blackout();})();}
   }
 
   private onAction(a: Action): void {
@@ -853,13 +865,14 @@ export class Game {
       // The badge road (DESIGN §3): any order, the nearest unbeaten gym is marked.
       const earned = this.save.gymBadges ?? [];
       // Inside a gym you're really at its city, not out over the sea where its rooms are built.
-      const here = this.gymVisit?.gym.city ?? (this.hall ? SETTLEMENT_BY_ID.tornhavn : null) ?? this.controller?.position ?? { x: 0, z: 0 };
+      const here = this.gymVisit?.gym.city ?? (this.hall ? SETTLEMENT_BY_ID[this.hall.h.id === 'league' ? 'crownspire' : 'tornhavn'] : null) ?? this.controller?.position ?? { x: 0, z: 0 };
       const next = GYMS.filter((g) => !earned.includes(g.id)).map((g) => ({ g, at: serviceSpot(g.city, 'gym') ?? { x: g.city.x, z: g.city.z } }))
         .sort((p, q) => Math.hypot(p.at.x - here.x, p.at.z - here.z) - Math.hypot(q.at.x - here.x, q.at.z - here.z))[0];
       if (next) quests.push({ id: 'badges', text: `Earn gym badges with your partner (${earned.length} of ${GYMS.length}) · nearest: ${next.g.city.name} Gym, ${next.g.type} type`, main: true, target: { x: next.at.x, z: next.at.z } });
       else {
         const league = SETTLEMENT_BY_ID.crownspire;
-        if (league) quests.push({ id: 'league', text: 'All ten badges: climb to the Sijord League at Crownspire', main: true, target: { x: league.x, z: league.z } });
+        if (this.flags.has('champion')) quests.push({ id: 'league', text: 'Champion of Sijord: defend the title at Crownspire', main: true, done: true });
+        else if (league) quests.push({ id: 'league', text: 'All ten badges: climb to the Sijord League at Crownspire and beat the Elite Four and the Champion', main: true, target: { x: league.x, z: league.z } });
       }
       quests.push({ id: 'train', text: `Train your team (level cap ${this.levelCap})` });
     }
@@ -897,7 +910,7 @@ export class Game {
   }
 
   private get levelCap(): number {
-    return levelCap(this.save.badges ?? 0);
+    return levelCap(this.save.badges ?? 0, this.flags.has('champion'));
   }
 
   private setFlag(flag: string): void {
@@ -1838,6 +1851,7 @@ export class Game {
     this.beginScene();
     const say = (speaker: string, text: string, choices?: string[]) => ({ speaker, text, choices });
     let enterTower = false;
+    let enterLeague = false;
     try {
       if (sp.role === 'pokecenter') {
         const centers = (this.save.centers ??= []);
@@ -1893,12 +1907,14 @@ export class Game {
         if (badges >= TOWER.badges) enterTower = true;
         else await this.hud.dialogue.play([say('Tower doorman', `The Battle Tower welcomes trainers with ${TOWER.badges} badges. You have ${badges}.`)]);
       } else if (sp.role === 'league') {
-        await this.hud.dialogue.play([say('League guard', badges >= 10 ? 'Ten badges. The Elite Four will see you soon.' : `Only trainers with ten badges may climb to the Elite Four. You have ${badges}.`)]);
+        if (badges >= LEAGUE.badges) enterLeague = true;
+        else await this.hud.dialogue.play([say('League guard', `Only trainers with ${LEAGUE.badges} badges may climb to the Elite Four. You have ${badges}.`)]);
       }
     } finally {
       if (this.talking) this.endScene();
     }
     if (enterTower) await this.enterHall('battle-tower');
+    if (enterLeague) await this.enterHall('league');
   }
 
   // ---- Gyms (DESIGN §3, §13) ----
@@ -2316,7 +2332,8 @@ export class Game {
     await sleep(300);
     await this.hud.fade(false);
     this.endScene();
-    this.hud.showToast(h.name, `${this.towerRec.bp} BP · the desk ahead takes challengers`, 4);
+    if (id === 'league') this.hud.showToast(h.name, 'The Elite Four, then the Champion · no healing once you start', 4);
+    else this.hud.showToast(h.name, `${this.towerRec.bp} BP · the desk ahead takes challengers`, 4);
   }
 
   private async leaveHall(): Promise<void> {
@@ -2324,8 +2341,11 @@ export class Game {
     if (!v) return;
     this.beginScene();
     await this.hud.fade(true);
-    const town = SETTLEMENT_BY_ID.tornhavn;
-    const door = serviceSpot(town, 'tower');
+    const isLeague = v.h.id === 'league';
+    // Walking out ends a League run: back in, it starts again from the first room.
+    if (isLeague) this.leagueRec.run = 0;
+    const town = SETTLEMENT_BY_ID[isLeague ? 'crownspire' : 'tornhavn'];
+    const door = serviceSpot(town, isLeague ? 'league' : 'tower');
     const x = door ? door.x + Math.sin(door.yaw) * 4 : town.x;
     const z = door ? door.z + Math.cos(door.yaw) * 4 : town.z;
     const yaw = door?.yaw ?? 0;
@@ -2356,6 +2376,10 @@ export class Game {
     this.clearHallNpcs();
     const v = this.hall;
     if (!v) return;
+    if (v.h.id === 'league') {
+      this.spawnLeagueNpcs();
+      return;
+    }
     v.npcs.push(this.hallNpc('tower-guide', 'Tower guide', v.h.spots.guide, Math.PI, TOWER_STAFF[0]));
     v.npcs.push(this.hallNpc('tower-exchange', 'BP exchange clerk', v.h.spots.exchange, Math.PI / 2, TOWER_STAFF[1]));
   }
@@ -2375,10 +2399,18 @@ export class Game {
   private updateHall(dt: number): void {
     const v = this.hall;
     if (!v) return;
+    if (v.h.id === 'league') v.open = this.leagueDoors();
     this.world.hallRooms?.sync(v.open, dt);
     const pos = this.controller.position;
     for (const n of [...v.npcs, ...v.challengers]) n.update(dt, pos);
     if (v.busy || this.battle || this.remoteBattleHost || this.talking) return;
+    if (v.h.id === 'league') {
+      // A friend's League battle in the room you're in: join it at their side.
+      const theirs = [...this.partnerBattles].find(([, f]) => f.joinable && f.gym?.id === LEAGUE.battleId);
+      const k = theirs ? LEAGUE_MEMBERS.findIndex((m) => m === memberByAce(theirs[1].gym!.ace)) : -1;
+      if (theirs && k >= 0 && this.leagueRoomAt(pos.z - v.h.oz) === k && registerForBoss(this.party, LEAGUE.cap).registered.length) this.joinRemoteBattle(theirs[0], theirs[1]);
+      return;
+    }
     const invite = [...this.partnerBattles].find(([, f]) => f.joinable && f.gym?.id === TOWER_BATTLE_ID);
     if (invite && !towerBlock(this.party, 'coop')) {
       // Up beside them on the battle floor.
@@ -2395,6 +2427,7 @@ export class Game {
     if (!v || v.busy) return null;
     const h = v.h;
     const lx = pos.x - h.ox, lz = pos.z - h.oz;
+    if (h.id === 'league') return this.leagueSpot({ x: lx, z: lz });
     const near = (k: string, r: number) => Math.hypot(lx - h.spots[k].x, lz - h.spots[k].z) < r;
     if (near('exit', 2.2)) return { label: 'Leave the Battle Tower', act: () => this.leaveHall() };
     if (near('guide', 3.8)) return { label: 'Talk to the Tower guide', act: () => this.towerDesk() };
@@ -2561,6 +2594,237 @@ export class Game {
     this.cam.snapBehind(this.controller.position, Math.PI);
     await sleep(250);
     await this.hud.fade(false);
+    this.endScene();
+  }
+
+  // ---- The League at Crownspire (DESIGN §2, §3.2, Act IV) ----
+
+  private get leagueRec(): LeagueRecord {
+    return (this.save.league ??= { run: 0 });
+  }
+
+  /** Which League room (0-3 the Elite Four, 4 the Champion) a local z is in, or -1 for the foyer. */
+  private leagueRoomAt(lz: number): number {
+    const v = this.hall;
+    if (!v || v.h.id !== 'league') return -1;
+    const rm = hallRoomAt(v.h, lz);
+    return rm ? Number(rm.id.replace('room-', '')) : -1;
+  }
+
+  /** The League's doors: the first is always open; each one after opens as its room is won. */
+  private leagueDoors(): Set<string> {
+    const run = this.leagueRec.run;
+    const open = new Set<string>(['door-0']);
+    for (let k = 1; k <= 4; k++) if (run >= k) open.add(`door-${k}`);
+    return open;
+  }
+
+  private spawnLeagueNpcs(): void {
+    const v = this.hall;
+    if (!v) return;
+    v.npcs.push(this.hallNpc('league-guard', 'League guard', v.h.spots.guard, -Math.PI / 2, LEAGUE_GUARD));
+    LEAGUE_MEMBERS.forEach((m, k) => {
+      const n = this.hallNpc(`league-${m.id}`, `${m.title} ${m.name}`, v.h.spots[`m${k}`], Math.PI, m.look);
+      v.npcs.push(n);
+    });
+  }
+
+  private leagueSpot(l: { x: number; z: number }): { label: string; act: () => Promise<void> } | null {
+    const v = this.hall!;
+    const h = v.h;
+    const near = (k: string, r: number) => Math.hypot(l.x - h.spots[k].x, l.z - h.spots[k].z) < r;
+    if (near('exit', 2.2)) return { label: 'Leave the League', act: () => this.leaveHall() };
+    if (near('heal', 2.6)) return { label: 'Use the healing machine', act: () => this.leagueHeal() };
+    if (near('guard', 3)) return { label: 'Talk to the League guard', act: () => this.leagueGuard() };
+    for (let k = 0; k < LEAGUE_MEMBERS.length; k++) {
+      if (!near(`m${k}`, 5)) continue;
+      const m = LEAGUE_MEMBERS[k];
+      return { label: `${this.leagueRec.run > k ? 'Talk to' : 'Challenge'} ${m.title} ${m.name}`, act: () => this.leagueBattle(k) };
+    }
+    return null;
+  }
+
+  private async leagueGuard(): Promise<void> {
+    this.beginScene();
+    const run = this.leagueRec.run;
+    await this.hud.dialogue.play([
+      run > 0 && run < 5
+        ? { speaker: 'League guard', text: `You've beaten ${run} of the five so far this run. The way on is open, but the healing machine stays off until the run is over. Walk out, and it's over.` }
+        : { speaker: 'League guard', text: 'Welcome to the Sijord League. Through that door: four rooms, four of the Elite Four, and the Champion at the top of the stair.' },
+      { speaker: 'League guard', text: `League rules: each of you registers your first three healthy Pokémon at level ${LEAGUE.cap} or under. No healing between rooms, only what's in your bag.` },
+      { speaker: 'League guard', text: 'Lose to any of them, or walk out, and the run starts over from the first room. Good luck. You\'ll need it.' },
+    ]);
+    this.endScene();
+  }
+
+  private async leagueHeal(): Promise<void> {
+    this.beginScene();
+    if (this.leagueRec.run > 0 && this.leagueRec.run < 5) {
+      await this.hud.dialogue.play([{ speaker: 'League guard', text: 'Sorry. Once a run has started, the machine stays off for you. Bag items only.' }]);
+      this.endScene();
+      return;
+    }
+    await this.hud.fade(true);
+    this.healParty();
+    await sleep(400);
+    await this.hud.fade(false);
+    this.hud.showToast('Your team is fighting fit', 'The Elite Four are through the door', 3);
+    this.endScene();
+  }
+
+  /** An Elite Four member (0-3) or the Champion (4): a co-op boss battle, like a gym leader's. */
+  private async leagueBattle(k: number): Promise<void> {
+    const v = this.hall;
+    if (!v || v.h.id !== 'league' || this.battle) return;
+    const m = LEAGUE_MEMBERS[k];
+    const rec = this.leagueRec;
+    const speaker = `${m.title} ${m.name}`;
+    // Already started by the friend? Join theirs.
+    const theirs = [...this.partnerBattles].find(([, f]) => f.joinable && f.gym?.id === LEAGUE.battleId);
+    if (theirs) {
+      this.joinRemoteBattle(theirs[0], theirs[1]);
+      return;
+    }
+    this.cancelAim();
+    this.beginScene();
+    const say = (text: string, who = speaker) => this.hud.dialogue.play([{ speaker: who, text }]);
+    if (rec.run > k) {
+      await say(k === 4 ? 'You\'re the Champions now. Come back and battle me any time: I\'ll be ready.' : m.beaten);
+      this.endScene();
+      return;
+    }
+    if (rec.run < k) {
+      await say('How did you get in here? Back to the first room with you.');
+      this.endScene();
+      return;
+    }
+    const friends = this.hallFriends().filter((id) => {
+      const p = this.partners.get(id)!.remote.root.position;
+      return this.leagueRoomAt(p.z - v.h.oz) === k;
+    });
+    if (!friends.length && !this.soloEcho) {
+      await say(this.partners.size ? 'You\'ll want your partner for this one. Fetch them and come back together.' : 'You\'ll want a partner for this one. (Playing alone? Turn on the Echo partner in Settings.)');
+      this.endScene();
+      return;
+    }
+    const { registered, tooWild } = registerForBoss(this.party, LEAGUE.cap);
+    if (!registered.length) {
+      await say(`League rules: only healthy Pokémon at level ${LEAGUE.cap} or under.`, 'Referee');
+      this.endScene();
+      return;
+    }
+    if (tooWild.length) await say(`${tooWild.map(displayName).join(', ')} ${tooWild.length > 1 ? 'are' : 'is'} over level ${LEAGUE.cap}: League rules say they sit this one out.`, 'Referee');
+    await this.hud.dialogue.play(m.intro.map((text) => ({ speaker, text })));
+    const room = v.h.rooms.find((rm) => rm.id === `room-${k}`)!;
+    const at = hallWorld(v.h, { x: 0, z: room.z0 + 6 });
+    const p = new THREE.Vector3(at.x, v.h.floorY, at.z);
+    this.controller.teleport(p, 0);
+    const npc = v.npcs.find((n) => n.name === speaker);
+    if (npc) {
+      const foe = arenaSpots(p, 0).foeTrainer;
+      npc.position.set(foe.x, v.h.floorY, foe.z);
+      npc.lookAt(p);
+    }
+    this.talking = false;
+    const team = leagueTeam(m, randomSeed());
+    const echo: TeamSetup | undefined = !this.partners.size && this.soloEcho ? { owner: 'echo', name: 'Echo', creatures: leagueEcho(), ai: 't3', levelCap: 100 } : undefined;
+    const outcome = await this.runBattle({
+      kind: 'trainer',
+      foes: team.creatures,
+      foeName: speaker,
+      foeAi: team.ai,
+      boss: { gym: LEAGUE.battleId, stage: 'leader', ace: m.ace, echo },
+      levelCap: LEAGUE.cap,
+      playerPos: p,
+      facing: 0,
+      intro: `${speaker} wants to battle!`,
+    }, registered);
+    this.beginScene();
+    this.scripted = true;
+    if (outcome.winner === 0) {
+      await say(m.beaten);
+      await this.leagueWon(k);
+      if (k === 4) await this.leagueToFoyer('The Hall of Fame keeps your names', 'The League will be here when you want to defend the title');
+    } else if (outcome.winner === 1) {
+      await say(k === 4 ? 'The storm wins today. Come back stronger, both of you.' : 'That\'s the League. Back to the start, and better luck next run.');
+      await this.leagueLost();
+    } else if (!outcome.fainted.size) {
+      await say('Your partner never came. Come back together.');
+    }
+    npc?.lookAt(null);
+    this.endScene();
+  }
+
+  /** A League battle won (also for a friend who joined it). */
+  private async leagueWon(k: number): Promise<void> {
+    const rec = this.leagueRec;
+    // A friend who joined a room ahead of their own run catches up with it.
+    if (rec.run > k) return;
+    const m = LEAGUE_MEMBERS[k];
+    rec.run = k + 1;
+    this.gainXp(TRAINER_XP.trainerWin * (k === 4 ? 4 : 2));
+    this.earn(trainerPrize(m.ace, false) * (k === 4 ? 4 : 2), `Prize money from ${m.title} ${m.name}`);
+    if (k < 4) this.hud.showToast(`${m.name} is beaten`, `${4 - k} to go · no healing between rooms`, 4);
+    else await this.crownChampion();
+    writeSave(this.save);
+  }
+
+  /** The Champion beaten: the Hall of Fame, and the level cap lifts to 100 (DESIGN §3.4). */
+  private async crownChampion(): Promise<void> {
+    const rec = this.leagueRec;
+    rec.wins = (rec.wins ?? 0) + 1;
+    (rec.fame ??= []).push({ at: Date.now(), team: this.party.map((c) => c.species) });
+    const first = !this.flags.has('champion');
+    this.setFlag('champion');
+    let grew = 0;
+    for (const c of [...this.party, ...(this.save.box ?? [])]) grew += releaseBankedXp(c, this.levelCap).levelsGained;
+    this.onPartyChanged();
+    this.refreshQuests();
+    await this.hud.dialogue.play([
+      { speaker: 'Hall of Fame', text: `Your names go on the wall at the top of Crownspire, beside every Champion before you, and your team's with them: ${this.party.map(displayName).join(', ')}.` },
+      { speaker: 'Hall of Fame', text: first ? 'You are the Champions of Sijord. From now on your Pokémon grow and obey all the way to level 100.' : `Champions again: that's ${rec.wins} times now.` },
+    ]);
+    this.hud.showToast(first ? 'You are the Champion of Sijord!' : 'Champion again!', `Level cap 100${grew ? ` · banked experience: +${grew} levels` : ''}`, 6);
+    // The run is over: next time, it starts again from the first room.
+    rec.run = 0;
+  }
+
+  /** Lost in the League: the staff patch you up and walk you back to the entrance. */
+  private async leagueLost(): Promise<void> {
+    if (this.hall?.h.id !== 'league') return;
+    this.leagueRec.run = 0;
+    writeSave(this.save);
+    await this.leagueToFoyer('The League staff patched your team up', 'The run starts again from the first room', true);
+  }
+
+  /** Back to the foyer (after a loss, or after the Hall of Fame), with the members back in their rooms. */
+  private async leagueToFoyer(title: string, sub: string, heal = false): Promise<void> {
+    const v = this.hall;
+    if (!v || v.h.id !== 'league') return;
+    await this.hud.fade(true);
+    if (heal) {
+      this.healParty();
+      this.vitals.restore();
+    }
+    const back = hallWorld(v.h, v.h.spots.spawn);
+    this.controller.teleport(new THREE.Vector3(back.x, v.h.floorY, back.z), 0);
+    this.cam.snapBehind(this.controller.position, 0);
+    this.spawnHallNpcs();
+    await sleep(300);
+    await this.hud.fade(false);
+    this.hud.showToast(title, sub, 3);
+  }
+
+  /** A friend's League battle this player fought in has closed: the same win or loss as theirs. */
+  private async leagueGuestResult(k: number, won: boolean): Promise<void> {
+    if (this.hall?.h.id !== 'league') return;
+    this.beginScene();
+    if (won) {
+      await this.leagueWon(k);
+      if (k === 4) await this.leagueToFoyer('The Hall of Fame keeps your names', 'The League will be here when you want to defend the title');
+    } else {
+      await this.leagueLost();
+    }
     this.endScene();
   }
 
@@ -2759,7 +3023,8 @@ export class Game {
     const fire = (w.anchors.stations ?? []).some((s) => s.kind === 'campfire' && Math.hypot(p.x - s.position.x, p.z - s.position.z) < T.fireReach);
     this.wet = wading ? 1 : Math.max(0, this.wet - (dt / T.drySeconds) * (fire ? 3 : 1));
     this.felt = feltTemp({
-      air: airTemp(this.gameMinutes, p.y) + regionHeat(p.x, p.z),
+      // Gyms and halls are heated, whatever the weather over the sea where they're built.
+      air: this.indoors ? T.indoorAir : airTemp(this.gameMinutes, p.y) + regionHeat(p.x, p.z),
       warmth: this.armour.warmth,
       wet: this.wet,
       exertion: this.exerting,
@@ -3816,7 +4081,7 @@ export class Game {
   debugAdvance(ms: number): void { for (let t = 0; t < ms; t += 1000 / 60) this.frame(1 / 60); }
 
   debugText(): string {
-    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', time: clockText(this.gameMinutes), lantern: { lit: this.lantern.lit, oil: Math.round(lanternOil(this.save.bag ?? {}, this.save.toolWear ?? {})), partner: this.partnerLit.size > 0 }, stardust: { night: this.stardust.night, out: this.stardust.root.visible, left: this.stardust.spots.filter((p) => !p.taken).length }, player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, pillion: this.pillion ? this.partners.get(this.pillion.id)?.profile.name ?? true : false, ride: this.ride ? { species: this.ride.creature.species, mode: this.ride.ctl.stats.mode, flying: this.ride.ctl.flying, altitude: Math.round(this.ride.ctl.altitude * 10) / 10, tier: this.ride.ctl.stats.tier, top: Math.round(this.ride.ctl.topSpeed * 10) / 10, speed: Math.round(this.ride.ctl.speed * 10) / 10, galloping: this.ride.ctl.galloping, stamina: Math.round(this.ride.ctl.stamina.value * 100) / 100 } : null, hall: this.hall ? { id: this.hall.h.id, busy: this.hall.busy } : null, tower: this.save.tower ?? null, found:this.save.found?.length ?? 0, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
+    return JSON.stringify({ mode: this.battle ? 'battle' : this.talking ? 'dialogue' : this.menu.isOpen ? 'menu' : 'overworld', coordinates: 'Y up; north +Z; east -X', time: clockText(this.gameMinutes), lantern: { lit: this.lantern.lit, oil: Math.round(lanternOil(this.save.bag ?? {}, this.save.toolWear ?? {})), partner: this.partnerLit.size > 0 }, stardust: { night: this.stardust.night, out: this.stardust.root.visible, left: this.stardust.spots.filter((p) => !p.taken).length }, player: this.controller.snapshot(), trainer: this.avatar.root.userData.trainerModel, trainerClip:this.avatar.root.userData.currentClip, climbing:this.controller.climbing, pillion: this.pillion ? this.partners.get(this.pillion.id)?.profile.name ?? true : false, ride: this.ride ? { species: this.ride.creature.species, mode: this.ride.ctl.stats.mode, flying: this.ride.ctl.flying, altitude: Math.round(this.ride.ctl.altitude * 10) / 10, tier: this.ride.ctl.stats.tier, top: Math.round(this.ride.ctl.topSpeed * 10) / 10, speed: Math.round(this.ride.ctl.speed * 10) / 10, galloping: this.ride.ctl.galloping, stamina: Math.round(this.ride.ctl.stamina.value * 100) / 100 } : null, hall: this.hall ? { id: this.hall.h.id, busy: this.hall.busy, open: [...this.hall.open] } : null, tower: this.save.tower ?? null, league: this.save.league ?? null, champion: this.flags.has('champion'), levelCap: this.levelCap, found:this.save.found?.length ?? 0, party: this.party.map((p) => ({ species: p.species, name: displayName(p), level: p.level, hp: p.hp })), follower: this.follower.model?.root.userData.pokemon, wild: this.wild.root.children.length, partners: [...this.partners.values()].map((p) => ({ name: p.profile.name, trainer: p.remote.avatar.root.userData.trainerModel, position: p.remote.root.position.toArray() })), battle: this.battle?.director.snapshot() ?? this.remoteFrame ?? null,
       trainerHp: { hp: Math.round(this.vitals.hp * 10) / 10, max: this.vitals.max, down: this.vitals.knockedDown },
       money: this.save.money ?? 0,
       meters: { hunger: Math.round(this.meters.hunger * 10) / 10, thirst: Math.round(this.meters.thirst * 10) / 10, queasy: Math.round(this.meters.queasy) },

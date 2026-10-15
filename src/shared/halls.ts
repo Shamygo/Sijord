@@ -10,7 +10,7 @@ import type { Rect } from './gym-interior';
  * hall's state opens them. Spots name where people stand and where the prompts are.
  */
 
-export type HallId = 'battle-tower';
+export type HallId = 'battle-tower' | 'league';
 
 export interface HallProp {
   kind: 'counter' | 'board' | 'ring' | 'dais' | 'pad' | 'banner' | 'pillar' | 'plant' | 'heal';
@@ -112,8 +112,55 @@ function battleTower(): HallInterior {
   };
 }
 
+/** The League's rooms: the foyer, then each Elite Four member's colours, then the Champion's hall. */
+const LEAGUE_THEMES: HallRoom['theme'][] = [
+  { floor: '#3a3440', wall: '#e4ded2', trim: '#2a2230', accent: '#e8c86a', pattern: 'diamond' },
+  { floor: '#221c2c', wall: '#4a3f5c', trim: '#15111c', accent: '#8a5ad8', pattern: 'hex' },
+  { floor: '#4a2a22', wall: '#d8b8a0', trim: '#2a1a14', accent: '#d8603a', pattern: 'plank' },
+  { floor: '#26342a', wall: '#b8c8a8', trim: '#1a2418', accent: '#9ad84a', pattern: 'hex' },
+  { floor: '#1c2440', wall: '#a8b4d0', trim: '#121830', accent: '#4a7ad8', pattern: 'square' },
+  { floor: '#d8e4ee', wall: '#f2f6fa', trim: '#3a4a6a', accent: '#7ad8f0', pattern: 'diamond' },
+];
+
+/** Where the League's rooms start: the foyer runs to 16, each Elite Four room is 26 long, the Champion's 42. */
+export const LEAGUE_ROOM_Z = [16, 42, 68, 94, 120];
+
+/**
+ * The League at Crownspire: a foyer (the guard and the healing machine), four Elite Four rooms,
+ * and the Champion's hall with the Hall of Fame at its far end. Each member waits where the battle
+ * stage puts the foe trainer, ten metres ahead of where the battle puts you.
+ */
+function league(): HallInterior {
+  const halfW = 18;
+  const length = 162;
+  const { walls, doors } = shell(halfW, length, LEAGUE_ROOM_Z);
+  const ends = [...LEAGUE_ROOM_Z, length];
+  const rooms: HallRoom[] = [{ id: 'foyer', z0: 0, z1: LEAGUE_ROOM_Z[0], theme: LEAGUE_THEMES[0] }];
+  LEAGUE_ROOM_Z.forEach((z0, k) => rooms.push({ id: `room-${k}`, z0, z1: ends[k + 1], theme: LEAGUE_THEMES[k + 1] }));
+  const props: HallProp[] = [
+    { kind: 'pad', x: 0, z: 1.4, w: 1.6, d: 1 },
+    { kind: 'heal', x: -10.2, z: 10, w: 0.9, d: 0.7, solid: true },
+    { kind: 'plant', x: -16, z: 2.5 }, { kind: 'plant', x: 16, z: 2.5 }, { kind: 'plant', x: -16, z: 14 }, { kind: 'plant', x: 16, z: 14 },
+    { kind: 'banner', x: -halfW + 0.2, z: 7 }, { kind: 'banner', x: halfW - 0.2, z: 7 },
+  ];
+  const spots: HallInterior['spots'] = { spawn: { x: 0, z: 4 }, exit: { x: 0, z: 1.4 }, heal: { x: -8.6, z: 10 }, guard: { x: 5, z: 12.5 } };
+  LEAGUE_ROOM_Z.forEach((z0, k) => {
+    // The battle ring, centred where the stage puts it, five metres ahead of the player's spot (z0 + 6).
+    props.push({ kind: 'ring', x: -0.6, z: z0 + 10.9, w: 7.4 });
+    props.push({ kind: 'pillar', x: -12, z: z0 + 4 }, { kind: 'pillar', x: 12, z: z0 + 4 }, { kind: 'pillar', x: -12, z: z0 + 21 }, { kind: 'pillar', x: 12, z: z0 + 21 });
+    props.push({ kind: 'banner', x: -halfW + 0.2, z: z0 + 12.5 }, { kind: 'banner', x: halfW - 0.2, z: z0 + 12.5 });
+    spots[`m${k}`] = { x: 0, z: z0 + 16 };
+  });
+  // The Hall of Fame, up a step at the far end of the Champion's hall.
+  props.push({ kind: 'dais', x: 0, z: 154, w: 8, d: 5, color: '#e8c86a' });
+  props.push({ kind: 'pillar', x: -12, z: 146, color: '#e8c86a' }, { kind: 'pillar', x: 12, z: 146, color: '#e8c86a' }, { kind: 'pillar', x: -12, z: 158, color: '#e8c86a' }, { kind: 'pillar', x: 12, z: 158, color: '#e8c86a' });
+  props.push({ kind: 'banner', x: -halfW + 0.2, z: 152, color: '#e8c86a' }, { kind: 'banner', x: halfW - 0.2, z: 152, color: '#e8c86a' });
+  spots.fame = { x: 0, z: 152 };
+  return { id: 'league', name: 'Sijord League', ox: ORIGIN.x + 50, oz: ORIGIN.z, floorY: HALL_FLOOR_Y, halfW, length, rooms, walls, doors, props, spots };
+}
+
 const HALLS = new Map<HallId, HallInterior>();
-const BUILD: Record<HallId, () => HallInterior> = { 'battle-tower': battleTower };
+const BUILD: Record<HallId, () => HallInterior> = { 'battle-tower': battleTower, league };
 
 export function hallInterior(id: HallId): HallInterior {
   let h = HALLS.get(id);
@@ -125,7 +172,7 @@ const ALL = Object.keys(BUILD) as HallId[];
 
 /** The hall a world point is in, if any (with its local coordinates). */
 export function hallAt(x: number, z: number): { hall: HallInterior; lx: number; lz: number } | null {
-  if (!(z > ORIGIN.z - 2 && z < ORIGIN.z + 160)) return null;
+  if (!(z > ORIGIN.z - 2 && z < ORIGIN.z + 170)) return null;
   for (const id of ALL) {
     const h = hallInterior(id);
     const lx = x - h.ox;

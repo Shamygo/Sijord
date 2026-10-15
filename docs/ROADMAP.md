@@ -29,7 +29,7 @@ Every milestone ends in a **playable build** that two people can open in a brows
 | M9 | Riding and traversal | Land, water and air mounts with derived stats, saddles, glider, grapple | L · in progress (land, water and flying mounts with derived stats and saddles, and two-seat riding, are in) |
 | M10 | Content expansion I | All 11 biomes, all 12 cities, 5 gyms, Act I-II story, about 250 species | XXL |
 | M11 | Battle depth and gimmicks | AI T3-T4, Mega / Z / Dynamax, full items, spreads tools, Battle Tower | L · Battle Tower done (2026-10-15) |
-| M12 | Content expansion II | All 10 gyms, Act III-IV, the Elite Four, legendaries, about 500 species | XXL |
+| M12 | Content expansion II | All 10 gyms, Act III-IV, the Elite Four, legendaries, about 500 species | XXL · the League (Elite Four and Champion) done (2026-10-15) |
 | M13 | Substance pass and dynamic events | Event Director, density targets met, quirky NPCs, festivals | L |
 | M14 | Desktop packaging and polish | Electron or Tauri builds for Windows and Mac, embedded server, saves, settings | M |
 | 1.0 | Release | Balance, performance, art pass, onboarding, bug bash | — |
