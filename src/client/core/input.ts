@@ -137,6 +137,7 @@ export class Input {
       right: Math.max(-1, Math.min(1, k('right') - k('left') + raw('ArrowRight') - raw('ArrowLeft'))),
       sprint: this.keys.has(keys.sprint),
       jump: this.pressed.has(keys.jump),
+      ascend: this.keys.has(keys.jump),
       climb: this.keys.has(keys.climb),
       dodge: this.pressed.has(keys.dodge),
     };

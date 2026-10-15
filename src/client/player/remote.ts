@@ -100,6 +100,7 @@ export class RemotePlayer {
   readonly mount = new MountView();
   private ride: string | null = null;
   private rideAlpha = false;
+  private rideFly = false;
 
   constructor(profile: PlayerProfile | { name: string; appearance: Appearance }) {
     this.name = profile.name;
@@ -204,6 +205,7 @@ export class RemotePlayer {
     const cur = !b || renderT <= a.t ? a.s : renderT <= b.t ? ((renderT - a.t) / (b.t - a.t) < 0.5 ? a.s : b.s) : b.s;
     this.ride = cur.ride ?? null;
     this.rideAlpha = !!cur.rideAlpha;
+    this.rideFly = !!cur.rideFly;
 
     if (this.displayPos.distanceTo(target) > T.snapDistance) {
       this.displayPos.copy(target);
@@ -218,10 +220,12 @@ export class RemotePlayer {
     this.mount.set(this.ride, this.rideAlpha);
     let seatUp = 0;
     if (this.ride) {
-      this.mount.update(dt, 0, 0, 0, this.displayYaw, this.speed);
+      this.mount.update(dt, 0, 0, 0, this.displayYaw, this.speed, this.rideFly);
       const seat = this.mount.seat(), hip = (this.avatar.root.userData.hipHeight as number | undefined) ?? 0.95;
       seatUp = seat.up;
-      this.avatar.root.position.set(Math.sin(this.displayYaw) * seat.forward, seat.up - hip, Math.cos(this.displayYaw) * seat.forward);
+      const lift = this.mount.root.position.y;
+      this.avatar.root.position.set(Math.sin(this.displayYaw) * seat.forward, lift + seat.up - hip, Math.cos(this.displayYaw) * seat.forward);
+      this.avatar.root.rotation.x = this.mount.lean;
       this.anim = 'ride';
     } else this.avatar.root.position.set(0, 0, 0);
     this.nameTag.position.y = REMOTE_TUNING.nameTagHeight + seatUp;

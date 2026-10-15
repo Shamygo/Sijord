@@ -75,3 +75,21 @@ describe('mounts', () => {
     expect(st.blown).toBe(false);
   });
 });
+
+describe('flyers', () => {
+  it('are rated like other mounts and tire in the air (DESIGN §8.2, §10.4)', () => {
+    const zard = mountStats('forgelynx')!;
+    expect(zard.mode).toBe('air');
+    expect(zard.tier).toBe('A');
+    expect(mountStats('aerodactyl')!.tier).toBe('S');
+    expect(mountStats('dragonite')!.tier).toBe('B');
+    // Cruising spends half a gallop's stamina: a full bar is good for a few hundred metres.
+    const st = { value: 1, rest: 0, blown: false };
+    let t = 0;
+    while (!st.blown) { stepMountStamina(st, true, 0.1, zard, RIDING.flyDrain); t += 0.1; }
+    expect(t).toBeCloseTo(zard.stamina / RIDING.flyDrain, 0);
+    const reach = t * zard.speed * RIDING.flyCruise;
+    expect(reach).toBeGreaterThan(250);
+    expect(reach).toBeLessThan(900);
+  });
+});
