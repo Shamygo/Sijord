@@ -2781,7 +2781,7 @@ export class Game {
     this.onPartyChanged();
     this.refreshQuests();
     await this.hud.dialogue.play([
-      { speaker: 'Hall of Fame', text: `${this.party.map(displayName).join(', ')}. Your names go on the wall at the top of Crownspire, beside every Champion before you.` },
+      { speaker: 'Hall of Fame', text: `Your names go on the wall at the top of Crownspire, beside every Champion before you, and your team's with them: ${this.party.map(displayName).join(', ')}.` },
       { speaker: 'Hall of Fame', text: first ? 'You are the Champions of Sijord. From now on your Pokémon grow and obey all the way to level 100.' : `Champions again: that's ${rec.wins} times now.` },
     ]);
     this.hud.showToast(first ? 'You are the Champion of Sijord!' : 'Champion again!', `Level cap 100${grew ? ` · banked experience: +${grew} levels` : ''}`, 6);
@@ -3023,7 +3023,8 @@ export class Game {
     const fire = (w.anchors.stations ?? []).some((s) => s.kind === 'campfire' && Math.hypot(p.x - s.position.x, p.z - s.position.z) < T.fireReach);
     this.wet = wading ? 1 : Math.max(0, this.wet - (dt / T.drySeconds) * (fire ? 3 : 1));
     this.felt = feltTemp({
-      air: airTemp(this.gameMinutes, p.y) + regionHeat(p.x, p.z),
+      // Gyms and halls are heated, whatever the weather over the sea where they're built.
+      air: this.indoors ? T.indoorAir : airTemp(this.gameMinutes, p.y) + regionHeat(p.x, p.z),
       warmth: this.armour.warmth,
       wet: this.wet,
       exertion: this.exerting,

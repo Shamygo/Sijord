@@ -38,6 +38,8 @@ export const TEMPERATURE = {
   fireFloor: 22,
   /** Inside Bramblewick's fence: walls, hearths and hot food are never far. */
   townFloor: 12,
+  /** Inside a gym or a hall. */
+  indoorAir: 18,
   /** A Fire-type partner beside you warms you by this much, but never past `partnerCap`. */
   partner: 6,
   partnerCap: 18,
